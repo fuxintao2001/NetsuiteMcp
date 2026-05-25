@@ -1,0 +1,480 @@
+# NetSuite MCP Server
+
+A Model Context Protocol (MCP) server providing access to NetSuite data through OAuth 2.0 with PKCE authentication. Works seamlessly with any MCP-compatible client including Claude Code, Cursor IDE, and Gemini CLI.
+
+# Motivation and Context
+NetSuite provides an official AI Connector SuiteApp that enables AI-powered interactions with NetSuite data. However, NetSuite's AI Connector currently only supports:
+
+- Claude via Anthropic's web interface
+- ChatGPT via custom GPT connections
+The problem: Developers using MCP-compatible tools like Claude Code, Cursor IDE, Windsurf, or other CLI/IDE environments cannot leverage NetSuite's AI capabilities
+because there's no MCP server implementation.
+
+This MCP server solves that gap by:
+
+- Providing the missing bridge between MCP clients (Claude Code, Cursor, Gemini CLI, etc.) and NetSuite's AI Connector
+- Enabling the exact same functionality that NetSuite's AI Connector provides, but accessible through any MCP-compatible client
+- Allowing developers to interact with NetSuite data using natural language directly within their development environment
+- Maintaining the same security standards (OAuth 2.0 with PKCE) required by NetSuite's official AI Connector
+  
+In essence, this MCP server brings NetSuite's AI capabilities to the broader MCP ecosystem, allowing developers to query business data, generate reports, and automate
+NetSuite operations without leaving their IDE or CLI.
+
+## Features
+
+- ✅ **OAuth 2.0 with PKCE** - Secure authentication without client secrets
+- ✅ **Automatic Token Refresh** - Tokens refresh automatically before expiration
+- ✅ **Environment Variable Support** - Configure credentials once in your MCP config
+- ✅ **Session Persistence** - Authentication survives server restarts
+- ✅ **Universal MCP Integration** - Works with Claude Code, Cursor IDE, Gemini CLI, and other MCP clients
+- ✅ **NetSuite MCP Tools** - Access to all NetSuite MCP capabilities (SuiteQL, Reports, Saved Searches, etc.)
+- ✅ **Modular Architecture** - Clean, maintainable codebase following single-responsibility principle
+- 🚀 **Real-time Data Cache Refresh** - Dedicated tool to trigger NetSuite REST session cache reload, bypassing NetSuite's 1-hour session dataset freeze.
+- 🔒 **Multi-Environment Isolation** - Deep integration with client configs to run multiple sandbox/production accounts concurrently without database or token cross-contamination.
+
+## Quick Start
+
+### 1. NetSuite Setup
+
+#### Step 1: Install NetSuite AI Connector SuiteApp
+
+Before creating the integration record, you must install and configure the NetSuite AI Connector SuiteApp:
+
+**Important**: The NetSuite AI Connector SuiteApp is required for MCP functionality. Without it, the MCP tools will not be available even after authentication.
+
+#### Step 2: Create OAuth Integration Record
+
+After installing the SuiteApp, create an integration record:
+
+1. Navigate to **Setup > Integration > Manage Integrations > New**
+2. Fill in the details:
+   - **Name**: "MCP Server Integration"
+   - **OAuth 2.0**: Checked Authorization Code Grant
+                    Checked Public Client
+   - **Redirect URI**: `http://localhost:8080/callback` (or your custom port)
+3. Save and copy the **Client ID** (consumer key)
+
+**Note**: we dont need client secret (since this is public client and Authorization Code Grant with pkce)
+
+   <img width="1891" height="410" alt="image" src="https://github.com/user-attachments/assets/1779d97e-77e2-4968-8a59-d814e99a8492" />
+
+### 2. MCP Client Configuration
+
+Add to your MCP client's configuration file:
+
+**Claude Code**: `~/.claude.json`
+**Cursor IDE**: `.cursor/mcp.json`
+**Gemini CLI**: Per Gemini's MCP setup
+
+#### Option A: Using npx (Recommended - No Installation Required)
+
+```json
+{
+  "mcpServers": {
+    "netsuite": {
+      "command": "npx",
+      "args": ["@suiteinsider/netsuite-mcp@latest"],
+      "env": {
+        "NETSUITE_ACCOUNT_ID": "your-account-id",
+        "NETSUITE_CLIENT_ID": "your-client-id",
+        "OAUTH_CALLBACK_PORT": "8080"
+      }
+    }
+  }
+}
+```
+
+**Benefits**:
+- No manual installation required
+- Always uses the latest version with `@latest`
+- Clean, simple configuration
+- Works immediately after MCP client restart
+
+**Optional Environment Variables**:
+- `OAUTH_CALLBACK_PORT` - OAuth callback port (default: 8080)
+
+#### Option B: Local Development Setup
+
+For contributing or local development:
+
+```bash
+# Clone the repository
+git clone https://github.com/dsvantien/netsuite-mcp-server.git
+cd netsuite-mcp-server
+
+# Install dependencies
+npm install
+
+# Test locally with npm link
+npm link
+```
+
+Then configure with absolute path:
+
+```json
+{
+  "mcpServers": {
+    "netsuite": {
+      "command": "node",
+      "args": ["/absolute/path/to/netsuite-mcp-server/src/index.js"],
+      "env": {
+        "NETSUITE_ACCOUNT_ID": "your-account-id",
+        "NETSUITE_CLIENT_ID": "your-client-id",
+        "OAUTH_CALLBACK_PORT": "8080"
+      }
+    }
+  }
+}
+```
+
+#### Option C: Without Environment Variables
+
+```json
+{
+  "mcpServers": {
+    "netsuite": {
+      "command": "npx",
+      "args": ["@suiteinsider/netsuite-mcp@latest"]
+    }
+  }
+}
+```
+
+**Note**: You'll need to provide credentials when calling `netsuite_authenticate`
+
+### 3. Authenticate & Use
+
+Start your MCP client and authenticate:
+
+```
+Authenticate with NetSuite
+```
+
+A browser window opens → Login to NetSuite → Authentication complete!
+
+**Important**: After authentication, you'll need to restart your chat or reconnect the MCP server to see NetSuite tools. This is normal MCP behavior.
+
+Once authenticated, use natural language queries:
+
+```
+Show me all customers
+List available saved searches
+Run a SuiteQL query to get sales orders from last month
+Execute the "Monthly Revenue" report
+```
+
+## Architecture
+
+```
+MCP Client (Claude Code, Cursor, Gemini, etc.)
+       │
+       │ stdio (JSON-RPC)
+       ▼
+┌──────────────────────────────┐
+│   MCP Server (Node.js)       │
+│                              │
+│  ┌────────────────────────┐ │
+│  │ OAuth Manager          │ │
+│  │ - PKCE generation      │ │
+│  │ - Local HTTP server    │ │
+│  │   (port 8080 default)  │ │
+│  │ - Token storage        │ │
+│  └────────────────────────┘ │
+│                              │
+│  ┌────────────────────────┐ │
+│  │ MCP Tools              │ │
+│  │ - ns_runCustomSuiteQL  │ │
+│  │ - ns_runReport         │ │
+│  │ - ns_listSavedSearches │ │
+│  └────────────────────────┘ │
+└──────────────────────────────┘
+       │
+       │ HTTPS + Bearer Token
+       ▼
+┌──────────────────────────────┐
+│  NetSuite MCP REST API       │
+└──────────────────────────────┘
+```
+
+## Project Structure
+
+```
+netsuite-mcp-server/
+├── src/
+│   ├── index.js              # Main MCP server entry point
+│   ├── oauth/
+│   │   ├── manager.js        # OAuth flow orchestrator
+│   │   ├── pkce.js           # PKCE challenge/verifier generation
+│   │   ├── callbackServer.js # HTTP callback server with CSRF protection
+│   │   ├── sessionStorage.js # Session file management
+│   │   └── tokenExchange.js  # Token exchange & refresh operations
+│   ├── mcp/
+│   │   └── tools.js          # NetSuite MCP API client
+│   └── utils/
+│       └── browserLauncher.js # Cross-platform browser launcher
+├── sessions/                 # OAuth tokens (gitignored)
+├── authenticate.js           # Standalone CLI authentication utility
+├── package.json
+├── .gitignore
+└── README.md
+```
+
+### Modular Design Benefits
+
+The codebase follows the single-responsibility principle:
+
+- **pkce.js** - PKCE utilities (base64 encoding, challenge generation)
+- **callbackServer.js** - HTTP callback handling (CSRF protection, HTML pages, timeouts)
+- **sessionStorage.js** - Session persistence (save, load, clear, isAuthenticated)
+- **tokenExchange.js** - NetSuite OAuth API communication (token exchange/refresh)
+- **browserLauncher.js** - Cross-platform URL opening (macOS, Windows, Linux)
+
+This modular structure enables:
+- ✅ Independent testing of each module
+- ✅ Easy maintenance and debugging
+- ✅ Reusability in other projects
+- ✅ Clear separation of concerns
+
+## Environment Variable Configuration
+
+### Configuration Example
+
+**Recommended npx setup:**
+
+```json
+{
+  "mcpServers": {
+    "netsuite": {
+      "command": "npx",
+      "args": ["@suiteinsider/netsuite-mcp@latest"],
+      "env": {
+        "NETSUITE_ACCOUNT_ID": "123456-sb1",
+        "NETSUITE_CLIENT_ID": "your-client-id-here",
+        "OAUTH_CALLBACK_PORT": "8080"
+      }
+    }
+  }
+}
+```
+
+**Local development setup:**
+
+```json
+{
+  "mcpServers": {
+    "netsuite": {
+      "command": "node",
+      "args": ["path/to/src/index.js"],
+      "env": {
+        "NETSUITE_ACCOUNT_ID": "123456-sb1",
+        "NETSUITE_CLIENT_ID": "your-client-id-here",
+        "OAUTH_CALLBACK_PORT": "8080"
+      }
+    }
+  }
+}
+```
+
+### Environment Variables
+
+- **NETSUITE_ACCOUNT_ID** - Your NetSuite account ID (required)
+- **NETSUITE_CLIENT_ID** - Your OAuth client ID (required)
+- **OAUTH_CALLBACK_PORT** - OAuth callback port (optional, default: 8080)
+- **NETSUITE_SESSION_PATH** - Custom session directory path (optional). Highly recommended for multi-environment setups to isolate account session storage files.
+
+### Resolution Order
+
+1. **Check arguments first**: If `accountId` or `clientId` provided as arguments, use them
+2. **Fallback to environment variables**: If no arguments, use env vars
+3. **Validation**: If neither source provides credentials, show error with instructions
+
+### Security Best Practices
+
+1. **File Permissions**: Ensure config file has restrictive permissions
+   ```bash
+   chmod 600 ~/.claude.json
+   ```
+2. **No Secrets**: Client secrets not required (PKCE authentication)
+3. **Local Token Storage**: OAuth tokens stored in `sessions/` directory
+4. **Never Commit**: Don't commit config files with credentials to git
+
+## Multi-Environment Isolation & Session Setup
+
+If you need to query and manage multiple NetSuite environments concurrently (e.g. Production and Sandboxes), you can set up multiple server instances in your `mcp_config.json`. 
+
+By configuring `NETSUITE_SESSION_PATH` environment variables for each instance, the server processes will run fully isolated session directories to prevent token pollution or cross-database queries:
+
+```json
+{
+  "mcpServers": {
+    "netsuite_prod": {
+      "command": "node",
+      "args": ["/Users/yourname/WebstormProjects/netsuite-mcp-server-master/src/index.js"],
+      "env": {
+        "NETSUITE_ACCOUNT_ID": "123456",
+        "NETSUITE_CLIENT_ID": "your-prod-client-id",
+        "OAUTH_CALLBACK_PORT": "8080",
+        "NETSUITE_SESSION_PATH": "/Users/yourname/.gemini/antigravity/sessions/prod"
+      }
+    },
+    "netsuite_sb1": {
+      "command": "node",
+      "args": ["/Users/yourname/WebstormProjects/netsuite-mcp-server-master/src/index.js"],
+      "env": {
+        "NETSUITE_ACCOUNT_ID": "123456-sb1",
+        "NETSUITE_CLIENT_ID": "your-sb1-client-id",
+        "OAUTH_CALLBACK_PORT": "8081",
+        "NETSUITE_SESSION_PATH": "/Users/yourname/.gemini/antigravity/sessions/sb1"
+      }
+    }
+  }
+}
+```
+
+This guarantees:
+1. **No Session Collision**: OAuth flows and login states are stored separately in `/sessions/prod` and `/sessions/sb1`.
+2. **Absolute Data Quarantine**: Even if the AI client mixes up tool calls, the processes run on strict account scopes and cannot access other databases.
+
+## Available NetSuite MCP Tools
+
+Once authenticated, you'll have access to NetSuite's native MCP tools:
+
+- `ns_runCustomSuiteQL` - Execute SuiteQL queries
+- `ns_listAllReports` - List available financial reports
+- `ns_runReport` - Execute a specific report
+- `ns_listSavedSearches` - List saved searches
+- `ns_runSavedSearch` - Execute a saved search
+- `ns_getRecord` - Retrieve a specific record
+- `ns_createRecord` - Create a new record
+- `ns_updateRecord` - Update an existing record
+- `netsuite_refresh_cache` - **[NEW]** Force NetSuite to clear and refresh its internal REST session filter set cache. Essential when you made updates in the NetSuite UI and need the AI tools to reflect the latest database state instantly.
+- `netsuite_logout` - Clear session tokens and logout
+- And more...
+
+The exact tools available depend on your NetSuite account configuration.
+
+## OAuth Flow
+
+1. **Initiation**: User calls `netsuite_authenticate` with credentials
+2. **PKCE Generation**: Server generates code verifier and SHA-256 challenge
+3. **Authorization URL**: Server generates NetSuite OAuth URL and starts local callback server
+4. **User Login**: Browser opens NetSuite login page
+5. **Authorization**: User approves access
+6. **Callback**: NetSuite redirects to `http://localhost:8080/callback` with authorization code
+7. **Token Exchange**: Server exchanges code for access/refresh tokens (public client pattern)
+8. **Session Storage**: Tokens stored in `sessions/session.json` (persists across restarts)
+9. **Auto-Refresh**: Tokens automatically refresh when expiring (5-minute buffer)
+
+## Troubleshooting
+ now uses absolute paths based on script location
+
+### Issue: "Port already in use"
+
+**Cause**: Another application using the OAuth callback port
+
+**Solution**:
+```bash
+# Check what's using the port (example for port 8080)
+lsof -i :8080
+
+# Option 1: Kill the process
+# Option 2: Change port via environment variable
+```
+
+Set custom port in your MCP config:
+```json
+{
+  "env": {
+    "OAUTH_CALLBACK_PORT": "9000"
+  }
+}
+```
+
+**Remember to update the redirect URI in your NetSuite integration to match the new port!**
+
+### Issue: Tools not appearing after authentication
+
+**Cause**: MCP clients cache tool list at session start
+
+**Solution**:
+- **Restart chat** - Open new conversation
+- **Reconnect MCP** - Use `/mcp` command (Claude Code)
+- **Restart app** - Close and reopen your IDE
+
+This is normal MCP behavior - tool lists are fetched once per session.
+
+## Development
+
+### Standalone Authentication
+
+Test authentication without MCP client:
+
+```bash
+node authenticate.js <accountId> <clientId>
+```
+
+### Clearing Session
+
+```bash
+rm -rf sessions/
+```
+
+Or use the `netsuite_logout` tool in your MCP client.
+
+### Viewing Logs
+
+All server logs output to stderr. When running in MCP clients, these logs appear in the client's console/logs.
+
+## Technical Details
+
+### PKCE Implementation
+
+- **Code Verifier**: 32 random bytes, base64url encoded
+- **Code Challenge**: SHA-256 hash of verifier, base64url encoded
+- **Challenge Method**: S256 (required by NetSuite)
+
+### Token Exchange (Public Client Pattern)
+
+```http
+POST https://{accountId}.suitetalk.api.netsuite.com/services/rest/auth/oauth2/v1/token
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=authorization_code
+&code={authorization_code}
+&redirect_uri=http://localhost:8080/callback
+&client_id={client_id}
+&code_verifier={verifier}
+```
+
+**Important**: No `Authorization` header (public client).
+
+### Token Refresh
+
+Tokens automatically refresh when expiring in < 5 minutes:
+
+```http
+POST https://{accountId}.suitetalk.api.netsuite.com/services/rest/auth/oauth2/v1/token
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=refresh_token
+&refresh_token={refresh_token}
+&client_id={client_id}
+```
+
+## Prerequisites
+
+- **Node.js** 18.0.0 or higher
+- **NetSuite Account** with MCP access
+- **NetSuite AI Connector SuiteApp** (Bundle ID: 522506) installed and configured
+- **NetSuite Integration Record** with OAuth 2.0 and PKCE enabled
+- **MCP Client** - Any MCP-compatible client (Claude Code, Cursor IDE, Gemini CLI, etc.)
+
+## License
+
+MIT
+
+## References
+
+- [Model Context Protocol Documentation](https://modelcontextprotocol.io/)
+- [NetSuite OAuth 2.0 Documentation](https://docs.oracle.com/en/cloud/saas/netsuite/ns-online-help/section_158081952044.html)
+- [PKCE Specification (RFC 7636)](https://datatracker.ietf.org/doc/html/rfc7636)
