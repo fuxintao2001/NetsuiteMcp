@@ -26,4 +26,10 @@ Thumbs.db
 # Debug
 .inspector/
 
+# Cache
+.cache/
+
+# Gemini files
+.gemini_sql_memory.md
+
 .npmignore

@@ -163,6 +163,43 @@ Run a SuiteQL query to get sales orders from last month
 Execute the "Monthly Revenue" report
 ```
 
+### 4. Claude Code Skills (Highly Recommended)
+
+This server is equipped with highly optimized **Claude Code Skills** designed to give Claude Code a specialized "NetSuite workflow playbook" (SOP) to perform complex tasks flawlessly:
+
+1. **`netsuite-suiteql-expert`** (SuiteQL Zero-Error Expert): Automatically triggers for SuiteQL queries. Guides Claude through fetching metadata first, silent testing of the query, self-healing error resolution, and logging learnings to a local `.gemini_sql_memory.md` file.
+2. **`netsuite-record-expert`** (Record Management Expert): Automatically triggers for creating, updating, or fetching NetSuite records (e.g. Sales Orders, Customers). Guides Claude through schema lookup, formatting child line items (sublists) correctly, and automatically generating clickable NetSuite UI direct browser links.
+
+#### Skill Installation
+
+Install the skills to Claude Code's config directory with a single command:
+
+**Global Installation** (Recommended - makes NetSuite skills available in *any* project folder):
+```bash
+# If using npx directly:
+npx @suiteinsider/netsuite-mcp@latest install-skills
+
+# If running from a cloned local repository:
+npm run install-skills
+```
+
+**Local Installation** (Installs only into the current directory's `.claude/skills/`):
+```bash
+# If using npx directly:
+npx @suiteinsider/netsuite-mcp@latest install-skills --local
+
+# If running from a cloned local repository:
+npm run install-skills -- --local
+```
+
+#### Invocation
+
+Once installed, Claude Code can trigger them automatically based on your prompt, or you can invoke them explicitly inside your chat session using slash commands:
+```
+/netsuite-suiteql-expert "Query sales orders from last month"
+/netsuite-record-expert "Create a new customer named Acme Corp with email info@acme.com"
+```
+
 ## Architecture
 
 ```

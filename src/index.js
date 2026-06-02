@@ -6,8 +6,10 @@ import { ListToolsRequestSchema, CallToolRequestSchema } from '@modelcontextprot
 import { OAuthManager } from './oauth/manager.js';
 import { NetSuiteMCPTools } from './mcp/tools.js';
 import { generateNetSuiteUrl } from './utils/netsuiteUrls.js';
+import { installSkills } from './utils/installSkills.js';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
+import fs from 'fs/promises';
 
 // Get the directory where the script is located
 const __filename = fileURLToPath(import.meta.url);
@@ -142,6 +144,66 @@ class NetSuiteMCPServer {
               type: 'object',
               properties: {}
             }
+          },
+          {
+            name: 'netsuite_get_sql_memory',
+            description: 'Reads the workspace-specific SQL/SuiteQL cheat sheet, error logs, and lessons learned to prevent repeating past database query errors. Always call this tool before writing or refactoring any SQL/SuiteQL query.',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                workspacePath: {
+                  type: 'string',
+                  description: 'Optional custom workspace path. If omitted, uses current working directory.'
+                }
+              }
+            }
+          },
+          {
+            name: 'netsuite_save_sql_error',
+            description: 'Appends a newly discovered SQL/SuiteQL error, its correction, and the rule to the workspace memory file (.gemini_sql_memory.md) so the AI remembers it in future chats.',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                errorDescription: {
+                  type: 'string',
+                  description: 'Brief summary of what went wrong (e.g. "Casing issue with transaction ID column")'
+                },
+                incorrectSql: {
+                  type: 'string',
+                  description: 'The query that caused the error'
+                },
+                correctSql: {
+                  type: 'string',
+                  description: 'The final working query'
+                },
+                rule: {
+                  type: 'string',
+                  description: 'The rule to avoid this error in the future'
+                },
+                workspacePath: {
+                  type: 'string',
+                  description: 'Optional custom workspace path. If omitted, uses current working directory.'
+                }
+              },
+              required: ['errorDescription', 'incorrectSql', 'correctSql', 'rule']
+            }
+          },
+          {
+            name: 'netsuite_run_parallel_queries',
+            description: 'Executes multiple SuiteQL queries in parallel using Promise.all and returns timing stats alongside query results to test NetSuite concurrent request performance.',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                queries: {
+                  type: 'array',
+                  items: {
+                    type: 'string'
+                  },
+                  description: 'List of SuiteQL query strings to run in parallel'
+                }
+              },
+              required: ['queries']
+            }
           }
         ];
 
@@ -189,6 +251,184 @@ class NetSuiteMCPServer {
           return await this.handleCacheRefresh();
         }
 
+        // Handle getting SQL memory guide and 错题本
+        if (name === 'netsuite_get_sql_memory') {
+          const workspace = args.workspacePath || process.cwd();
+          const memoryFilePath = join(workspace, '.gemini_sql_memory.md');
+          
+          try {
+            let content;
+            try {
+              content = await fs.readFile(memoryFilePath, 'utf-8');
+            } catch (err) {
+              if (err.code === 'ENOENT') {
+                const defaultTemplate = `# Gemini SuiteQL 错题本与避坑记忆库\n\n` +
+                  `> [!IMPORTANT]\n` +
+                  `> 每次在编写或修改 SuiteQL 之前，必须先读取本文件，严格遵守以下已验证的规则，避免重复犯错。\n\n` +
+                  `## NetSuite SuiteQL 核心通用规则\n` +
+                  `1. **【禁止盲猜】** 绝对不能仅凭经验猜测 NetSuite 的表名和字段名。\n` +
+                  `2. **【Schema先行】** 编写任何查询前，必须先调用 \`ns_getSuiteQLMetadata\` 获取相关 Record 类型的真实字段定义。\n` +
+                  `3. **【验证JOIN】** 只有当元数据中字段明确标有 \`x-n:joinable: true\` 时，才允许使用该字段进行 JOIN。\n` +
+                  `4. **【利用BUILTIN】** 优先使用 \`BUILTIN.DF(field)\` 函数获取关联字段的显示文本，避免繁琐且易错的 JOIN 逻辑。\n` +
+                  `5. **【防错闭环】** 在开发过程中如果遇到 SQL 执行报错，请先分析报错信息，重新验证 Schema，并在解决后使用 \`netsuite_save_sql_error\` 工具记录。\n\n` +
+                  `## 历史错误与正确示范 (已验证规则)\n` +
+                  `*暂无自定义记录。当您在调试过程中解决报错后，AI 会使用 \`netsuite_save_sql_error\` 将其自动追加记录于此。*\n`;
+                
+                await fs.writeFile(memoryFilePath, defaultTemplate, 'utf-8');
+                content = defaultTemplate;
+              } else {
+                throw err;
+              }
+            }
+            
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: `📖 **已成功读取 SQL 记忆库与规则 (.gemini_sql_memory.md):**\n\n${content}`
+                }
+              ]
+            };
+          } catch (error) {
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: `❌ 读取 SQL 记忆库失败: ${error.message}`
+                }
+              ],
+              isError: true
+            };
+          }
+        }
+
+        // Handle saving new SQL error entry
+        if (name === 'netsuite_save_sql_error') {
+          const { errorDescription, incorrectSql, correctSql, rule } = args;
+          const workspace = args.workspacePath || process.cwd();
+          const memoryFilePath = join(workspace, '.gemini_sql_memory.md');
+          
+          try {
+            let content = '';
+            try {
+              content = await fs.readFile(memoryFilePath, 'utf-8');
+            } catch (err) {
+              if (err.code !== 'ENOENT') throw err;
+              content = `# Gemini SuiteQL 错题本与避坑记忆库\n\n` +
+                `> [!IMPORTANT]\n` +
+                `> 每次在编写或修改 SuiteQL 之前，必须先读取本文件，严格遵守以下已验证的规则，避免重复犯错。\n\n` +
+                `## NetSuite SuiteQL 核心通用规则\n` +
+                `1. **【禁止盲猜】** 绝对不能仅凭经验猜测 NetSuite 的表名和字段名。\n` +
+                `2. **【Schema先行】** 编写任何查询前，必须先调用 \`ns_getSuiteQLMetadata\` 获取相关 Record 类型的真实字段定义。\n` +
+                `3. **【验证JOIN】** 只有当元数据中字段明确标有 \`x-n:joinable: true\` 时，才允许使用该字段进行 JOIN。\n` +
+                `4. **【利用BUILTIN】** 优先使用 \`BUILTIN.DF(field)\` 函数获取关联字段的显示文本，避免繁琐且易错的 JOIN 逻辑。\n` +
+                `5. **【防错闭环】** 在开发过程中如果遇到 SQL 执行报错，请先分析报错信息，重新验证 Schema，并在解决后使用 \`netsuite_save_sql_error\` 工具记录。\n\n` +
+                `## 历史错误与正确示范 (已验证规则)\n`;
+            }
+            
+            content = content.replace('*暂无自定义记录。当您在调试过程中解决报错后，AI 会使用 `netsuite_save_sql_error` 将其自动追加记录于此。*\n', '');
+            
+            const dateStr = new Date().toISOString().split('T')[0];
+            const newEntry = `\n### 📝 错误记录: ${errorDescription} (${dateStr})\n` +
+              `- **错误 SQL**：\`${incorrectSql.replace(/`/g, '\\`').trim()}\`\n` +
+              `- **正确 SQL**：\`${correctSql.replace(/`/g, '\\`').trim()}\`\n` +
+              `- **防错规则**：${rule.trim()}\n`;
+              
+            content += newEntry;
+            await fs.writeFile(memoryFilePath, content, 'utf-8');
+            
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: `✅ **错题记忆已成功追加到本地的 .gemini_sql_memory.md 文件中！**\n\n新增记录：\n- 描述: ${errorDescription}\n- 规则: ${rule}`
+                }
+              ]
+            };
+          } catch (error) {
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: `❌ 保存错题失败: ${error.message}`
+                }
+              ],
+              isError: true
+            };
+          }
+        }
+
+        // Handle running parallel queries
+        if (name === 'netsuite_run_parallel_queries') {
+          const { queries } = args;
+          if (!Array.isArray(queries) || queries.length === 0) {
+            return {
+              content: [{ type: 'text', text: '❌ Invalid arguments: queries must be a non-empty array.' }],
+              isError: true
+            };
+          }
+
+          console.error(`\n⚡ Running ${queries.length} queries in parallel (concurrency limit: 5)...`);
+          const startTime = Date.now();
+
+          const concurrencyLimit = 5;
+          const results = new Array(queries.length);
+          let currentQueryIndex = 0;
+
+          const worker = async () => {
+            while (currentQueryIndex < queries.length) {
+              const index = currentQueryIndex++;
+              const sqlQuery = queries[index];
+              const queryStart = Date.now();
+              try {
+                // Execute the query via our internal execution engine (ns_runCustomSuiteQL tool)
+                const result = await this.mcpTools.executeTool('ns_runCustomSuiteQL', { sqlQuery });
+                const duration = Date.now() - queryStart;
+                results[index] = {
+                  index,
+                  success: true,
+                  durationMs: duration,
+                  query: sqlQuery,
+                  result: typeof result === 'string' ? JSON.parse(result) : result
+                };
+              } catch (err) {
+                const duration = Date.now() - queryStart;
+                results[index] = {
+                  index,
+                  success: false,
+                  durationMs: duration,
+                  query: sqlQuery,
+                  error: err.message
+                };
+              }
+            }
+          };
+
+          const workers = [];
+          for (let i = 0; i < Math.min(concurrencyLimit, queries.length); i++) {
+            workers.push(worker());
+          }
+          await Promise.all(workers);
+          const totalDuration = Date.now() - startTime;
+
+          const summary = {
+            totalQueries: queries.length,
+            successfulQueries: results.filter(r => r.success).length,
+            failedQueries: results.filter(r => r.success === false).length,
+            totalDurationMs: totalDuration,
+            individualResults: results
+          };
+
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify(summary, null, 2)
+              }
+            ]
+          };
+        }
+
         // Check authentication for NetSuite tools
         this.isAuthenticated = await this.oauthManager.hasValidSession();
         if (!this.isAuthenticated) {
@@ -224,8 +464,14 @@ class NetSuiteMCPServer {
               isError: true
             };
           }
+
+          // Resolve custom record rectype if script ID is passed
+          let rectype = args.rectype;
+          if (!rectype && args.recordType && args.recordType.toLowerCase().startsWith('customrecord')) {
+            rectype = this.resolveCustomRecordRectype(args.recordType);
+          }
           
-          const url = generateNetSuiteUrl(targetAccountId, args.recordType, args.recordId, args.rectype);
+          const url = generateNetSuiteUrl(targetAccountId, args.recordType, args.recordId, rectype);
           return {
             content: [
               {
@@ -250,7 +496,13 @@ class NetSuiteMCPServer {
           if (recordId) {
             const currentAccountId = await this.oauthManager.getAccountId();
             if (currentAccountId) {
-              const url = generateNetSuiteUrl(currentAccountId, recordType, recordId, args.rectype);
+              // Resolve custom record rectype if script ID is passed
+              let rectype = args.rectype;
+              if (!rectype && recordType && recordType.toLowerCase().startsWith('customrecord')) {
+                rectype = this.resolveCustomRecordRectype(recordType);
+              }
+              
+              const url = generateNetSuiteUrl(currentAccountId, recordType, recordId, rectype);
               if (url) {
                 responseText += `\n\n🔗 **NetSuite UI Link (Current Environment):**\n${url}`;
               }
@@ -410,11 +662,15 @@ class NetSuiteMCPServer {
     try {
       console.error('\n🔄 Triggering NetSuite REST session cache refresh...');
       await this.mcpTools.refreshSessionCache();
+      
+      console.error('🗑️ Clearing local metadata cache...');
+      await this.mcpTools.clearMetadataCache();
+
       return {
         content: [
           {
             type: 'text',
-            text: '✅ Successfully cleared and refreshed NetSuite REST session cache! Subsequent queries will now fetch the latest data.'
+            text: '✅ Successfully cleared and refreshed NetSuite REST session cache and local metadata schema cache! Subsequent queries will now fetch the latest data.'
           }
         ]
       };
@@ -430,6 +686,20 @@ class NetSuiteMCPServer {
         isError: true
       };
     }
+  }
+
+  /**
+   * Resolve custom record type script ID to numeric internal ID
+   */
+  resolveCustomRecordRectype(recordType) {
+    if (!recordType) return null;
+    const upperType = recordType.toUpperCase().trim();
+    if (this.mcpTools.customRecordMappings.has(upperType)) {
+      const numericId = this.mcpTools.customRecordMappings.get(upperType);
+      console.error(`⚡ [Link Resolution] Successfully mapped ${recordType} -> rectype ${numericId}`);
+      return numericId;
+    }
+    return null;
   }
 
   /**
@@ -465,6 +735,17 @@ class NetSuiteMCPServer {
 
 // Start the server
 async function main() {
+  // Check if we are running the skill installation CLI
+  if (process.argv.includes('install-skills')) {
+    try {
+      const isLocal = process.argv.includes('--local') || process.argv.includes('-l');
+      await installSkills({ local: isLocal });
+      process.exit(0);
+    } catch (error) {
+      process.exit(1);
+    }
+  }
+
   try {
     const server = new NetSuiteMCPServer();
     await server.start();
