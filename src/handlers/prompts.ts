@@ -7,19 +7,7 @@ export function registerPromptHandlers(server: Server, projectRoot: string) {
   // Handle prompts listing
   server.setRequestHandler(ListPromptsRequestSchema, async () => {
     return {
-      prompts: [
-        {
-          name: 'netsuite-sql-expert',
-          description: 'Start a NetSuite SuiteQL debugging or authoring session with historical memory context injected.',
-          arguments: [
-            {
-              name: 'task',
-              description: 'What do you want to query or debug?',
-              required: true
-            }
-          ]
-        }
-      ]
+      prompts: []
     };
   });
 

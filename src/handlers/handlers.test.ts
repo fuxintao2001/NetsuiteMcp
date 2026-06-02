@@ -82,13 +82,13 @@ describe('MCP Handlers', () => {
   });
 
   describe('Prompts Handler', () => {
-    it('should register and return expert prompt', async () => {
+    it('should register and return empty prompts list to hide from autocomplete menu', async () => {
       registerPromptHandlers(mockServer, testWorkspace);
       const listHandler = toolHandlers.get(ListPromptsRequestSchema);
       expect(listHandler).toBeDefined();
 
       const result = await listHandler!();
-      expect(result.prompts[0].name).toBe('netsuite-sql-expert');
+      expect(result.prompts).toEqual([]);
     });
 
     it('should resolve prompt with dynamic memory content', async () => {
