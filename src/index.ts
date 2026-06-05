@@ -18,6 +18,7 @@ axios.defaults.httpsAgent = new https.Agent({ keepAlive: true });
 
 // Import Handlers
 import { registerResourceHandlers } from './handlers/resources.js';
+import { registerPromptHandlers } from './handlers/prompts.js';
 import { registerToolHandlers } from './handlers/tools.js';
 import type { ToolHandlerDeps } from './handlers/tools.js';
 import { validateEnv } from './utils/envValidator.js';
@@ -78,6 +79,7 @@ class NetSuiteMCPServer {
 
   setupHandlers(): void {
     registerResourceHandlers(this.server, projectRoot);
+    registerPromptHandlers(this.server, projectRoot);
 
     const deps: ToolHandlerDeps = {
       server: this.server,

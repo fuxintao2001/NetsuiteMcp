@@ -280,8 +280,16 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
         return { tools: [AUTH_TOOL, LOGOUT_TOOL] };
       }
 
+      const accountId = await oauthManager.getAccountId();
+      const isSandbox = accountId ? (
+        accountId.toUpperCase().includes('_SB') || 
+        accountId.toUpperCase().startsWith('TSTDRV')
+      ) : false;
+
       const tools = await mcpTools.fetchTools() as Array<Record<string, unknown>>;
-      const filteredTools = tools.filter(tool => tool.name !== 'ns_createRecord' && tool.name !== 'ns_updateRecord');
+      const filteredTools = isSandbox
+        ? tools
+        : tools.filter(tool => tool.name !== 'ns_createRecord' && tool.name !== 'ns_updateRecord');
       const modifiedTools = filteredTools.map((tool) => {
         if (tool.name === 'ns_runCustomSuiteQL') {
           return {
@@ -321,7 +329,15 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
 
       // --- Block write operations ---
       if (name === 'ns_createRecord' || name === 'ns_updateRecord') {
-        throw new McpError(ErrorCode.InvalidRequest, `Write operations are disabled to ensure data accuracy: ${name}`);
+        const accountId = await oauthManager.getAccountId();
+        const isSandbox = accountId ? (
+          accountId.toUpperCase().includes('_SB') || 
+          accountId.toUpperCase().startsWith('TSTDRV')
+        ) : false;
+        
+        if (!isSandbox) {
+          throw new McpError(ErrorCode.InvalidRequest, `Write operations are disabled to ensure data accuracy in production environments: ${name}`);
+        }
       }
 
       // --- Tools requiring authentication ---

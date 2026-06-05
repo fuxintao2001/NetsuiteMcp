@@ -223,5 +223,58 @@ describe('MCP Handlers', () => {
       expect(response.content[0].text).toContain('🔗 **NetSuite UI Link (Current Environment):**');
       expect(response.content[0].text).toContain('https://test-account.app.netsuite.com/app/common/entity/custjob.nl?id=100');
     });
+
+    it('should block write operations (create/update) in production environments', async () => {
+      mockOAuthManager.getAccountId.mockResolvedValue('123456'); // Production ID
+      const callHandler = toolHandlers.get(CallToolRequestSchema);
+      
+      const response = await callHandler!({
+        params: {
+          name: 'ns_createRecord',
+          arguments: { recordType: 'customer', record: {} }
+        }
+      });
+      expect(response.isError).toBe(true);
+      expect(response.content[0].text).toContain('Write operations are disabled to ensure data accuracy in production environments');
+    });
+
+    it('should allow write operations (create/update) in sandbox/test environments', async () => {
+      mockOAuthManager.getAccountId.mockResolvedValue('123456_SB1'); // Sandbox ID
+      mockMCPTools.executeTool.mockResolvedValue({ id: 200, type: 'customer' });
+      const callHandler = toolHandlers.get(CallToolRequestSchema);
+      
+      const response = await callHandler!({
+        params: {
+          name: 'ns_createRecord',
+          arguments: { recordType: 'customer', record: {} }
+        }
+      });
+      expect(response.content[0].text).toContain('🔗 **NetSuite UI Link (Current Environment):**');
+    });
+
+    it('should filter out write tools in production and keep them in sandbox listing', async () => {
+      mockMCPTools.fetchTools.mockResolvedValue([
+        { name: 'ns_getRecord', description: 'Get' },
+        { name: 'ns_createRecord', description: 'Create' },
+        { name: 'ns_updateRecord', description: 'Update' }
+      ]);
+      const listHandler = toolHandlers.get(ListToolsRequestSchema);
+      
+      // Test production listing (blocked tools filtered out)
+      mockOAuthManager.getAccountId.mockResolvedValue('123456');
+      const prodResult = await listHandler!();
+      const prodNames = prodResult.tools.map((t: any) => t.name);
+      expect(prodNames).toContain('ns_getRecord');
+      expect(prodNames).not.toContain('ns_createRecord');
+      expect(prodNames).not.toContain('ns_updateRecord');
+      
+      // Test sandbox listing (all tools included)
+      mockOAuthManager.getAccountId.mockResolvedValue('TSTDRV123456'); // Sandbox / Test Drive ID
+      const sbResult = await listHandler!();
+      const sbNames = sbResult.tools.map((t: any) => t.name);
+      expect(sbNames).toContain('ns_getRecord');
+      expect(sbNames).toContain('ns_createRecord');
+      expect(sbNames).toContain('ns_updateRecord');
+    });
   });
 });
