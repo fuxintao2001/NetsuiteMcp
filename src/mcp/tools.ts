@@ -1,69 +1,291 @@
 import axios from 'axios';
-import crypto from 'crypto';
 import { cacheService } from '../utils/cache.js';
 import { OAuthManager } from '../oauth/manager.js';
 import { asyncJsonParse } from '../utils/json.js';
 
-function isStaticTableQuery(sqlQuery: string): boolean {
-  const normalized = sqlQuery.toLowerCase();
-  const staticTables = ['subsidiary', 'currency', 'location', 'department', 'classification'];
-  
-  const hasFromStaticTable = staticTables.some(table => {
-    const regex = new RegExp(`\\bfrom\\s+${table}\\b|\\bjoin\\s+${table}\\b`);
-    return regex.test(normalized);
-  });
-  
-  if (!hasFromStaticTable) return false;
-  
-  const dynamicTables = ['transaction', 'customer', 'item', 'employee', 'journalentry', 'salesorder', 'invoice', 'opportunity', 'contact', 'vendor'];
-  const hasDynamicTable = dynamicTables.some(table => {
-    const regex = new RegExp(`\\bfrom\\s+${table}\\b|\\bjoin\\s+${table}\\b`);
-    return regex.test(normalized);
-  });
-  
-  return !hasDynamicTable;
-}
-
+/**
+ * Extracts table names from a SQL query string (used for cache invalidation).
+ */
 function extractTableNames(sqlQuery: string): string[] {
   const normalized = sqlQuery.toLowerCase();
   const tables = new Set<string>();
-  
-  // Regular expressions to match table names after FROM or JOIN
   const regex = /\b(?:from|join)\s+([a-zA-Z0-9_-]+)\b/g;
   let match;
   while ((match = regex.exec(normalized)) !== null) {
-    if (match[1]) {
-      tables.add(match[1]);
-    }
+    if (match[1]) tables.add(match[1]);
   }
   return Array.from(tables);
 }
 
 /**
  * NetSuite MCP Tools Client
- * Communicates with NetSuite MCP REST API using JSON-RPC 2.0
+ *
+ * Communicates with NetSuite's MCP REST API using JSON-RPC 2.0.
+ * Handles tool discovery, tool execution, caching, and 401 auto-retry.
+ *
+ * Design contract:
+ * - Every public method has a single try/catch — no nested exception handling.
+ * - 401 retry is inline (single retry after force-refreshing the token).
+ * - All errors thrown are plain Error objects with descriptive messages.
  */
 export class NetSuiteMCPTools {
-  private oauthManager: OAuthManager;
-  customRecordMappings: Map<string, number>;
-  hasFetchedMappings: boolean = false;
+  private readonly oauthManager: OAuthManager;
+  customRecordMappings: Map<string, number> = new Map();
+  hasFetchedMappings = false;
 
   constructor(oauthManager: OAuthManager) {
     this.oauthManager = oauthManager;
-    this.customRecordMappings = new Map();
-    // Load custom record mappings from local cache in background (safe fire-and-forget, no API call)
+
+    // Load cached mappings from disk (fire-and-forget, no API call)
     this.loadCustomRecordMappingsCache().catch((err: unknown) => {
-      const message = err instanceof Error ? err.message : String(err);
-      console.error(`⚠️ Failed to load custom record mappings cache: ${message}`);
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`⚠️ Failed to load custom record mappings cache: ${msg}`);
     });
-    // NOTE: fetchCustomRecordMappings() is deliberately NOT called here.
-    // It requires authentication and is called after successful auth in index.ts.
+  }
+
+  // ---------------------------------------------------------------------------
+  // Public API
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Fetch available tools from NetSuite MCP API.
+   * Uses cache with 1-hour TTL to avoid redundant network calls.
+   */
+  async fetchTools(): Promise<unknown[]> {
+    const accountId = await this.oauthManager.getAccountId();
+
+    // Check cache first
+    if (accountId) {
+      const cached = await cacheService.get<unknown[]>(accountId, 'toolsCache');
+      if (cached) return cached;
+    }
+
+    const tools = await this.jsonRpcCall<{ tools: unknown[] }>('tools/list');
+
+    if (!tools || !Array.isArray(tools.tools)) {
+      throw new Error('Invalid tools/list response: missing result.tools array');
+    }
+
+    if (accountId) {
+      await cacheService.set(accountId, 'toolsCache', tools.tools, 3600);
+    }
+
+    return tools.tools;
   }
 
   /**
-   * Get NetSuite MCP API endpoint URL
+   * Execute a NetSuite MCP tool by name.
+   * Metadata results are cached. SuiteQL responses are slimmed.
    */
-  async getMCPEndpoint(): Promise<string> {
+  async executeTool(toolName: string, parameters: Record<string, unknown> = {}): Promise<unknown> {
+    const accountId = await this.oauthManager.getAccountId();
+
+    // --- Cache check for metadata tools ---
+    if (this.isMetadataTool(toolName) && accountId) {
+      const cacheKey = this.metadataCacheKey(toolName, parameters);
+      try {
+        const cached = await cacheService.get(accountId, cacheKey);
+        if (cached) return cached;
+      } catch {
+        // Cache miss or read error — continue to API call
+      }
+    }
+
+    console.error(`🔧 Executing tool: ${toolName}`);
+
+    const result = await this.jsonRpcCall<unknown>('tools/call', {
+      name: toolName,
+      arguments: parameters
+    });
+
+    if (result === undefined) {
+      throw new Error(`Tool '${toolName}' returned no result`);
+    }
+
+    console.error(`✅ Tool executed successfully`);
+
+    // --- Slim SuiteQL response payload ---
+    const finalResult = toolName === 'ns_runCustomSuiteQL'
+      ? this.slimSuiteQLResponse(result)
+      : result;
+
+    // --- Cache metadata results ---
+    if (this.isMetadataTool(toolName) && accountId) {
+      const cacheKey = this.metadataCacheKey(toolName, parameters);
+      try {
+        await cacheService.set(accountId, cacheKey, finalResult);
+      } catch {
+        // Cache write failure is non-fatal
+      }
+    }
+
+    // --- Self-healing cache invalidation on SuiteQL error is handled by the caller ---
+    return finalResult;
+  }
+
+  /**
+   * Clear the tools cache (e.g. after re-authentication).
+   */
+  async clearCache(): Promise<void> {
+    const accountId = await this.oauthManager.getAccountId();
+    if (accountId) {
+      await cacheService.set(accountId, 'toolsCache', null);
+    }
+  }
+
+  /**
+   * Force refresh NetSuite's internal REST session cache.
+   */
+  async refreshSessionCache(): Promise<void> {
+    const accountId = await this.oauthManager.getAccountId();
+    if (accountId) {
+      await cacheService.clearAccountCache(accountId);
+    }
+
+    const accessToken = await this.oauthManager.ensureValidToken();
+    const url = `https://${accountId}.suitetalk.api.netsuite.com/services/rest/v1/session/cache/refresh`;
+
+    try {
+      await axios.post(url, {}, {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        },
+        timeout: 10000
+      });
+      console.error('✅ NetSuite REST session cache refreshed');
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : String(error);
+      throw new Error(`Failed to refresh NetSuite REST session cache: ${msg}`);
+    }
+  }
+
+  /**
+   * Clear all metadata cache for the current account.
+   */
+  async clearMetadataCache(): Promise<void> {
+    try {
+      const accountId = await this.oauthManager.getAccountId();
+      if (accountId) {
+        await cacheService.clearAccountCache(accountId);
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`⚠️ Failed to clear metadata cache: ${msg}`);
+    }
+  }
+
+  /**
+   * Fetch custom record type → internal ID mappings from NetSuite.
+   * Called after successful authentication, NOT in the constructor.
+   */
+  async fetchCustomRecordMappings(): Promise<void> {
+    if (this.hasFetchedMappings) return;
+    this.hasFetchedMappings = true;
+
+    try {
+      console.error('🔍 Fetching custom record mappings from NetSuite...');
+      const rawResult = await this.executeTool('ns_runCustomSuiteQL', {
+        sqlQuery: 'SELECT internalId, scriptId FROM customrecordtype'
+      });
+
+      const records = this.extractDataArray(rawResult);
+      if (records.length === 0) return;
+
+      const newMappings: Record<string, number> = {};
+      for (const record of records) {
+        const scriptId = (String(record.scriptid || record.scriptId || '')).toUpperCase().trim();
+        const internalId = parseInt(String(record.internalid || record.internalId), 10);
+        if (scriptId && !isNaN(internalId)) {
+          this.customRecordMappings.set(scriptId, internalId);
+          newMappings[scriptId] = internalId;
+        }
+      }
+
+      const accountId = await this.oauthManager.getAccountId();
+      if (accountId) {
+        await cacheService.set(accountId, 'customrecord_mappings', newMappings);
+        console.error(`✅ Saved ${this.customRecordMappings.size} custom record mappings`);
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`⚠️ Failed to fetch custom record mappings: ${msg}`);
+    }
+  }
+
+  /**
+   * Prefetch metadata for commonly used record types in parallel.
+   */
+  async prefetchCommonMetadata(): Promise<void> {
+    const types = ['customer', 'salesorder', 'item', 'transaction'];
+    console.error(`🚀 Prefetching metadata for: ${types.join(', ')}...`);
+
+    await Promise.all(
+      types.map(async (recordType) => {
+        try {
+          await this.executeTool('ns_getRecordTypeMetadata', { recordType });
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : String(err);
+          console.error(`⚠️ Failed to prefetch metadata for ${recordType}: ${msg}`);
+        }
+      })
+    );
+
+    console.error('✅ Prefetching common metadata completed.');
+  }
+
+  // ---------------------------------------------------------------------------
+  // Private helpers
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Core JSON-RPC 2.0 call to NetSuite MCP API.
+   * Includes single 401 auto-retry after force-refreshing the token.
+   */
+  private async jsonRpcCall<T>(method: string, params?: Record<string, unknown>): Promise<T> {
+    let accessToken = await this.oauthManager.ensureValidToken();
+    const endpoint = await this.getEndpoint();
+
+    const body: Record<string, unknown> = {
+      jsonrpc: '2.0',
+      id: `mcp-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
+      method
+    };
+    if (params) body.params = params;
+
+    const makeRequest = async (token: string): Promise<T> => {
+      const response = await axios.post(endpoint, body, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+          'Accept-Encoding': 'gzip, deflate, br'
+        },
+        timeout: method === 'tools/list' ? 30000 : 60000
+      });
+
+      if (response.data?.error) {
+        throw new Error(response.data.error.message || `JSON-RPC error in ${method}`);
+      }
+
+      return response.data?.result as T;
+    };
+
+    try {
+      return await makeRequest(accessToken);
+    } catch (error: unknown) {
+      // Single 401 retry: force-refresh token and try once more
+      const axiosErr = error as { response?: { status?: number } };
+      if (axiosErr.response?.status === 401) {
+        console.error('🔄 [401 Retry] Force-refreshing token and retrying...');
+        accessToken = await this.oauthManager.forceRefreshToken();
+        return await makeRequest(accessToken);
+      }
+      throw error;
+    }
+  }
+
+  /** Build the NetSuite MCP API endpoint URL. */
+  private async getEndpoint(): Promise<string> {
     const accountId = await this.oauthManager.getAccountId();
     if (!accountId) {
       throw new Error('Account ID not found. Please authenticate first.');
@@ -71,400 +293,98 @@ export class NetSuiteMCPTools {
     return `https://${accountId}.suitetalk.api.netsuite.com/services/mcp/v1/all`;
   }
 
-  /**
-   * Fetch available tools from NetSuite
-   */
-  async fetchTools(): Promise<unknown[]> {
-    try {
-      const accountId = await this.oauthManager.getAccountId();
-      if (accountId) {
-        const cachedTools = await cacheService.get<unknown[]>(accountId, 'toolsCache');
-        if (cachedTools) {
-          return cachedTools;
-        }
-      }
+  /** Check if a tool name is a metadata tool that should be cached. */
+  private isMetadataTool(toolName: string): boolean {
+    return toolName === 'ns_getSuiteQLMetadata' || toolName === 'ns_getRecordTypeMetadata';
+  }
 
-      // Try fetching tools with automatic 401 retry
-      const tools = await this._fetchToolsWithRetry();
-
-      if (accountId) {
-        await cacheService.set(accountId, 'toolsCache', tools, 3600); // 1 hour TTL
-      }
-      return tools;
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error);
-      console.error(`❌ Failed to fetch tools from NetSuite: ${message}`);
-      throw error;
-    }
+  /** Generate a cache key for metadata tools. */
+  private metadataCacheKey(toolName: string, params: Record<string, unknown>): string {
+    const recordType = (params.recordType as string) || (params.tableName as string) || 'all';
+    return `${toolName}_${recordType}`;
   }
 
   /**
-   * Internal: fetch tools from NetSuite with 401 auto-retry
+   * Slim a SuiteQL response to only include essential data fields.
    */
-  private async _fetchToolsWithRetry(): Promise<unknown[]> {
-    let accessToken = await this.oauthManager.ensureValidToken();
-    const endpoint = await this.getMCPEndpoint();
+  private slimSuiteQLResponse(result: unknown): unknown {
+    if (!result || typeof result !== 'object') return result;
 
-    const doFetch = async (): Promise<unknown[]> => {
-      const response = await axios.post(endpoint, {
-        jsonrpc: '2.0',
-        id: this.generateRequestId(),
-        method: 'tools/list'
-      }, {
-        headers: {
-          'Authorization': `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
-          'Cache-Control': 'no-cache, no-store, must-revalidate',
-          'Pragma': 'no-cache',
-          'Expires': '0'
-        },
-        timeout: 30000
-      });
+    const resObj = result as Record<string, unknown>;
+    let suiteqlData: Record<string, unknown> | null = null;
 
-      if (response.data.error) {
-        throw new Error(response.data.error.message || 'Failed to fetch tools');
-      }
-
-      const result = response.data?.result;
-      if (!result || !Array.isArray(result.tools)) {
-        throw new Error('Invalid tools/list response: missing result.tools array');
-      }
-
-      return result.tools;
-    };
-
-    try {
-      return await doFetch();
-    } catch (error: unknown) {
-      const err = error as { response?: { status?: number } };
-      // On 401, force-refresh token and retry once
-      if (err.response?.status === 401) {
-        console.error('🔄 [401 Retry] Token expired during fetchTools, force-refreshing and retrying...');
-        accessToken = await this.oauthManager.forceRefreshToken();
-        return await doFetch();
-      }
-      throw error;
+    // Direct shape: { method: 'custom_suiteql', data: [...] }
+    if (resObj.method === 'custom_suiteql' && Array.isArray(resObj.data)) {
+      suiteqlData = resObj;
     }
-  }
-
-  /**
-   * Execute a NetSuite MCP tool
-   */
-  async executeTool(toolName: string, parameters: Record<string, unknown> = {}): Promise<unknown> {
-    const accountId = await this.oauthManager.getAccountId();
-
-
-    // Intercept metadata tools for schema caching
-    if (toolName === 'ns_getSuiteQLMetadata' || toolName === 'ns_getRecordTypeMetadata') {
-      try {
-        if (accountId) {
-          const recordType = (parameters?.recordType as string) || 'all';
-          const cacheKey = `${toolName}_${recordType}`;
-          const cachedResult = await cacheService.get(accountId, cacheKey);
-          if (cachedResult) {
-            return cachedResult;
+    // Wrapped shape: { content: [{ text: '...' }] }
+    else if (Array.isArray(resObj.content)) {
+      const firstContent = (resObj.content as Array<{ text?: string }>)[0];
+      if (firstContent?.text && typeof firstContent.text === 'string') {
+        try {
+          const parsed = JSON.parse(firstContent.text) as Record<string, unknown>;
+          if (parsed.method === 'custom_suiteql' && Array.isArray(parsed.data)) {
+            suiteqlData = parsed;
           }
+        } catch {
+          // Not JSON — return as-is
         }
-      } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        console.error(`⚠️ Failed to read metadata cache: ${message}`);
       }
     }
 
-
-
-    let accessToken = await this.oauthManager.ensureValidToken();
-    const endpoint = await this.getMCPEndpoint();
-
-    console.error(`🔧 Executing tool: ${toolName}`);
-
-    const doExecute = async (): Promise<unknown> => {
-      const response = await axios.post(endpoint, {
-        jsonrpc: '2.0',
-        id: this.generateRequestId(),
-        method: 'tools/call',
-        params: {
-          name: toolName,
-          arguments: parameters
-        }
-      }, {
-        headers: {
-          'Authorization': `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
-          'Cache-Control': 'no-cache, no-store, must-revalidate',
-          'Pragma': 'no-cache',
-          'Expires': '0',
-          'Accept-Encoding': 'gzip, deflate, br'
-        },
-        timeout: 60000 // 60 second timeout for tool execution
-      });
-
-      if (response.data.error) {
-        const errorMsg = response.data.error.message || 'Tool execution failed';
-        console.error(`❌ Tool execution error: ${errorMsg}`);
-        throw new Error(errorMsg);
-      }
-
-      const result = response.data?.result;
-      if (result === undefined) {
-        throw new Error(`Tool '${toolName}' returned no result`);
-      }
-
-      // Perform response payload slimming for SuiteQL results
-      if (toolName === 'ns_runCustomSuiteQL' && result && typeof result === 'object') {
-        const resObj = result as Record<string, unknown>;
-        let suiteqlData: Record<string, unknown> | null = null;
-
-        if (resObj.method === 'custom_suiteql' && Array.isArray(resObj.data)) {
-          suiteqlData = resObj;
-        } else if (Array.isArray(resObj.content) && resObj.content[0] && typeof resObj.content[0].text === 'string') {
-          try {
-            const parsedText = JSON.parse(resObj.content[0].text);
-            if (parsedText && typeof parsedText === 'object' && parsedText.method === 'custom_suiteql' && Array.isArray(parsedText.data)) {
-              suiteqlData = parsedText;
-            }
-          } catch {
-            // Ignore parse errors
-          }
-        }
-
-        if (suiteqlData) {
-          return {
-            totalResults: suiteqlData.totalResults,
-            numberOfPages: suiteqlData.numberOfPages,
-            data: suiteqlData.data
-          };
-        }
-      }
-
-      return result;
-    };
-
-    try {
-      let result: unknown;
-      try {
-        result = await doExecute();
-      } catch (error: unknown) {
-        const err = error as { response?: { status?: number } };
-        // On 401, force-refresh token and retry once
-        if (err.response?.status === 401) {
-          console.error('🔄 [401 Retry] Token expired during executeTool, force-refreshing and retrying...');
-          accessToken = await this.oauthManager.forceRefreshToken();
-          result = await doExecute();
-        } else {
-          throw error;
-        }
-      }
-
-      console.error(`✅ Tool executed successfully`);
-
-      // Save to cache after successful execution
-      if (accountId) {
-        if (toolName === 'ns_getSuiteQLMetadata' || toolName === 'ns_getRecordTypeMetadata') {
-          try {
-            const recordType = (parameters?.recordType as string) || 'all';
-            const cacheKey = `${toolName}_${recordType}`;
-            await cacheService.set(accountId, cacheKey, result);
-          } catch (err: unknown) {
-            const message = err instanceof Error ? err.message : String(err);
-            console.error(`⚠️ Failed to write metadata cache: ${message}`);
-          }
-        }
-      }
-
-      return result;
-
-    } catch (error: unknown) {
-      // Self-Healing Cache Invalidation: clear local cache on any SuiteQL execution error
-      if (toolName === 'ns_runCustomSuiteQL') {
-        const sqlQuery = parameters.sqlQuery as string;
-        if (sqlQuery && accountId) {
-          const tableNames = extractTableNames(sqlQuery);
-          if (tableNames.length > 0) {
-            console.error(`⚠️ SuiteQL error on tables [${tableNames.join(', ')}]. Performing selective cache invalidation...`);
-            for (const tableName of tableNames) {
-              try {
-                await cacheService.delete(accountId, `ns_getSuiteQLMetadata_${tableName}`);
-                await cacheService.delete(accountId, `ns_getRecordTypeMetadata_${tableName}`);
-              } catch (err: unknown) {
-                const message = err instanceof Error ? err.message : String(err);
-                console.error(`⚠️ Failed to delete selective cache for ${tableName}: ${message}`);
-              }
-            }
-          } else {
-            console.error('⚠️ SuiteQL error encountered. No table names parsed. Automatically clearing entire metadata cache...');
-            try {
-              await this.clearMetadataCache();
-            } catch (err: unknown) {
-              const message = err instanceof Error ? err.message : String(err);
-              console.error(`⚠️ Failed to self-heal/clear metadata cache: ${message}`);
-            }
-          }
-        }
-      }
-
-      const err = error as { response?: { data?: unknown }; message?: string };
-      console.error('❌ Tool execution error:', err.response?.data || err.message);
-      const message = error instanceof Error ? error.message : String(error);
-      throw new Error(`Tool execution failed: ${message}`);
+    if (suiteqlData) {
+      return {
+        totalResults: suiteqlData.totalResults,
+        numberOfPages: suiteqlData.numberOfPages,
+        data: suiteqlData.data
+      };
     }
+
+    return result;
   }
 
-  /**
-   * Generate unique request ID for JSON-RPC
-   */
-  private generateRequestId(): string {
-    return `mcp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-  }
-
-  /**
-   * Clear tools cache (useful after re-authentication)
-   */
-  async clearCache(): Promise<void> {
-    const accountId = await this.oauthManager.getAccountId();
-    if (accountId) {
-      await cacheService.set(accountId, 'toolsCache', null);
-    }
-    console.error('🗑️  Tools cache cleared');
-  }
-
-  /**
-   * Force refresh NetSuite REST session filter set cache
-   */
-  async refreshSessionCache(): Promise<boolean> {
-    const accountId = await this.oauthManager.getAccountId();
-    if (accountId) {
-      await cacheService.clearAccountCache(accountId);
-    }
-    const accessToken = await this.oauthManager.ensureValidToken();
-    const refreshUrl = `https://${accountId}.suitetalk.api.netsuite.com/services/rest/v1/session/cache/refresh`;
-
-    console.error('🔄 Refreshing NetSuite REST session cache...');
-
-    try {
-      await axios.post(refreshUrl, {}, {
-        headers: {
-          'Authorization': `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
-          'Cache-Control': 'no-cache, no-store, must-revalidate',
-          'Pragma': 'no-cache',
-          'Expires': '0'
-        },
-        timeout: 10000
-      });
-      console.error('✅ NetSuite REST session cache refreshed successfully');
-      return true;
-    } catch (error: unknown) {
-      const err = error as { response?: { data?: unknown }; message?: string };
-      console.error('❌ Cache refresh failed:', err.response?.data || err.message);
-      const message = error instanceof Error ? error.message : String(error);
-      throw new Error(`Failed to refresh NetSuite REST session cache: ${message}`);
-    }
-  }
-
-  /**
-   * Clear metadata cache for current account
-   */
-  async clearMetadataCache(): Promise<void> {
-    try {
-      const accountId = await this.oauthManager.getAccountId();
-      if (!accountId) return;
-      await cacheService.clearAccountCache(accountId);
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      console.error(`⚠️ Failed to clear metadata cache: ${message}`);
-    }
-  }
-
-  /**
-   * Load custom record mappings from local cache file
-   */
+  /** Load custom record mappings from local file cache (no API call). */
   private async loadCustomRecordMappingsCache(): Promise<void> {
-    try {
-      const accountId = await this.oauthManager.getAccountId();
-      if (!accountId) return;
+    const accountId = await this.oauthManager.getAccountId();
+    if (!accountId) return;
 
-      const mappingsObj = await cacheService.get<Record<string, number>>(accountId, 'customrecord_mappings');
-      if (mappingsObj) {
-        this.customRecordMappings = new Map(Object.entries(mappingsObj));
-        console.error(`⚡ Loaded ${this.customRecordMappings.size} custom record mappings from local cache`);
-      }
-    } catch {
-      // Ignore
+    const mappingsObj = await cacheService.get<Record<string, number>>(accountId, 'customrecord_mappings');
+    if (mappingsObj) {
+      this.customRecordMappings = new Map(Object.entries(mappingsObj));
+      console.error(`⚡ Loaded ${this.customRecordMappings.size} custom record mappings from cache`);
     }
   }
 
   /**
-   * Fetch custom record type ID mapping from NetSuite.
-   * Should be called after successful authentication, NOT in constructor.
+   * Extract a data array from various NetSuite response shapes.
    */
-  async fetchCustomRecordMappings(): Promise<void> {
-    if (this.hasFetchedMappings) return;
-    this.hasFetchedMappings = true;
+  private extractDataArray(result: unknown): Array<Record<string, unknown>> {
+    if (!result || typeof result !== 'object') return [];
 
-    try {
-      console.error('🔍 Fetching dynamic custom record mappings from NetSuite...');
-      
-      // Query customrecordtype table
-      const sqlQuery = 'SELECT internalId, scriptId FROM customrecordtype';
-      const result = await this.executeTool('ns_runCustomSuiteQL', { sqlQuery }) as Record<string, unknown>;
-      
-      let data: Record<string, unknown> = result;
-      if (result && Array.isArray((result as Record<string, unknown>).content)) {
-        const content = (result as { content: Array<{ text?: string }> }).content;
-        if (content[0] && typeof content[0].text === 'string') {
-          data = await asyncJsonParse<Record<string, unknown>>(content[0].text);
-        }
-      } else if (typeof result === 'string') {
-        data = await asyncJsonParse<Record<string, unknown>>(result);
-      }
-      
-      const records = (data.data || data.records || []) as Array<Record<string, unknown>>;
-      if (records.length > 0) {
-        const newMappings: Record<string, number> = {};
-        for (const record of records) {
-          const scriptId = ((record.scriptid || record.scriptId || '') as string).toUpperCase().trim();
-          const internalId = parseInt(String(record.internalid || record.internalId), 10);
-          if (scriptId && !isNaN(internalId)) {
-            this.customRecordMappings.set(scriptId, internalId);
-            newMappings[scriptId] = internalId;
-          }
-        }
-        
-        // Save to cache
-        const accountId = await this.oauthManager.getAccountId();
-        if (accountId) {
-          await cacheService.set(accountId, 'customrecord_mappings', newMappings);
-          console.error(`✅ Saved ${this.customRecordMappings.size} custom record mappings to cache`);
+    let data = result as Record<string, unknown>;
+
+    // Unwrap content wrapper
+    if (Array.isArray(data.content)) {
+      const content = (data.content as Array<{ text?: string }>)[0];
+      if (content?.text && typeof content.text === 'string') {
+        try {
+          data = JSON.parse(content.text) as Record<string, unknown>;
+        } catch {
+          return [];
         }
       }
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      console.error(`⚠️ Failed to fetch custom record mappings: ${message}`);
     }
-  }
 
-  /**
-   * Prefetch metadata for commonly used record types in parallel
-   */
-  async prefetchCommonMetadata(): Promise<void> {
-    const commonTypes = ['customer', 'salesorder', 'item', 'transaction'];
-    console.error(`🚀 Prefetching metadata for common records in parallel: ${commonTypes.join(', ')}...`);
-    try {
-      await Promise.all(
-        commonTypes.map(async (recordType) => {
-          try {
-            await this.executeTool('ns_getRecordTypeMetadata', { recordType });
-          } catch (err: unknown) {
-            const message = err instanceof Error ? err.message : String(err);
-            console.error(`⚠️ Failed to prefetch metadata for ${recordType}: ${message}`);
-          }
-        })
-      );
-      console.error('✅ Prefetching common metadata completed.');
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      console.error(`⚠️ Prefetch error: ${message}`);
+    // Unwrap string result
+    if (typeof result === 'string') {
+      try {
+        data = JSON.parse(result) as Record<string, unknown>;
+      } catch {
+        return [];
+      }
     }
+
+    const records = (data.data || data.records || []) as Array<Record<string, unknown>>;
+    return Array.isArray(records) ? records : [];
   }
 }

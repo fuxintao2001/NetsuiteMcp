@@ -32,9 +32,8 @@ Thumbs.db
 # Build outputs
 dist/
 
-# Gemini files
-.gemini_sql_memory.md
-.gemini_sql_memory.backup.md
+
+
 
 .npmignore
 

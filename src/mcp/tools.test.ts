@@ -13,7 +13,8 @@ describe('NetSuiteMCPTools', () => {
 
     mockOAuthManager = {
       getAccountId: jest.fn().mockResolvedValue('test-account'),
-      ensureValidToken: jest.fn().mockResolvedValue('test-token')
+      ensureValidToken: jest.fn().mockResolvedValue('test-token'),
+      forceRefreshToken: jest.fn().mockResolvedValue('new-test-token')
     };
 
     // Pre-emptively mock axios.post globally to intercept constructor background calls
@@ -31,18 +32,6 @@ describe('NetSuiteMCPTools', () => {
 
   afterEach(() => {
     jest.restoreAllMocks();
-  });
-
-  describe('getMCPEndpoint', () => {
-    it('should return correct endpoint using account ID', async () => {
-      const endpoint = await toolsClient.getMCPEndpoint();
-      expect(endpoint).toBe('https://test-account.suitetalk.api.netsuite.com/services/mcp/v1/all');
-    });
-
-    it('should throw if account ID is missing', async () => {
-      mockOAuthManager.getAccountId.mockResolvedValueOnce(null);
-      await expect(toolsClient.getMCPEndpoint()).rejects.toThrow('Account ID not found. Please authenticate first.');
-    });
   });
 
   describe('fetchTools', () => {
@@ -65,7 +54,6 @@ describe('NetSuiteMCPTools', () => {
         }
       };
       
-      // Override global spy for this specific call
       globalAxiosPostSpy.mockResolvedValueOnce(mockApiResponse as any);
       const cacheSetSpy = jest.spyOn(cacheService, 'set').mockResolvedValueOnce(undefined);
 
@@ -102,7 +90,7 @@ describe('NetSuiteMCPTools', () => {
       expect(cacheSetSpy).toHaveBeenCalledWith('test-account', 'ns_getSuiteQLMetadata_customer', mockResponse.data.result);
     });
 
-    it('should trigger self-healing cache invalidation on SuiteQL error', async () => {
+    it('should throw on API error', async () => {
       jest.spyOn(cacheService, 'get').mockResolvedValueOnce(null);
       const mockError = new Error('Request failed with status code 500');
       Object.assign(mockError, {
@@ -113,18 +101,31 @@ describe('NetSuiteMCPTools', () => {
       });
       
       globalAxiosPostSpy.mockRejectedValueOnce(mockError as any);
-      const deleteSpy = jest.spyOn(cacheService, 'delete').mockResolvedValue(undefined as any);
 
       await expect(
         toolsClient.executeTool('ns_runCustomSuiteQL', { sqlQuery: 'SELECT * FROM invalid' })
-      ).rejects.toThrow('Tool execution failed: Request failed with status code 500');
-
-      // Verify selective cache invalidation was triggered for the 'invalid' table
-      expect(deleteSpy).toHaveBeenCalledWith('test-account', 'ns_getSuiteQLMetadata_invalid');
-      expect(deleteSpy).toHaveBeenCalledWith('test-account', 'ns_getRecordTypeMetadata_invalid');
+      ).rejects.toThrow('Request failed with status code 500');
     });
 
+    it('should retry once on 401 with force-refreshed token', async () => {
+      jest.spyOn(cacheService, 'get').mockResolvedValueOnce(null);
+      
+      const error401 = new Error('Unauthorized');
+      Object.assign(error401, { response: { status: 401 } });
+      
+      const successResponse = {
+        data: { result: { data: [1, 2, 3] } }
+      };
+      
+      globalAxiosPostSpy
+        .mockRejectedValueOnce(error401)
+        .mockResolvedValueOnce(successResponse);
 
+      const result = await toolsClient.executeTool('ns_runCustomSuiteQL', { sqlQuery: 'SELECT id FROM customer' });
+      expect(result).toEqual(successResponse.data.result);
+      expect(mockOAuthManager.forceRefreshToken).toHaveBeenCalled();
+    });
+  });
 
   describe('fetchCustomRecordMappings', () => {
     it('should resolve and cache custom record mappings from customrecordtype query', async () => {
@@ -138,11 +139,9 @@ describe('NetSuiteMCPTools', () => {
         }]
       };
       
-      // Stub executeTool for internal call
       jest.spyOn(toolsClient, 'executeTool').mockResolvedValueOnce(mockSqlResult);
       const cacheSetSpy = jest.spyOn(cacheService, 'set').mockResolvedValueOnce(undefined);
 
-      // Force fetch
       toolsClient.hasFetchedMappings = false;
       await toolsClient.fetchCustomRecordMappings();
 

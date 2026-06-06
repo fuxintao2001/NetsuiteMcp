@@ -1,170 +1,156 @@
 import http from 'http';
 
 /**
- * OAuth callback server for receiving authorization codes
- * Handles the redirect from NetSuite after user authentication
+ * OAuth callback server for receiving authorization codes.
+ * Handles the redirect from NetSuite after user authentication.
+ *
+ * Design contract:
+ * - The returned Promise settles exactly once (settled flag guard).
+ * - The 5-minute timeout is always cleaned up.
+ * - The HTTP server is always closed after the flow completes.
  */
 export class CallbackServer {
-  private port: number;
-  private server: http.Server | null;
-  private authPromiseResolve: (() => void) | null;
-  private authPromiseReject: ((error: Error) => void) | null;
+  private readonly port: number;
+  private server: http.Server | null = null;
 
   constructor(port: number) {
     this.port = port;
-    this.server = null;
-    this.authPromiseResolve = null;
-    this.authPromiseReject = null;
   }
 
   /**
-   * Start HTTP server and wait for OAuth callback
+   * Start HTTP server and wait for OAuth callback.
+   * Resolves on successful token exchange, rejects on error or timeout.
    */
-  start(expectedState: string, onCodeReceived: (code: string) => Promise<void>): Promise<void> {
-    return new Promise((resolve, reject) => {
-      this.authPromiseResolve = resolve;
-      this.authPromiseReject = reject;
+  start(
+    expectedState: string,
+    onCodeReceived: (code: string) => Promise<void>
+  ): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      let settled = false;
 
-      // Close existing server if any
+      const settle = (action: 'resolve' | 'reject', error?: Error): void => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeoutId);
+        this.close();
+        if (action === 'resolve') {
+          resolve();
+        } else {
+          reject(error);
+        }
+      };
+
+      // Close any pre-existing server
       if (this.server) {
         this.server.close();
+        this.server = null;
       }
 
-      this.server = http.createServer(async (req, res) => {
-        try {
-          await this.handleRequest(req, res, expectedState, onCodeReceived);
-        } catch (error: unknown) {
-          const message = error instanceof Error ? error.message : String(error);
-          console.error(`⚠️ Error handling callback HTTP request: ${message}`);
-          try {
-            res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
-            res.end('Internal Server Error');
-          } catch { /* already sent */ }
-        }
+      this.server = http.createServer((req, res) => {
+        void this.handleRequest(req, res, expectedState, onCodeReceived, settle);
       });
 
       this.server.on('error', (error: NodeJS.ErrnoException) => {
         if (error.code === 'EADDRINUSE') {
           console.error(`❌ Port ${this.port} is already in use.`);
-          console.error(`   Please close any application using this port or change the port in config.`);
         }
-        this.authPromiseReject!(error);
+        settle('reject', error);
       });
 
       this.server.listen(this.port, () => {
         console.error(`🌐 OAuth callback server listening on http://localhost:${this.port}`);
       });
 
-      // Set timeout for authentication (5 minutes)
-      setTimeout(() => {
-        if (this.server && this.server.listening) {
-          this.close();
-          this.authPromiseReject!(new Error('Authentication timeout (5 minutes)'));
-        }
+      // 5-minute authentication timeout
+      const timeoutId = setTimeout(() => {
+        settle('reject', new Error('Authentication timeout (5 minutes)'));
       }, 5 * 60 * 1000);
     });
   }
 
   /**
-   * Handle OAuth callback request
+   * Handle an incoming HTTP request on the callback server.
    */
   private async handleRequest(
     req: http.IncomingMessage,
     res: http.ServerResponse,
     expectedState: string,
-    onCodeReceived: (code: string) => Promise<void>
+    onCodeReceived: (code: string) => Promise<void>,
+    settle: (action: 'resolve' | 'reject', error?: Error) => void
   ): Promise<void> {
-    const url = new URL(req.url || '/', `http://localhost:${this.port}`);
-
-    if (url.pathname !== '/callback') {
-      return;
-    }
-
-    const code = url.searchParams.get('code');
-    const state = url.searchParams.get('state');
-    const error = url.searchParams.get('error');
-
-    // Handle OAuth error
-    if (error) {
-      this.sendErrorPage(res, 'Authentication Failed', error);
-      this.close();
-      this.authPromiseReject!(new Error(error));
-      return;
-    }
-
-    // Validate state parameter (CSRF protection)
-    if (state !== expectedState) {
-      this.sendErrorPage(res, 'Invalid State', 'CSRF validation failed. Please try again.');
-      this.close();
-      this.authPromiseReject!(new Error('Invalid state parameter'));
-      return;
-    }
-
     try {
-      // Exchange authorization code for tokens
-      await onCodeReceived(code!);
+      const url = new URL(req.url || '/', `http://localhost:${this.port}`);
 
+      if (url.pathname !== '/callback') {
+        res.writeHead(404, { 'Content-Type': 'text/plain' });
+        res.end('Not Found');
+        return;
+      }
+
+      const code = url.searchParams.get('code');
+      const state = url.searchParams.get('state');
+      const error = url.searchParams.get('error');
+
+      // OAuth error from NetSuite
+      if (error) {
+        this.sendErrorPage(res, 'Authentication Failed', error);
+        settle('reject', new Error(error));
+        return;
+      }
+
+      // CSRF validation
+      if (state !== expectedState) {
+        this.sendErrorPage(res, 'Invalid State', 'CSRF validation failed. Please try again.');
+        settle('reject', new Error('Invalid state parameter'));
+        return;
+      }
+
+      if (!code) {
+        this.sendErrorPage(res, 'Missing Code', 'No authorization code received.');
+        settle('reject', new Error('No authorization code received'));
+        return;
+      }
+
+      // Exchange authorization code for tokens
+      await onCodeReceived(code);
       this.sendSuccessPage(res);
 
-      // Close server after successful auth
-      setTimeout(() => {
-        this.close();
-        this.authPromiseResolve!();
-      }, 3000);
-
+      // Short delay to let browser render success page before closing server
+      setTimeout(() => settle('resolve'), 1000);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
-      this.sendErrorPage(res, 'Token Exchange Failed', message);
-      this.close();
-      this.authPromiseReject!(err instanceof Error ? err : new Error(message));
+      try {
+        this.sendErrorPage(res, 'Token Exchange Failed', message);
+      } catch {
+        // Response may already be sent
+      }
+      settle('reject', err instanceof Error ? err : new Error(message));
     }
   }
 
-  /**
-   * Send success HTML page
-   */
   private sendSuccessPage(res: http.ServerResponse): void {
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-    res.end(`
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <meta charset="UTF-8">
-          <title>Authentication Successful</title>
-        </head>
-        <body style="font-family: system-ui; text-align: center; padding: 50px;">
-          <h1>✅ Authentication Successful!</h1>
-          <p>You can close this window and return to your IDE.</p>
-        </body>
-      </html>
-    `);
+    res.end(`<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>Authentication Successful</title></head>
+<body style="font-family:system-ui;text-align:center;padding:50px;">
+<h1>✅ Authentication Successful!</h1>
+<p>You can close this window and return to your IDE.</p>
+</body></html>`);
   }
 
-  /**
-   * Send error HTML page
-   */
   private sendErrorPage(res: http.ServerResponse, title: string, message: string): void {
     const statusCode = title.includes('Invalid') ? 400 : 500;
     res.writeHead(statusCode, { 'Content-Type': 'text/html; charset=utf-8' });
-    res.end(`
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <meta charset="UTF-8">
-          <title>${title}</title>
-        </head>
-        <body style="font-family: system-ui; text-align: center; padding: 50px;">
-          <h1>❌ ${title}</h1>
-          <p style="color: #d32f2f; font-size: 1.1em;">${message}</p>
-          <p style="color: #666; margin-top: 30px;">You can close this window.</p>
-        </body>
-      </html>
-    `);
+    res.end(`<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>${title}</title></head>
+<body style="font-family:system-ui;text-align:center;padding:50px;">
+<h1>❌ ${title}</h1>
+<p style="color:#d32f2f;font-size:1.1em;">${message}</p>
+<p style="color:#666;margin-top:30px;">You can close this window.</p>
+</body></html>`);
   }
 
-  /**
-   * Close the server
-   */
+  /** Close the HTTP server. Safe to call multiple times. */
   close(): void {
     if (this.server) {
       this.server.close();

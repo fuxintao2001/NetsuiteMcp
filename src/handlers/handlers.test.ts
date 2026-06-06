@@ -1,8 +1,6 @@
 import { registerToolHandlers } from './tools.js';
-import { registerResourceHandlers } from './resources.js';
-import { registerPromptHandlers } from './prompts.js';
 import { describe, it, expect, jest, beforeEach, afterEach } from '@jest/globals';
-import { ListToolsRequestSchema, CallToolRequestSchema, ListResourcesRequestSchema, ReadResourceRequestSchema, ListPromptsRequestSchema, GetPromptRequestSchema } from '@modelcontextprotocol/sdk/types.js';
+import { ListToolsRequestSchema, CallToolRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import fs from 'fs/promises';
 import path from 'path';
 
@@ -45,73 +43,6 @@ describe('MCP Handlers', () => {
     await fs.rm(testWorkspace, { recursive: true, force: true });
   });
 
-  describe('Resources Handler', () => {
-    it('should register and return resources list', async () => {
-      registerResourceHandlers(mockServer, testWorkspace);
-      const listHandler = toolHandlers.get(ListResourcesRequestSchema);
-      expect(listHandler).toBeDefined();
-
-      const result = await listHandler!();
-      expect(result.resources).toContainEqual(expect.objectContaining({
-        uri: 'memory://sql-cheat-sheet'
-      }));
-    });
-
-    it('should create default template if memory file does not exist', async () => {
-      registerResourceHandlers(mockServer, testWorkspace);
-      const readHandler = toolHandlers.get(ReadResourceRequestSchema);
-      expect(readHandler).toBeDefined();
-
-      const result = await readHandler!({ params: { uri: 'memory://sql-cheat-sheet' } });
-      expect(result.contents[0].text).toContain('# Gemini SuiteQL Memory & Lessons Learned');
-
-      // Verify file was written
-      const fileExists = await fs.stat(path.join(testWorkspace, '.gemini_sql_memory.md')).then(() => true).catch(() => false);
-      expect(fileExists).toBe(true);
-    });
-
-    it('should read existing memory file correctly', async () => {
-      const customContent = '# My Custom SQL Rules';
-      await fs.writeFile(path.join(testWorkspace, '.gemini_sql_memory.md'), customContent, 'utf-8');
-
-      registerResourceHandlers(mockServer, testWorkspace);
-      const readHandler = toolHandlers.get(ReadResourceRequestSchema);
-      const result = await readHandler!({ params: { uri: 'memory://sql-cheat-sheet' } });
-      expect(result.contents[0].text).toBe(customContent);
-    });
-  });
-
-  describe('Prompts Handler', () => {
-    it('should register and return available prompts list', async () => {
-      registerPromptHandlers(mockServer, testWorkspace);
-      const listHandler = toolHandlers.get(ListPromptsRequestSchema);
-      expect(listHandler).toBeDefined();
-
-      const result = await listHandler!();
-      expect(result.prompts).toContainEqual(expect.objectContaining({
-        name: 'netsuite-sql-expert'
-      }));
-    });
-
-    it('should resolve prompt with dynamic memory content', async () => {
-      const customContent = 'Rule X: SELECT *';
-      await fs.writeFile(path.join(testWorkspace, '.gemini_sql_memory.md'), customContent, 'utf-8');
-
-      registerPromptHandlers(mockServer, testWorkspace);
-      const getHandler = toolHandlers.get(GetPromptRequestSchema);
-      
-      const result = await getHandler!({
-        params: {
-          name: 'netsuite-sql-expert',
-          arguments: { task: 'Fetch accounts' }
-        }
-      });
-
-      expect(result.messages[0].content.text).toContain('Fetch accounts');
-      expect(result.messages[1].content.resource.text).toBe(customContent);
-    });
-  });
-
   describe('Tools Handler', () => {
     let authenticateCallback: any;
     let logoutCallback: any;
@@ -141,11 +72,9 @@ describe('MCP Handlers', () => {
       expect(listHandler).toBeDefined();
 
       const result = await listHandler!();
-      // Authenticated list includes fetchTools + our custom handlers
       const names = result.tools.map((t: any) => t.name);
       expect(names).toContain('ns_getRecord');
       expect(names).toContain('netsuite_get_record_link');
-      expect(names).toContain('netsuite_save_sql_error');
       expect(names).toContain('netsuite_run_parallel_queries');
     });
 
@@ -159,29 +88,6 @@ describe('MCP Handlers', () => {
       });
 
       expect(authenticateCallback).toHaveBeenCalledWith({ accountId: '123', clientId: '456' });
-    });
-
-    it('should append SuiteQL error to memory file on netsuite_save_sql_error call', async () => {
-      const callHandler = toolHandlers.get(CallToolRequestSchema);
-      await callHandler!({
-        params: {
-          name: 'netsuite_save_sql_error',
-          arguments: {
-            errorDescription: 'test error',
-            incorrectSql: 'SELECT x',
-            correctSql: 'SELECT y',
-            rule: 'Avoid x',
-            workspacePath: testWorkspace
-          }
-        }
-      });
-
-      const memoryFilePath = path.join(testWorkspace, '.gemini_sql_memory.md');
-      const content = await fs.readFile(memoryFilePath, 'utf-8');
-      expect(content).toContain('test error');
-      expect(content).toContain('SELECT x');
-      expect(content).toContain('SELECT y');
-      expect(content).toContain('Avoid x');
     });
 
     it('should run parallel queries using parallel worker pools', async () => {
@@ -224,22 +130,21 @@ describe('MCP Handlers', () => {
       expect(response.content[0].text).toContain('https://test-account.app.netsuite.com/app/common/entity/custjob.nl?id=100');
     });
 
-    it('should block write operations (create/update) in production environments', async () => {
-      mockOAuthManager.getAccountId.mockResolvedValue('123456'); // Production ID
+    it('should block write operations in production environments', async () => {
+      mockOAuthManager.getAccountId.mockResolvedValue('123456');
       const callHandler = toolHandlers.get(CallToolRequestSchema);
       
-      const response = await callHandler!({
+      // McpError is thrown and should propagate
+      await expect(callHandler!({
         params: {
           name: 'ns_createRecord',
           arguments: { recordType: 'customer', record: {} }
         }
-      });
-      expect(response.isError).toBe(true);
-      expect(response.content[0].text).toContain('Write operations are disabled to ensure data accuracy in production environments');
+      })).rejects.toThrow('Write operations are disabled in production environments');
     });
 
-    it('should allow write operations (create/update) in sandbox/test environments', async () => {
-      mockOAuthManager.getAccountId.mockResolvedValue('123456_SB1'); // Sandbox ID
+    it('should allow write operations in sandbox environments', async () => {
+      mockOAuthManager.getAccountId.mockResolvedValue('123456_SB1');
       mockMCPTools.executeTool.mockResolvedValue({ id: 200, type: 'customer' });
       const callHandler = toolHandlers.get(CallToolRequestSchema);
       
@@ -252,7 +157,7 @@ describe('MCP Handlers', () => {
       expect(response.content[0].text).toContain('🔗 **NetSuite UI Link (Current Environment):**');
     });
 
-    it('should filter out write tools in production and keep them in sandbox listing', async () => {
+    it('should filter out write tools in production listing', async () => {
       mockMCPTools.fetchTools.mockResolvedValue([
         { name: 'ns_getRecord', description: 'Get' },
         { name: 'ns_createRecord', description: 'Create' },
@@ -260,7 +165,7 @@ describe('MCP Handlers', () => {
       ]);
       const listHandler = toolHandlers.get(ListToolsRequestSchema);
       
-      // Test production listing (blocked tools filtered out)
+      // Production: write tools filtered out
       mockOAuthManager.getAccountId.mockResolvedValue('123456');
       const prodResult = await listHandler!();
       const prodNames = prodResult.tools.map((t: any) => t.name);
@@ -268,13 +173,27 @@ describe('MCP Handlers', () => {
       expect(prodNames).not.toContain('ns_createRecord');
       expect(prodNames).not.toContain('ns_updateRecord');
       
-      // Test sandbox listing (all tools included)
-      mockOAuthManager.getAccountId.mockResolvedValue('TSTDRV123456'); // Sandbox / Test Drive ID
+      // Sandbox: all tools included
+      mockOAuthManager.getAccountId.mockResolvedValue('TSTDRV123456');
       const sbResult = await listHandler!();
       const sbNames = sbResult.tools.map((t: any) => t.name);
       expect(sbNames).toContain('ns_getRecord');
       expect(sbNames).toContain('ns_createRecord');
       expect(sbNames).toContain('ns_updateRecord');
+    });
+
+    it('should require auth for parallel queries', async () => {
+      mockOAuthManager.hasValidSession.mockResolvedValue(false);
+      const callHandler = toolHandlers.get(CallToolRequestSchema);
+      
+      const response = await callHandler!({
+        params: {
+          name: 'netsuite_run_parallel_queries',
+          arguments: { queries: ['SELECT 1'] }
+        }
+      });
+      expect(response.isError).toBe(true);
+      expect(response.content[0].text).toContain('Not authenticated');
     });
   });
 });

@@ -2,7 +2,6 @@
 
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { OAuthManager } from './oauth/manager.js';
 import { NetSuiteMCPTools } from './mcp/tools.js';
 import { cacheService } from './utils/cache.js';
@@ -12,34 +11,50 @@ import http from 'http';
 import https from 'https';
 import axios from 'axios';
 
-// Configure Axios global agents for HTTP Keep-Alive connection pooling
-axios.defaults.httpAgent = new http.Agent({ keepAlive: true });
-axios.defaults.httpsAgent = new https.Agent({ keepAlive: true });
-
-// Import Handlers
-import { registerResourceHandlers } from './handlers/resources.js';
-import { registerPromptHandlers } from './handlers/prompts.js';
-import { registerToolHandlers } from './handlers/tools.js';
+// Import handlers
+import { registerToolHandlers, textResult } from './handlers/tools.js';
 import type { ToolHandlerDeps } from './handlers/tools.js';
 import { validateEnv } from './utils/envValidator.js';
 
-/** Helper to create a text content response matching MCP SDK's CallToolResult shape */
-function textResult(text: string, isError?: boolean): CallToolResult {
-  return { content: [{ type: 'text' as const, text }], ...(isError ? { isError } : {}) };
-}
+// ---------------------------------------------------------------------------
+// Global error handlers — LOG ONLY, NEVER EXIT
+//
+// For a stdio MCP server, killing the process on transient errors (network
+// timeouts, DNS failures, etc.) causes the MCP client to see a disconnect.
+// Instead we log the error and let the event loop continue.
+// ---------------------------------------------------------------------------
+process.on('uncaughtException', (error) => {
+  console.error('[MCP] uncaughtException:', error);
+});
 
+process.on('unhandledRejection', (reason) => {
+  console.error('[MCP] unhandledRejection:', reason);
+});
+
+// ---------------------------------------------------------------------------
+// Configure Axios connection pooling
+// ---------------------------------------------------------------------------
+axios.defaults.httpAgent = new http.Agent({ keepAlive: true });
+axios.defaults.httpsAgent = new https.Agent({ keepAlive: true });
+
+// ---------------------------------------------------------------------------
+// Project root
+// ---------------------------------------------------------------------------
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const projectRoot = dirname(__dirname); // Go up one level from dist/ or src/ to project root
+const projectRoot = dirname(__dirname);
 
+// ---------------------------------------------------------------------------
+// Server class
+// ---------------------------------------------------------------------------
 class NetSuiteMCPServer {
-  private oauthManager: OAuthManager;
-  private mcpTools: NetSuiteMCPTools;
-  private isAuthenticated: boolean;
-  private server: Server;
+  private readonly oauthManager: OAuthManager;
+  private readonly mcpTools: NetSuiteMCPTools;
+  private readonly server: Server;
+  private isAuthenticated = false;
 
   constructor() {
-    // --- Validate environment at startup with Zod ---
+    // Validate environment variables at startup
     const envConfig = validateEnv();
     const callbackPort = envConfig.OAUTH_CALLBACK_PORT;
 
@@ -50,37 +65,28 @@ class NetSuiteMCPServer {
       console.error('⚠️  NETSUITE_CLIENT_ID not set. User must provide clientId during authentication.');
     }
 
-    // Configure cache with project root instead of relying on process.cwd()
+    // Configure cache with stable project root
     cacheService.configure(projectRoot);
 
-    const sessionsPath = envConfig.NETSUITE_SESSION_PATH || (envConfig.NETSUITE_ACCOUNT_ID 
-      ? join(projectRoot, 'sessions', envConfig.NETSUITE_ACCOUNT_ID.toLowerCase()) 
-      : join(projectRoot, 'sessions'));
+    // Session storage path — scoped by account ID to prevent cross-environment pollution
+    const sessionsPath = envConfig.NETSUITE_SESSION_PATH
+      || (envConfig.NETSUITE_ACCOUNT_ID
+        ? join(projectRoot, 'sessions', envConfig.NETSUITE_ACCOUNT_ID.toLowerCase())
+        : join(projectRoot, 'sessions'));
 
-    this.oauthManager = new OAuthManager({
-      storagePath: sessionsPath,
-      callbackPort
-    });
-
+    this.oauthManager = new OAuthManager({ storagePath: sessionsPath, callbackPort });
     this.mcpTools = new NetSuiteMCPTools(this.oauthManager);
-    this.isAuthenticated = false;
 
-    this.server = new Server({
-      name: 'netsuite-mcp',
-      version: '1.0.0',
-    }, {
-      capabilities: {
-        tools: {},
-        resources: {},
-        prompts: {}
-      }
-    });
+    this.server = new Server(
+      { name: 'netsuite-mcp', version: '1.0.0' },
+      { capabilities: { tools: {} } }
+    );
   }
 
-  setupHandlers(): void {
-    registerResourceHandlers(this.server, projectRoot);
-    registerPromptHandlers(this.server, projectRoot);
-
+  /**
+   * Register all MCP protocol handlers.
+   */
+  private setupHandlers(): void {
     const deps: ToolHandlerDeps = {
       server: this.server,
       oauthManager: this.oauthManager,
@@ -95,12 +101,19 @@ class NetSuiteMCPServer {
     registerToolHandlers(deps);
   }
 
+  // -------------------------------------------------------------------------
+  // Authentication lifecycle
+  // -------------------------------------------------------------------------
+
   private async handleAuthentication(args: Record<string, unknown>) {
     const accountId = (args.accountId as string) || process.env.NETSUITE_ACCOUNT_ID;
     const clientId = (args.clientId as string) || process.env.NETSUITE_CLIENT_ID;
 
     if (!accountId || !clientId) {
-      return textResult('❌ Missing required credentials. Provide accountId and clientId, or set NETSUITE_ACCOUNT_ID and NETSUITE_CLIENT_ID environment variables.', true);
+      return textResult(
+        '❌ Missing required credentials. Provide accountId and clientId, or set NETSUITE_ACCOUNT_ID and NETSUITE_CLIENT_ID environment variables.',
+        true
+      );
     }
 
     try {
@@ -109,16 +122,11 @@ class NetSuiteMCPServer {
       this.isAuthenticated = true;
       await this.mcpTools.clearCache();
 
-      // Start proactive token refresh after successful authentication
+      // Start proactive token refresh
       this.oauthManager.startProactiveRefresh();
 
-      // Fetch custom record mappings and prefetch common metadata in parallel in background
-      this.mcpTools.fetchCustomRecordMappings()
-        .then(() => this.mcpTools.prefetchCommonMetadata())
-        .catch((err: unknown) => {
-          const message = err instanceof Error ? err.message : String(err);
-          console.error(`⚠️ Background prefetch failed: ${message}`);
-        });
+      // Background: fetch custom record mappings then prefetch common metadata
+      this.backgroundPrefetch();
 
       return textResult('✅ Successfully authenticated with NetSuite!');
     } catch (error: unknown) {
@@ -153,52 +161,55 @@ class NetSuiteMCPServer {
   private resolveCustomRecordRectype(recordType: string): number | null {
     if (!recordType) return null;
     const upperType = recordType.toUpperCase().trim();
-    if (this.mcpTools.customRecordMappings.has(upperType)) {
-      return this.mcpTools.customRecordMappings.get(upperType) as number;
-    }
-    return null;
+    return this.mcpTools.customRecordMappings.get(upperType) ?? null;
   }
+
+  // -------------------------------------------------------------------------
+  // Background prefetch (fully guarded — no exceptions escape)
+  // -------------------------------------------------------------------------
+
+  private backgroundPrefetch(): void {
+    (async () => {
+      try {
+        await this.mcpTools.fetchCustomRecordMappings();
+        await this.mcpTools.prefetchCommonMetadata();
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.error(`⚠️ Background prefetch failed: ${message}`);
+      }
+    })();
+  }
+
+  // -------------------------------------------------------------------------
+  // Server startup
+  // -------------------------------------------------------------------------
 
   async start(): Promise<void> {
     console.error('🚀 NetSuite MCP Server starting...');
+
+    // Check for existing authentication
     this.isAuthenticated = await this.oauthManager.hasValidSession();
 
-    // Register handlers BEFORE connecting to avoid a window where
-    // the server is connected but has no handlers (race condition)
+    // Register handlers BEFORE connecting (prevents race condition)
     this.setupHandlers();
 
+    // Connect stdio transport
     const transport = new StdioServerTransport();
     await this.server.connect(transport);
 
-    // Start proactive token refresh if already authenticated
+    // If already authenticated, start background tasks
     if (this.isAuthenticated) {
       this.oauthManager.startProactiveRefresh();
-
-      // Fetch custom record mappings and prefetch common metadata in parallel in background
-      this.mcpTools.fetchCustomRecordMappings()
-        .then(() => this.mcpTools.prefetchCommonMetadata())
-        .catch((err: unknown) => {
-          const message = err instanceof Error ? err.message : String(err);
-          console.error(`⚠️ Background prefetch failed: ${message}`);
-        });
+      this.backgroundPrefetch();
     }
 
     console.error('✅ NetSuite MCP Server ready!\n');
   }
 }
 
-// Handle uncaught errors — exit so the MCP client can detect the crash and auto-restart
-// (matching the behavior of the stable ac1e705 version)
-process.on('uncaughtException', (error) => {
-  console.error('💥 Uncaught Exception in NetSuite MCP Server:', error);
-  process.exit(1);
-});
-
-process.on('unhandledRejection', (reason, promise) => {
-  console.error('💥 Unhandled Rejection in NetSuite MCP Server at:', promise, 'reason:', reason);
-  process.exit(1);
-});
-
+// ---------------------------------------------------------------------------
+// Main
+// ---------------------------------------------------------------------------
 async function main(): Promise<void> {
   try {
     const server = new NetSuiteMCPServer();
