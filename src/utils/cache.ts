@@ -125,6 +125,16 @@ export class CacheService {
       console.error(`⚠️ Failed to clear L2 cache for ${accountId}: ${message}`);
     }
   }
+
+  /**
+   * Returns diagnostic statistics about the cache.
+   */
+  getStats(): { l1KeyCount: number; l2CacheDir: string } {
+    return {
+      l1KeyCount: this.memoryCache.keys().length,
+      l2CacheDir: path.join(this.projectRoot, '.cache')
+    };
+  }
 }
 
 // Export a singleton instance

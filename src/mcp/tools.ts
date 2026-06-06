@@ -93,10 +93,29 @@ export class NetSuiteMCPTools {
 
     console.error(`🔧 Executing tool: ${toolName}`);
 
-    const result = await this.jsonRpcCall<unknown>('tools/call', {
-      name: toolName,
-      arguments: parameters
-    });
+    let result: unknown;
+    try {
+      result = await this.jsonRpcCall<unknown>('tools/call', {
+        name: toolName,
+        arguments: parameters
+      });
+    } catch (error: unknown) {
+      // --- Self-healing: invalidate metadata cache for referenced tables on SuiteQL error ---
+      if (toolName === 'ns_runCustomSuiteQL' && accountId) {
+        const sqlQuery = (parameters.sqlQuery || parameters.query || '') as string;
+        const tableNames = extractTableNames(sqlQuery);
+        for (const table of tableNames) {
+          try {
+            await cacheService.delete(accountId, `ns_getSuiteQLMetadata_${table}`);
+            await cacheService.delete(accountId, `ns_getRecordTypeMetadata_${table}`);
+          } catch { /* cache cleanup is non-fatal */ }
+        }
+        if (tableNames.length > 0) {
+          console.error(`🩹 [Self-heal] Invalidated metadata cache for: ${tableNames.join(', ')}`);
+        }
+      }
+      throw error;
+    }
 
     if (result === undefined) {
       throw new Error(`Tool '${toolName}' returned no result`);
@@ -119,7 +138,6 @@ export class NetSuiteMCPTools {
       }
     }
 
-    // --- Self-healing cache invalidation on SuiteQL error is handled by the caller ---
     return finalResult;
   }
 
@@ -273,13 +291,28 @@ export class NetSuiteMCPTools {
     try {
       return await makeRequest(accessToken);
     } catch (error: unknown) {
-      // Single 401 retry: force-refresh token and try once more
-      const axiosErr = error as { response?: { status?: number } };
+      const axiosErr = error as { response?: { status?: number }; code?: string };
+
+      // --- 401 retry: force-refresh token and try once more ---
       if (axiosErr.response?.status === 401) {
         console.error('🔄 [401 Retry] Force-refreshing token and retrying...');
         accessToken = await this.oauthManager.forceRefreshToken();
         return await makeRequest(accessToken);
       }
+
+      // --- Transient error retry: network issues and rate limits ---
+      const transientCodes = new Set(['ECONNABORTED', 'ENOTFOUND', 'ETIMEDOUT', 'EAI_AGAIN', 'ECONNRESET', 'EPIPE']);
+      const retryableStatuses = new Set([429, 503]);
+      const isTransient = transientCodes.has(axiosErr.code || '')
+        || retryableStatuses.has(axiosErr.response?.status || 0);
+
+      if (isTransient) {
+        const reason = axiosErr.code || `HTTP ${axiosErr.response?.status}`;
+        console.error(`🔄 [Transient Retry] ${reason} — waiting 2s then retrying...`);
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        return await makeRequest(accessToken);
+      }
+
       throw error;
     }
   }

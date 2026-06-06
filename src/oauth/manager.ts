@@ -213,6 +213,39 @@ export class OAuthManager {
   }
 
   /**
+   * Get diagnostic info about the current session.
+   * Used by the netsuite_status tool.
+   */
+  async getSessionInfo(): Promise<{
+    authenticated: boolean;
+    accountId?: string;
+    clientId?: string;
+    tokenExpiresAt?: number;
+    tokenExpiresIn?: number;
+    refreshSchedulerActive: boolean;
+  }> {
+    const session = await this.storage.load();
+    const authenticated = !!(session?.authenticated && session?.tokens);
+
+    if (!authenticated || !session?.tokens) {
+      return { authenticated: false, refreshSchedulerActive: this.tokenRefreshScheduler.isRunning() };
+    }
+
+    const now = Date.now();
+    const expiresAt = session.tokens.expires_at;
+    const expiresInMs = expiresAt ? expiresAt - now : undefined;
+
+    return {
+      authenticated: true,
+      accountId: session.tokens.accountId,
+      clientId: session.tokens.clientId,
+      tokenExpiresAt: expiresAt,
+      tokenExpiresIn: expiresInMs ? Math.max(0, Math.round(expiresInMs / 1000)) : undefined,
+      refreshSchedulerActive: this.tokenRefreshScheduler.isRunning()
+    };
+  }
+
+  /**
    * Clear session (logout)
    */
   async clearSession(): Promise<void> {

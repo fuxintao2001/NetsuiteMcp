@@ -10,6 +10,7 @@ import { NetSuiteMCPTools } from '../mcp/tools.js';
 import { OAuthManager } from '../oauth/manager.js';
 import { generateNetSuiteUrl } from '../utils/netsuiteUrls.js';
 import { asyncJsonParse } from '../utils/json.js';
+import { cacheService } from '../utils/cache.js';
 
 // ---------------------------------------------------------------------------
 // Shared helper
@@ -114,6 +115,43 @@ async function handleRunParallelQueries(
   }, null, 2));
 }
 
+/**
+ * netsuite_status — Diagnostic tool
+ */
+async function handleStatus(
+  oauthManager: OAuthManager
+): Promise<ToolResponse> {
+  const sessionInfo = await oauthManager.getSessionInfo();
+  const cacheStats = cacheService.getStats();
+
+  const status: Record<string, unknown> = {
+    server: 'netsuite-mcp',
+    version: '1.0.0',
+    authenticated: sessionInfo.authenticated,
+    refreshSchedulerActive: sessionInfo.refreshSchedulerActive,
+    cache: cacheStats
+  };
+
+  if (sessionInfo.authenticated) {
+    status.accountId = sessionInfo.accountId;
+    status.clientId = sessionInfo.clientId ? `${sessionInfo.clientId.substring(0, 8)}...` : undefined;
+    status.tokenExpiresIn = sessionInfo.tokenExpiresIn !== undefined
+      ? `${sessionInfo.tokenExpiresIn}s`
+      : 'unknown';
+    status.tokenExpiresAt = sessionInfo.tokenExpiresAt
+      ? new Date(sessionInfo.tokenExpiresAt).toISOString()
+      : 'unknown';
+
+    const isSandbox = sessionInfo.accountId
+      ? (sessionInfo.accountId.toUpperCase().includes('_SB') || sessionInfo.accountId.toUpperCase().startsWith('TSTDRV'))
+      : false;
+    status.environment = isSandbox ? 'Sandbox/Test' : 'Production';
+    status.writeOperations = isSandbox ? 'enabled' : 'disabled';
+  }
+
+  return textResult(JSON.stringify(status, null, 2));
+}
+
 /** Append a NetSuite UI deep link to a record operation response. */
 async function appendRecordLink(
   responseText: string,
@@ -209,7 +247,13 @@ const PARALLEL_QUERIES_TOOL = {
   }
 };
 
-const LOCAL_TOOLS = [RECORD_LINK_TOOL, REFRESH_CACHE_TOOL, LOGOUT_TOOL, PARALLEL_QUERIES_TOOL];
+const STATUS_TOOL = {
+  name: 'netsuite_status',
+  description: 'Show diagnostic information: authentication state, token expiry, account details, cache statistics, and environment type.',
+  inputSchema: { type: 'object' as const, properties: {} }
+};
+
+const LOCAL_TOOLS = [RECORD_LINK_TOOL, REFRESH_CACHE_TOOL, LOGOUT_TOOL, PARALLEL_QUERIES_TOOL, STATUS_TOOL];
 
 // ---------------------------------------------------------------------------
 // Registration
@@ -283,6 +327,9 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
       }
       if (name === 'netsuite_run_parallel_queries') {
         return await handleRunParallelQueries(safeArgs, mcpTools);
+      }
+      if (name === 'netsuite_status') {
+        return await handleStatus(oauthManager);
       }
 
       // --- Block write operations in production ---

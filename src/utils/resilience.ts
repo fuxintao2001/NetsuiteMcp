@@ -58,6 +58,11 @@ export class TokenRefreshScheduler {
     }
   }
 
+  /** Check if the scheduler is currently running. */
+  isRunning(): boolean {
+    return this.intervalId !== null;
+  }
+
   /**
    * Single tick: check session validity and refresh token if needed.
    * ALL exceptions are caught here — nothing escapes to global scope.
