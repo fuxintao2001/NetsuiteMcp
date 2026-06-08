@@ -115,45 +115,45 @@ interface ToolHandlerDeps {
 
 ## 🧠 AI Agent Operating Procedures (SOP)
 
-### 1. NetSuite SuiteQL 编写规范
+### 1. NetSuite SuiteQL Rules
 
-调用 SQL 相关工具前，必须严格遵守以下规则：
+Before executing SQL queries, you must strictly follow these rules:
 
-#### 基础规则
-- 禁止使用 `SELECT *`，必须明确列出所需字段
-- 所有查询必须包含分页限制：`FETCH FIRST 100 ROWS ONLY`（或使用 `WHERE ROWNUM <= N`）
-- 表名、字段名区分大小写，必须与 NetSuite Schema 完全一致
-- **查询前必须调用 `ns_getSuiteQLMetadata` 验证表结构**，绝不猜测字段名
+#### Basic Rules
+- Do NOT use `SELECT *`; you must explicitly list all required fields.
+- All queries MUST include a pagination limit: `FETCH FIRST 100 ROWS ONLY` (or use `WHERE ROWNUM <= N`).
+- Table and field names are case-sensitive and must match the NetSuite Schema exactly.
+- **You MUST call `ns_getSuiteQLMetadata` to verify the table schema before querying.** Never guess field names.
 
-#### 语法规范（SuiteQL 基于 Oracle SQL 语法子集）
-- **JOIN**：显式使用 `INNER JOIN` / `LEFT JOIN`，禁止隐式逗号 JOIN
-- **空值处理**：优先使用 `NVL(field, default)`；`COALESCE` 也受支持但不可与 Oracle 语法混用
-- **日期传参**：必须使用 `TO_DATE('2024-01-01', 'YYYY-MM-DD')`，禁止直接使用日期字面量
-- **字符串拼接**：使用 `||` 运算符，不支持 `+` 拼接
-- 禁止使用 MySQL / PostgreSQL 特有语法（如 `LIMIT`、`ILIKE`、`::` 类型转换）
-- 同一查询中不可混用 SQL-92 语法和 Oracle 专有语法
-- **不支持 `WITH` (CTE) 子句**，需改用子查询
-- **不支持方括号 `[]`**
-- 单个 `IN` 子句最多 1000 个参数
+#### Syntax Rules (SuiteQL is based on a subset of Oracle SQL syntax)
+- **JOIN:** Explicitly use `INNER JOIN` / `LEFT JOIN`; implicit comma joins are prohibited.
+- **Null Value Handling:** Prefer `NVL(field, default)`. `COALESCE` is supported but do not mix Oracle syntax.
+- **Date Parameters:** You MUST use `TO_DATE('2024-01-01', 'YYYY-MM-DD')`; direct date string literals are prohibited.
+- **String Concatenation:** Use the `||` operator; `+` concatenation is not supported.
+- Do NOT use MySQL / PostgreSQL specific syntax (e.g., `LIMIT`, `ILIKE`, `::` type casting).
+- Do NOT mix SQL-92 syntax and Oracle-proprietary syntax in a single query.
+- **`WITH` (CTE) clauses are NOT supported.** Use subqueries instead.
+- **`Square brackets []` are NOT supported.**
+- A single `IN` clause can contain a maximum of 1000 parameters.
 
-#### 内置函数
-- 使用 `BUILTIN.DF(field_name)` 获取字段的显示值（避免复杂 JOIN）
-- 使用 `BUILTIN.CONSOLIDATE` 进行币种转换
-- 所有内置函数必须以 `BUILTIN.` 前缀调用
+#### Built-in Functions
+- Use `BUILTIN.DF(field_name)` to get the display value of a field (avoid complex JOINs).
+- Use `BUILTIN.CONSOLIDATE` for currency conversion.
+- All built-in functions must be prefixed with `BUILTIN.`.
 
-#### 常见字段约定
-- 主键字段使用 `id`（而非 `internalid`）
-- 金额字段注意 `transamount` / `foreignamount` 区别（本币/外币）
-- 状态字段通常为编码值，需 `BUILTIN.DF(status)` 获取显示名称
-- 只有在元数据中标记为 `x-n:joinable: true` 的字段才允许用于 JOIN
+#### Common Field Conventions
+- Use `id` for primary keys (do NOT use `internalid`).
+- Note the difference between transaction amounts: `transamount` (local currency) vs. `foreignamount` (foreign currency).
+- Status fields are usually encoded; use `BUILTIN.DF(status)` to get the display name.
+- Only fields marked as `x-n:joinable: true` in the metadata are allowed in JOIN clauses.
 
-#### 禁止事项
-- 禁止硬编码任何环境相关 ID（Sandbox 与 Production 内部 ID 不同）
-- 禁止在子查询中省略别名
-- 禁止使用 `CREATE VIEW`
+#### Prohibited Actions
+- Do NOT hardcode any environment-specific IDs (internal IDs differ between Sandbox and Production).
+- Do NOT omit aliases in subqueries.
+- Do NOT use `CREATE VIEW`.
 
 > [!IMPORTANT]
-> **🚨 并行查询规则：** 如需执行两个或以上 SuiteQL 查询，**必须**使用 `netsuite_run_parallel_queries` 并发执行，禁止连续调用 `ns_runCustomSuiteQL`（除非后续查询依赖前一个查询的输出）。
+> **🚨 Parallel Query Rule:** If you need to execute two or more independent SuiteQL queries, you **MUST** run them concurrently using `netsuite_run_parallel_queries`. **Directly calling `ns_runCustomSuiteQL` sequentially is strictly prohibited** unless a subsequent query depends on the output of a previous one.
 
 ---
 
@@ -187,7 +187,6 @@ interface ToolHandlerDeps {
 - **Transient Failures:** On `401 Unauthorized`, tools auto-retry once after force-refreshing the access token.
 
 ---
-
 ## 🛠️ MCP Tools Reference
 
 ### Local Tools (`netsuite_` prefix)
