@@ -131,3 +131,84 @@ When querying `transaction` and `transactionline`, always filter by `mainline` t
 -- Querying only transaction header details
 SELECT id, tranid FROM transaction WHERE mainline = 'T' AND type = 'SalesOrd'
 ```
+
+---
+
+## 7. Script Execution Log Queries (ScriptNote)
+
+NetSuite script execution logs are stored in the `ScriptNote` table. This is the primary way to query script logs via SuiteQL.
+
+### Basic Log Query
+```sql
+SELECT 
+    ScriptNote.date,
+    ScriptNote.type,
+    ScriptNote.title AS log_title,
+    ScriptNote.detail
+FROM ScriptNote
+ORDER BY ScriptNote.date DESC
+FETCH FIRST 100 ROWS ONLY
+```
+
+### Query Logs with Script Name (JOIN Script)
+```sql
+SELECT 
+    ScriptNote.date,
+    ScriptNote.type,
+    ScriptNote.title AS log_title,
+    ScriptNote.detail,
+    Script.name AS script_name
+FROM ScriptNote
+INNER JOIN Script ON ScriptNote.scriptType = Script.id
+ORDER BY ScriptNote.date DESC
+FETCH FIRST 100 ROWS ONLY
+```
+
+### Query Logs with Deployment Info (JOIN ScriptDeployment)
+```sql
+SELECT 
+    log.date,
+    log.type,
+    scriptDeployment.title AS deployment_title,
+    log.title AS log_title,
+    log.detail,
+    scriptDeployment.scriptid AS deployment_id
+FROM ScriptNote AS log
+INNER JOIN scriptDeployment ON log.scriptType = scriptDeployment.script
+ORDER BY log.date DESC
+FETCH FIRST 100 ROWS ONLY
+```
+
+### Filter by Script ID
+```sql
+SELECT 
+    ScriptNote.date,
+    ScriptNote.type,
+    ScriptNote.title AS log_title,
+    ScriptNote.detail
+FROM ScriptNote
+INNER JOIN Script ON ScriptNote.scriptType = Script.id
+WHERE Script.scriptid = 'customscript_my_script'
+ORDER BY ScriptNote.date DESC
+FETCH FIRST 50 ROWS ONLY
+```
+
+### Filter by Log Type (ERROR / DEBUG / AUDIT / EMERGENCY)
+```sql
+SELECT 
+    ScriptNote.date,
+    ScriptNote.title AS log_title,
+    ScriptNote.detail,
+    Script.name AS script_name
+FROM ScriptNote
+INNER JOIN Script ON ScriptNote.scriptType = Script.id
+WHERE ScriptNote.type = 'ERROR'
+ORDER BY ScriptNote.date DESC
+FETCH FIRST 50 ROWS ONLY
+```
+
+### ⚠️ Important Notes
+- **Log Retention**: Script logs are retained for approximately **30 days** and are subject to storage limits.
+- **Permissions**: Administrator role or equivalent permissions are required to query `ScriptNote`.
+- **Performance**: Always include `FETCH FIRST N ROWS ONLY` to avoid pulling excessive log data.
+- **Long-term Storage**: If you need logs beyond 30 days, consider writing to custom records in your SuiteScript.

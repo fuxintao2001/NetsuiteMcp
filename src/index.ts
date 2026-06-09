@@ -13,6 +13,7 @@ import axios from 'axios';
 
 // Import handlers
 import { registerToolHandlers, textResult } from './handlers/tools.js';
+import { registerResourceHandlers } from './handlers/resources.js';
 import type { ToolHandlerDeps } from './handlers/tools.js';
 import { validateEnv } from './utils/envValidator.js';
 
@@ -79,7 +80,7 @@ class NetSuiteMCPServer {
 
     this.server = new Server(
       { name: 'netsuite-mcp', version: '1.0.0' },
-      { capabilities: { tools: {} } }
+      { capabilities: { tools: {}, resources: {} } }
     );
   }
 
@@ -99,6 +100,7 @@ class NetSuiteMCPServer {
     };
 
     registerToolHandlers(deps);
+    registerResourceHandlers(this.server, projectRoot);
   }
 
   // -------------------------------------------------------------------------

@@ -14,6 +14,7 @@ This repository contains the source code for the **NetSuite MCP Server** (`@suit
 - **Caching:** Dual-layer cache service:
   - **L1 Cache:** In-memory (`node-cache` with a default TTL of 1 hour).
   - **L2 Cache:** File system-backed persistent cache under `.cache/`.
+- **Capabilities:** Exposes both MCP Tools (`ns_` and `netsuite_` prefixes) and MCP Resources (e.g. SuiteQL guide).
 
 ---
 
@@ -24,6 +25,7 @@ src/
 ├── index.ts                   # Server bootstrap, handler wiring, and Zod env validation
 ├── handlers/
 │   ├── tools.ts               # MCP tool registration + local tool handlers
+│   ├── resources.ts           # MCP resource registration + local resource handlers
 │   └── handlers.test.ts       # Test suite for tool handlers
 ├── mcp/
 │   ├── tools.ts               # NetSuite REST API client (JSON-RPC 2.0)
@@ -118,7 +120,8 @@ interface ToolHandlerDeps {
 ### 1. NetSuite SuiteQL Rules
 
 
-- **Syntax Reference:** For detailed SuiteQL syntax specifications, Oracle SQL function usages, NetSuite built-in functions, and common query patterns, always refer to the local [SUITEQL_GUIDE.md](file://./SUITEQL_GUIDE.md) in the workspace root.
+- **Syntax Reference:** For detailed SuiteQL syntax specifications, Oracle SQL function usages, NetSuite built-in functions, and common query patterns, always refer to the local [SUITEQL_GUIDE.md](file://./SUITEQL_GUIDE.md) in the workspace root, or retrieve the guide directly via the MCP Resource `netsuite://guides/suiteql`.
+- **Script Execution Logs:** You can query script execution logs from the `ScriptNote` table (see Section 7 of `SUITEQL_GUIDE.md` or the MCP Resource for patterns).
 Before executing SQL queries, you must strictly follow these rules:
 
 #### Basic Rules
@@ -214,3 +217,9 @@ Before executing SQL queries, you must strictly follow these rules:
 - **`ns_getNexusIds`**: Retrieve the list of tax nexuses.
 - **`ns_runCustomSuiteQL`**: Execute a custom SuiteQL query string.
 - **`ns_getSuiteQLMetadata`**: Retrieve schema/metadata for a SuiteQL table.
+
+---
+
+## 📂 MCP Resources Reference
+
+- **`netsuite://guides/suiteql`**: Access the complete SuiteQL syntax, Oracle SQL subset rules, and query reference guide (including ScriptNote log queries) directly via the MCP Resource.
