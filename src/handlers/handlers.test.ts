@@ -1,6 +1,12 @@
 import { registerToolHandlers } from './tools.js';
+import { registerResourceHandlers } from './resources.js';
 import { describe, it, expect, jest, beforeEach, afterEach } from '@jest/globals';
-import { ListToolsRequestSchema, CallToolRequestSchema } from '@modelcontextprotocol/sdk/types.js';
+import {
+  ListToolsRequestSchema,
+  CallToolRequestSchema,
+  ListResourcesRequestSchema,
+  ReadResourceRequestSchema,
+} from '@modelcontextprotocol/sdk/types.js';
 import fs from 'fs/promises';
 import path from 'path';
 
@@ -322,6 +328,46 @@ describe('MCP Handlers', () => {
       });
       expect(response.isError).toBe(true);
       expect(response.content[0].text).toContain('Not authenticated');
+    });
+  });
+
+  describe('Resources Handler', () => {
+    beforeEach(() => {
+      registerResourceHandlers(mockServer, testWorkspace);
+    });
+
+    it('should register resources and list them', async () => {
+      const listHandler = toolHandlers.get(ListResourcesRequestSchema);
+      expect(listHandler).toBeDefined();
+
+      const result = await listHandler!();
+      expect(result.resources).toHaveLength(1);
+      expect(result.resources[0].uri).toBe('netsuite://guides/suiteql');
+      expect(result.resources[0].mimeType).toBe('text/markdown');
+    });
+
+    it('should read the suiteql guide resource content', async () => {
+      const guidePath = path.join(testWorkspace, 'SUITEQL_GUIDE.md');
+      const testContent = '# Test SuiteQL Guide';
+      await fs.writeFile(guidePath, testContent, 'utf-8');
+
+      const readHandler = toolHandlers.get(ReadResourceRequestSchema);
+      expect(readHandler).toBeDefined();
+
+      const result = await readHandler!({
+        params: { uri: 'netsuite://guides/suiteql' }
+      });
+
+      expect(result.contents).toHaveLength(1);
+      expect(result.contents[0].uri).toBe('netsuite://guides/suiteql');
+      expect(result.contents[0].text).toBe(testContent);
+    });
+
+    it('should throw error for unknown resource uri', async () => {
+      const readHandler = toolHandlers.get(ReadResourceRequestSchema);
+      await expect(readHandler!({
+        params: { uri: 'netsuite://guides/unknown' }
+      })).rejects.toThrow('Resource not found: netsuite://guides/unknown');
     });
   });
 });
