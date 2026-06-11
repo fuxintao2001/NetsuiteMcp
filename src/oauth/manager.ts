@@ -5,7 +5,6 @@ import { CallbackServer } from './callbackServer.js';
 import { SessionStorage } from './sessionStorage.js';
 import type { TokenData } from './sessionStorage.js';
 import { exchangeCodeForTokens, refreshAccessToken, shouldRefreshToken, TokenRefreshError } from './tokenExchange.js';
-import { TokenRefreshScheduler } from '../utils/resilience.js';
 import { openBrowser } from '../utils/browserLauncher.js';
 
 interface OAuthManagerConfig {
@@ -26,7 +25,6 @@ export class OAuthManager {
   private callbackPort: number;
   private storage: SessionStorage;
   private callbackServer: CallbackServer;
-  private tokenRefreshScheduler: TokenRefreshScheduler;
   private refreshPromise: Promise<string> | null = null;
   private refreshingToken: string | null = null;
 
@@ -34,7 +32,6 @@ export class OAuthManager {
     this.callbackPort = config.callbackPort || 8080;
     this.storage = new SessionStorage(config.storagePath || './sessions');
     this.callbackServer = new CallbackServer(this.callbackPort);
-    this.tokenRefreshScheduler = new TokenRefreshScheduler(this);
   }
 
   /**
@@ -246,7 +243,7 @@ export class OAuthManager {
     const authenticated = !!(session?.authenticated && session?.tokens);
 
     if (!authenticated || !session?.tokens) {
-      return { authenticated: false, refreshSchedulerActive: this.tokenRefreshScheduler.isRunning() };
+      return { authenticated: false, refreshSchedulerActive: false };
     }
 
     const now = Date.now();
@@ -259,7 +256,7 @@ export class OAuthManager {
       clientId: session.tokens.clientId,
       tokenExpiresAt: expiresAt,
       tokenExpiresIn: expiresInMs ? Math.max(0, Math.round(expiresInMs / 1000)) : undefined,
-      refreshSchedulerActive: this.tokenRefreshScheduler.isRunning()
+      refreshSchedulerActive: false
     };
   }
 
@@ -267,21 +264,6 @@ export class OAuthManager {
    * Clear session (logout)
    */
   async clearSession(): Promise<void> {
-    this.stopProactiveRefresh();
     await this.storage.clear();
-  }
-
-  /**
-   * Start the proactive token refresh scheduler
-   */
-  startProactiveRefresh(): void {
-    this.tokenRefreshScheduler.start();
-  }
-
-  /**
-   * Stop the proactive token refresh scheduler
-   */
-  stopProactiveRefresh(): void {
-    this.tokenRefreshScheduler.stop();
   }
 }

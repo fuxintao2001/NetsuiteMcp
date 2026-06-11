@@ -124,9 +124,6 @@ class NetSuiteMCPServer {
       this.isAuthenticated = true;
       await this.mcpTools.clearCache();
 
-      // Start proactive token refresh
-      this.oauthManager.startProactiveRefresh();
-
       // Background: fetch custom record mappings then prefetch common metadata
       this.backgroundPrefetch();
 
@@ -201,7 +198,6 @@ class NetSuiteMCPServer {
 
     // If already authenticated, start background tasks
     if (this.isAuthenticated) {
-      this.oauthManager.startProactiveRefresh();
       this.backgroundPrefetch();
     }
 
