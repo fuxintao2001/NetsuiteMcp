@@ -15,6 +15,7 @@ describe('OAuthManager - Concurrent Refresh', () => {
   });
 
   afterEach(async () => {
+    manager.stopProactiveRefresh();
     await fs.rm(testStoragePath, { recursive: true, force: true });
   });
 

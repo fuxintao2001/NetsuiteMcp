@@ -24,12 +24,28 @@ import { validateEnv } from './utils/envValidator.js';
 // timeouts, DNS failures, etc.) causes the MCP client to see a disconnect.
 // Instead we log the error and let the event loop continue.
 // ---------------------------------------------------------------------------
-process.on('uncaughtException', (error) => {
+process.on('uncaughtException', (error: any) => {
+  // If the pipe is broken, exit immediately to prevent logging loop
+  if (error?.code === 'EPIPE' || error?.code === 'ECONNRESET') {
+    process.exit(0);
+  }
   console.error('[MCP] uncaughtException:', error);
 });
 
-process.on('unhandledRejection', (reason) => {
+process.on('unhandledRejection', (reason: any) => {
+  // If the reason is a broken pipe, exit immediately
+  if (reason?.code === 'EPIPE' || reason?.code === 'ECONNRESET') {
+    process.exit(0);
+  }
   console.error('[MCP] unhandledRejection:', reason);
+});
+
+// Ensure the process exits when parent closes stdin
+process.stdin.on('close', () => {
+  process.exit(0);
+});
+process.stdin.on('end', () => {
+  process.exit(0);
 });
 
 // ---------------------------------------------------------------------------
@@ -124,6 +140,9 @@ class NetSuiteMCPServer {
       this.isAuthenticated = true;
       await this.mcpTools.clearCache();
 
+      // Start proactive token refresh
+      this.oauthManager.startProactiveRefresh();
+
       // Background: fetch custom record mappings then prefetch common metadata
       this.backgroundPrefetch();
 
@@ -189,6 +208,19 @@ class NetSuiteMCPServer {
     // Check for existing authentication
     this.isAuthenticated = await this.oauthManager.hasValidSession();
 
+    // If session exists but token expired, try auto-recovery via refresh token
+    if (!this.isAuthenticated) {
+      try {
+        await this.oauthManager.tryAutoRecover();
+        this.isAuthenticated = await this.oauthManager.hasValidSession();
+        if (this.isAuthenticated) {
+          console.error('🔄 Session auto-recovered from expired token');
+        }
+      } catch {
+        // Auto-recovery failed (e.g. refresh token also expired) — user must manually authenticate
+      }
+    }
+
     // Register handlers BEFORE connecting (prevents race condition)
     this.setupHandlers();
 
@@ -198,6 +230,7 @@ class NetSuiteMCPServer {
 
     // If already authenticated, start background tasks
     if (this.isAuthenticated) {
+      this.oauthManager.startProactiveRefresh();
       this.backgroundPrefetch();
     }
 

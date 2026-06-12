@@ -2,6 +2,7 @@ import axios from 'axios';
 import { cacheService } from '../utils/cache.js';
 import { OAuthManager } from '../oauth/manager.js';
 import { asyncJsonParse } from '../utils/json.js';
+import { TokenRefreshError } from '../oauth/tokenExchange.js';
 
 /**
  * Extracts table names from a SQL query string (used for cache invalidation).
@@ -261,7 +262,6 @@ export class NetSuiteMCPTools {
    * Includes single 401 auto-retry after force-refreshing the token.
    */
   private async jsonRpcCall<T>(method: string, params?: Record<string, unknown>): Promise<T> {
-    let accessToken = await this.oauthManager.ensureValidToken();
     const endpoint = await this.getEndpoint();
 
     const body: Record<string, unknown> = {
@@ -288,7 +288,9 @@ export class NetSuiteMCPTools {
       return response.data?.result as T;
     };
 
+    let accessToken = '';
     try {
+      accessToken = await this.oauthManager.ensureValidToken();
       return await makeRequest(accessToken);
     } catch (error: unknown) {
       const axiosErr = error as { response?: { status?: number }; code?: string };
@@ -303,14 +305,17 @@ export class NetSuiteMCPTools {
       // --- Transient error retry: network issues and rate limits ---
       const transientCodes = new Set(['ECONNABORTED', 'ENOTFOUND', 'ETIMEDOUT', 'EAI_AGAIN', 'ECONNRESET', 'EPIPE']);
       const retryableStatuses = new Set([429, 503]);
-      const isTransient = transientCodes.has(axiosErr.code || '')
+      const isTokenRefreshTransient = error instanceof TokenRefreshError && error.recoverable;
+      const isTransient = isTokenRefreshTransient
+        || transientCodes.has(axiosErr.code || '')
         || retryableStatuses.has(axiosErr.response?.status || 0);
 
       if (isTransient) {
-        const reason = axiosErr.code || `HTTP ${axiosErr.response?.status}`;
+        const reason = isTokenRefreshTransient ? 'token refresh timeout/network error' : (axiosErr.code || `HTTP ${axiosErr.response?.status}`);
         console.error(`🔄 [Transient Retry] ${reason} — waiting 2s then retrying...`);
         await new Promise(resolve => setTimeout(resolve, 2000));
-        return await makeRequest(accessToken);
+        const nextToken = await this.oauthManager.ensureValidToken();
+        return await makeRequest(nextToken);
       }
 
       throw error;

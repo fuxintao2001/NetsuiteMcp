@@ -5,6 +5,7 @@ import { CallbackServer } from './callbackServer.js';
 import { SessionStorage } from './sessionStorage.js';
 import type { TokenData } from './sessionStorage.js';
 import { exchangeCodeForTokens, refreshAccessToken, shouldRefreshToken, TokenRefreshError } from './tokenExchange.js';
+import { TokenRefreshScheduler } from '../utils/resilience.js';
 import { openBrowser } from '../utils/browserLauncher.js';
 
 interface OAuthManagerConfig {
@@ -25,6 +26,7 @@ export class OAuthManager {
   private callbackPort: number;
   private storage: SessionStorage;
   private callbackServer: CallbackServer;
+  private tokenRefreshScheduler: TokenRefreshScheduler;
   private refreshPromise: Promise<string> | null = null;
   private refreshingToken: string | null = null;
 
@@ -32,6 +34,7 @@ export class OAuthManager {
     this.callbackPort = config.callbackPort || 8080;
     this.storage = new SessionStorage(config.storagePath || './sessions');
     this.callbackServer = new CallbackServer(this.callbackPort);
+    this.tokenRefreshScheduler = new TokenRefreshScheduler(this);
   }
 
   /**
@@ -150,8 +153,8 @@ export class OAuthManager {
         return newTokens.access_token;
       } catch (error: unknown) {
         if (error instanceof TokenRefreshError && !error.recoverable) {
-          console.error('🔒 Refresh token expired — clearing invalid session');
-          await this.clearSession();
+          console.error('🔒 Refresh token expired — session requires re-authentication');
+          // Don't clear session — preserve config for potential re-auth
         }
         throw error;
       } finally {
@@ -177,13 +180,27 @@ export class OAuthManager {
       return this.refreshPromise;
     }
 
-    // Refresh if expiring in < 5 minutes
-    if (shouldRefreshToken(session.tokens)) {
-      console.error('⚠️  Token expiring soon, refreshing...');
+    // Refresh if expiring in < 5 minutes,
+    // OR if past halfway through the token's lifetime (to keep refresh token alive)
+    if (shouldRefreshToken(session.tokens) || this.shouldProactivelyRenew(session.tokens)) {
+      console.error('⚠️  Token expiring soon or proactive renewal triggered, refreshing...');
       return this.executeTokenRefresh(session, session.tokens.access_token);
     }
 
     return session.tokens.access_token;
+  }
+
+  /**
+   * Check if we should proactively refresh to keep the refresh token alive.
+   * Returns true when the access token is past halfway through its lifetime.
+   * This ensures refresh tokens get renewed frequently (~every 30 min for a
+   * 60-min access token) and never expire from disuse.
+   */
+  private shouldProactivelyRenew(tokens: TokenData): boolean {
+    const issuedAt = tokens.expires_at - tokens.expires_in * 1000;
+    const elapsed = Date.now() - issuedAt;
+    const halfLife = (tokens.expires_in * 1000) / 2;
+    return elapsed > halfLife;
   }
 
   /**
@@ -243,7 +260,7 @@ export class OAuthManager {
     const authenticated = !!(session?.authenticated && session?.tokens);
 
     if (!authenticated || !session?.tokens) {
-      return { authenticated: false, refreshSchedulerActive: false };
+      return { authenticated: false, refreshSchedulerActive: this.tokenRefreshScheduler.isRunning() };
     }
 
     const now = Date.now();
@@ -256,7 +273,7 @@ export class OAuthManager {
       clientId: session.tokens.clientId,
       tokenExpiresAt: expiresAt,
       tokenExpiresIn: expiresInMs ? Math.max(0, Math.round(expiresInMs / 1000)) : undefined,
-      refreshSchedulerActive: false
+      refreshSchedulerActive: this.tokenRefreshScheduler.isRunning()
     };
   }
 
@@ -264,6 +281,40 @@ export class OAuthManager {
    * Clear session (logout)
    */
   async clearSession(): Promise<void> {
+    this.stopProactiveRefresh();
     await this.storage.clear();
+  }
+
+  /**
+   * Attempt to auto-recover an expired session using the refresh token.
+   * Called during server startup if a session file exists but token is expired.
+   * Silently fails if refresh token is also expired.
+   */
+  async tryAutoRecover(): Promise<void> {
+    const session = await this.storage.load();
+    if (!session?.tokens?.refresh_token) return;
+
+    console.error('🔄 Attempting auto-recovery with refresh token...');
+    const newTokens = await refreshAccessToken(session.tokens);
+    await this.storage.save({
+      ...session,
+      tokens: newTokens,
+      authenticated: true
+    });
+    console.error('✅ Auto-recovery successful');
+  }
+
+  /**
+   * Start the proactive token refresh scheduler
+   */
+  startProactiveRefresh(): void {
+    this.tokenRefreshScheduler.start();
+  }
+
+  /**
+   * Stop the proactive token refresh scheduler
+   */
+  stopProactiveRefresh(): void {
+    this.tokenRefreshScheduler.stop();
   }
 }
