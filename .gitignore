@@ -1,6 +1,9 @@
 # Dependencies
 node_modules/
 
+# Gemini/Antigravity project config (contains sensitive MCP credentials)
+.gemini/
+
 # Sessions (contains OAuth tokens)
 sessions/
 *.session.json

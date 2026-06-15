@@ -189,7 +189,7 @@ describe('MCP Handlers', () => {
       expect(sbNames).toContain('ns_updateRecord');
     });
 
-    it('should append parallel query warning to ns_runCustomSuiteQL description', async () => {
+    it('should append SuiteQL rules and parallel query warning to ns_runCustomSuiteQL description', async () => {
       mockMCPTools.fetchTools.mockResolvedValue([
         { name: 'ns_runCustomSuiteQL', description: 'Execute a custom SuiteQL query' }
       ]);
@@ -199,121 +199,24 @@ describe('MCP Handlers', () => {
       const customTool = result.tools.find((t: any) => t.name === 'ns_runCustomSuiteQL');
       expect(customTool).toBeDefined();
       expect(customTool.description).toContain('Execute a custom SuiteQL query');
+      expect(customTool.description).toContain('MANDATORY RULES');
+      expect(customTool.description).toContain('ns_getSuiteQLMetadata');
       expect(customTool.description).toContain('netsuite_run_parallel_queries');
+      expect(customTool.description).toContain('FETCH FIRST');
     });
 
-    it('should hide all tools if workspace account mismatch', async () => {
-      // Setup active workspace to target a different account
-      mockServer.listRoots.mockResolvedValue({
-        roots: [
-          { uri: `file://${testWorkspace}`, name: 'test' }
-        ]
-      });
-
-      // Write a project.json for a mismatching account
-      await fs.writeFile(
-        path.join(testWorkspace, 'project.json'),
-        JSON.stringify({ defaultAuthId: 'different-account-Adm-Sand' })
-      );
-
-      mockOAuthManager.getAccountId.mockResolvedValue('my-account');
-
+    it('should append metadata rules to ns_getSuiteQLMetadata description', async () => {
+      mockMCPTools.fetchTools.mockResolvedValue([
+        { name: 'ns_getSuiteQLMetadata', description: 'Get metadata for a SuiteQL table' }
+      ]);
       const listHandler = toolHandlers.get(ListToolsRequestSchema);
-      const result = await listHandler!();
-      const names = result.tools.map((t: any) => t.name);
-      expect(names).toContain('netsuite_authenticate');
-      expect(names).toContain('netsuite_logout');
-      expect(names).toContain('netsuite_status');
-      expect(names).not.toContain('ns_getRecord');
-    });
-
-    it('should show tools if workspace account matches', async () => {
-      // Setup active workspace to target the matching account
-      mockServer.listRoots.mockResolvedValue({
-        roots: [
-          { uri: `file://${testWorkspace}`, name: 'test' }
-        ]
-      });
-
-      // Write a project.json for the matching account
-      await fs.writeFile(
-        path.join(testWorkspace, 'project.json'),
-        JSON.stringify({ defaultAuthId: 'my-account-Adm-Sand' })
-      );
-
-      mockOAuthManager.getAccountId.mockResolvedValue('my-account');
-
-      const listHandler = toolHandlers.get(ListToolsRequestSchema);
-      const result = await listHandler!();
-      expect(result.tools.length).toBeGreaterThan(0);
-    });
-
-    it('should fail tool call if workspace account mismatch', async () => {
-      // Setup active workspace to target a different account
-      mockServer.listRoots.mockResolvedValue({
-        roots: [
-          { uri: `file://${testWorkspace}`, name: 'test' }
-        ]
-      });
-
-      // Write a project.json for a mismatching account
-      await fs.writeFile(
-        path.join(testWorkspace, 'project.json'),
-        JSON.stringify({ defaultAuthId: 'different-account-Adm-Sand' })
-      );
-
-      mockOAuthManager.getAccountId.mockResolvedValue('my-account');
-
-      const callHandler = toolHandlers.get(CallToolRequestSchema);
-      await expect(callHandler!({
-        params: {
-          name: 'ns_getRecord',
-          arguments: { recordType: 'customer', id: '100' }
-        }
-      })).rejects.toThrow('is disabled because the active workspace does not match the NetSuite account');
-    });
-
-    it('should bypass workspace matching check if workspace is netsuite-mcp-server-master', async () => {
-      // Setup active workspace to be netsuite-mcp-server-master
-      mockServer.listRoots.mockResolvedValue({
-        roots: [
-          { uri: 'file:///Users/fuxintao/WebstormProjects/netsuite-mcp-server-master', name: 'netsuite-mcp-server-master' }
-        ]
-      });
-
-      mockOAuthManager.getAccountId.mockResolvedValue('my-account');
-
-      const listHandler = toolHandlers.get(ListToolsRequestSchema);
-      const result = await listHandler!();
-      expect(result.tools.length).toBeGreaterThan(0);
-    });
-
-    it('should allow administrative tool calls even if workspace account mismatch', async () => {
-      // Setup active workspace to target a different account
-      mockServer.listRoots.mockResolvedValue({
-        roots: [
-          { uri: `file://${testWorkspace}`, name: 'test' }
-        ]
-      });
-
-      // Write a project.json for a mismatching account
-      await fs.writeFile(
-        path.join(testWorkspace, 'project.json'),
-        JSON.stringify({ defaultAuthId: 'different-account-Adm-Sand' })
-      );
-
-      mockOAuthManager.getAccountId.mockResolvedValue('my-account');
-
-      const callHandler = toolHandlers.get(CallToolRequestSchema);
       
-      // Call administrative tool - should not throw mismatch error
-      await callHandler!({
-        params: {
-          name: 'netsuite_status',
-          arguments: {}
-        }
-      });
-      expect(mockOAuthManager.hasValidSession).toHaveBeenCalled();
+      const result = await listHandler!();
+      const metadataTool = result.tools.find((t: any) => t.name === 'ns_getSuiteQLMetadata');
+      expect(metadataTool).toBeDefined();
+      expect(metadataTool.description).toContain('Get metadata for a SuiteQL table');
+      expect(metadataTool.description).toContain('ns_runCustomSuiteQL');
+      expect(metadataTool.description).toContain('case-sensitive');
     });
 
     it('should require auth for parallel queries', async () => {

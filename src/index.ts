@@ -7,6 +7,7 @@ import { NetSuiteMCPTools } from './mcp/tools.js';
 import { cacheService } from './utils/cache.js';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
+import { readFileSync } from 'fs';
 import http from 'http';
 import https from 'https';
 import axios from 'axios';
@@ -61,6 +62,10 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const projectRoot = dirname(__dirname);
 
+// Read version from package.json at startup
+const packageJson = JSON.parse(readFileSync(join(projectRoot, 'package.json'), 'utf-8')) as { version: string };
+const SERVER_VERSION = packageJson.version;
+
 // ---------------------------------------------------------------------------
 // Server class
 // ---------------------------------------------------------------------------
@@ -95,7 +100,7 @@ class NetSuiteMCPServer {
     this.mcpTools = new NetSuiteMCPTools(this.oauthManager);
 
     this.server = new Server(
-      { name: 'netsuite-mcp', version: '1.0.0' },
+      { name: 'netsuite-mcp', version: SERVER_VERSION },
       { capabilities: { tools: {}, resources: {} } }
     );
   }

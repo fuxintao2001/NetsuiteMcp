@@ -25,6 +25,7 @@ src/
 ├── index.ts                   # Server bootstrap, handler wiring, and Zod env validation
 ├── handlers/
 │   ├── tools.ts               # MCP tool registration + local tool handlers
+│   ├── toolSchemas.ts         # Tool schema definitions + description enhancement strings
 │   ├── resources.ts           # MCP resource registration + local resource handlers
 │   └── handlers.test.ts       # Test suite for tool handlers
 ├── mcp/
@@ -39,6 +40,7 @@ src/
 │   └── *.test.ts              # Unit tests for OAuth components
 └── utils/
     ├── cache.ts               # CacheService singleton (L1 + L2)
+    ├── environment.ts         # isSandboxAccount() + buildEnvSuffix() shared helpers
     ├── envValidator.ts        # Startup environment configuration schema (Zod validation)
     ├── resilience.ts          # TokenRefreshScheduler class
     ├── netsuiteUrls.ts        # NetSuite UI deep link URL generation
@@ -99,7 +101,7 @@ interface ToolHandlerDeps {
 
 ### 4. Write Operations Control
 > [!IMPORTANT]
-> Write operations (`ns_createRecord`, `ns_updateRecord`) are strictly disabled in **Production environments**. They are **fully enabled in Sandbox/Test environments** (account IDs containing `_SB` or starting with `TSTDRV`).
+> Write operations (`ns_createRecord`, `ns_updateRecord`) are strictly disabled in **Production environments**. They are **fully enabled in Sandbox/Test environments** (account IDs containing `_SB` or starting with `TSTDRV`). Environment detection is centralized in `src/utils/environment.ts` via `isSandboxAccount()`.
 
 ### 5. TypeScript & Naming Conventions
 - `tsconfig.json` enforces `"strict": true`. All code must be fully typed.
@@ -107,11 +109,15 @@ interface ToolHandlerDeps {
   - `ns_` prefix: NetSuite-proxied tools (routed to NetSuite REST API).
   - `netsuite_` prefix: Local tools (handled entirely within the MCP server).
 
-### 6. Workspace Physical Isolation & Environment Labeling
-- **Dynamic Suffixes:** Every tool description dynamically appends ` [Account: <accountId>, Env: <Sandbox/Production>]` during tool discovery (`list_tools`). This allows AI models to distinguish between production and sandbox environments easily.
-- **Automatic Workspace Isolation:** The server utilizes the MCP `listRoots` capability to automatically inspect open workspaces in the IDE.
-  - If a workspace contains a `project.json` (NetSuite SuiteCloud config), it extracts the project's target account ID.
-  - If the project's account ID does not match the server's account ID, the server **hides all tools** (returns `{ tools: [] }`) and **blocks tool execution** at runtime to prevent accidental cross-database/environment operations.
+### 6. Environment Isolation & Labeling
+- **Dynamic Suffixes:** Every tool description dynamically appends ` [Account: <accountId>, Env: <Sandbox/Production>]` during tool discovery (`list_tools`) via `buildEnvSuffix()` in `src/utils/environment.ts`.
+- **Configuration-Layer Isolation:** Each NetSuite workspace has a project-level `.gemini/settings.json` that only activates the corresponding MCP server instance. This replaces runtime workspace detection — the server no longer inspects IDE workspaces at runtime.
+
+### 7. Tool Description Enhancement
+- During `list_tools`, tool descriptions fetched from the NetSuite MCP API are dynamically enhanced with usage rules:
+  - `ns_runCustomSuiteQL` gets SuiteQL mandatory rules appended (defined in `SUITEQL_RULES_SUFFIX` in `src/handlers/toolSchemas.ts`).
+  - `ns_getSuiteQLMetadata` gets metadata usage hints appended (defined in `METADATA_RULES_SUFFIX`).
+- This ensures AI agents see critical rules at tool-discovery time, before writing any query.
 
 ---
 
@@ -172,7 +178,7 @@ Before executing SQL queries, you must strictly follow these rules:
 
 ### 3. Server Extensibility
 
-- **Adding Tools:** Add new local tools in `src/handlers/tools.ts`. Extract handler into a standalone `async function handleXxx()`.
+- **Adding Tools:** Add new tool schemas in `src/handlers/toolSchemas.ts`, then add the handler function in `src/handlers/tools.ts` as a standalone `async function handleXxx()`.
 - **Utilities:** Place reusable utilities in `src/utils/`.
 
 ---

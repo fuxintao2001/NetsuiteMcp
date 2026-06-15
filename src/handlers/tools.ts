@@ -11,9 +11,11 @@ import { OAuthManager } from '../oauth/manager.js';
 import { generateNetSuiteUrl } from '../utils/netsuiteUrls.js';
 import { asyncJsonParse } from '../utils/json.js';
 import { cacheService } from '../utils/cache.js';
-import { fileURLToPath } from 'url';
-import fs from 'fs/promises';
-import { join } from 'path';
+import { isSandboxAccount, buildEnvSuffix } from '../utils/environment.js';
+import {
+  AUTH_TOOL, LOGOUT_TOOL, LOCAL_TOOLS, STATUS_TOOL,
+  SUITEQL_RULES_SUFFIX, METADATA_RULES_SUFFIX
+} from './toolSchemas.js';
 
 // ---------------------------------------------------------------------------
 // Shared helper
@@ -25,93 +27,6 @@ export function textResult(text: string, isError?: boolean): CallToolResult {
 }
 
 type ToolResponse = CallToolResult;
-
-// ---------------------------------------------------------------------------
-// Workspace checking helpers for physical isolation
-// ---------------------------------------------------------------------------
-
-function matchesAccount(defaultAuthId: string, serverAccountId: string): boolean {
-  if (!defaultAuthId || !serverAccountId) return false;
-  const normalize = (str: string) => str.toUpperCase().replace(/[-_]/g, '');
-  const normalizedServer = normalize(serverAccountId);
-  const normalizedAuth = normalize(defaultAuthId);
-
-  if (!normalizedAuth.startsWith(normalizedServer)) {
-    return false;
-  }
-
-  const serverIsSandbox = serverAccountId.toUpperCase().includes('_SB') ||
-                          serverAccountId.toUpperCase().includes('-SB') ||
-                          serverAccountId.toUpperCase().startsWith('TSTDRV');
-
-  const projectIsSandbox = defaultAuthId.toUpperCase().includes('_SB') ||
-                           defaultAuthId.toUpperCase().includes('-SB') ||
-                           defaultAuthId.toUpperCase().startsWith('TSTDRV');
-
-  if (!serverIsSandbox && projectIsSandbox) {
-    return false;
-  }
-
-  return true;
-}
-
-async function checkWorkspaceMatch(server: Server, oauthManager: OAuthManager): Promise<boolean> {
-  const accountId = (await oauthManager.getAccountId()) || process.env.NETSUITE_ACCOUNT_ID;
-  if (!accountId) return true; // Can't determine account ID, allow by default
-
-  try {
-    const rootsResult = await server.listRoots();
-    if (!rootsResult || !Array.isArray(rootsResult.roots) || rootsResult.roots.length === 0) {
-      return true; // No roots returned, fallback to allow
-    }
-
-    let hasNetSuiteWorkspace = false;
-    let hasMatchingWorkspace = false;
-    let isMasterWorkspace = false;
-
-    for (const root of rootsResult.roots) {
-      try {
-        if (root.uri.startsWith('file://')) {
-          const workspacePath = fileURLToPath(root.uri);
-
-          if (workspacePath.toLowerCase().endsWith('netsuite-mcp-server-master') || root.name?.toLowerCase() === 'netsuite-mcp-server-master') {
-            isMasterWorkspace = true;
-            break;
-          }
-
-          const projectJsonPath = join(workspacePath, 'project.json');
-          const projectJsonContent = await fs.readFile(projectJsonPath, 'utf-8');
-          const projectConfig = JSON.parse(projectJsonContent);
-          const defaultAuthId = projectConfig.defaultAuthId;
-
-          if (defaultAuthId) {
-            hasNetSuiteWorkspace = true;
-            if (matchesAccount(defaultAuthId, accountId)) {
-              hasMatchingWorkspace = true;
-              break;
-            }
-          }
-        }
-      } catch {
-        // Ignore file read/parse errors for this root
-      }
-    }
-
-    if (isMasterWorkspace) {
-      return true;
-    }
-
-    // If there are NetSuite workspaces open, we require at least one matching workspace.
-    // If no NetSuite workspaces are open, we allow it.
-    if (hasNetSuiteWorkspace && !hasMatchingWorkspace) {
-      return false;
-    }
-  } catch {
-    // If listRoots fails or is not supported by client, fallback to allow
-  }
-
-  return true;
-}
 
 // ---------------------------------------------------------------------------
 // Dependency injection interface
@@ -232,11 +147,9 @@ async function handleStatus(
       ? new Date(sessionInfo.tokenExpiresAt).toISOString()
       : 'unknown';
 
-    const isSandbox = sessionInfo.accountId
-      ? (sessionInfo.accountId.toUpperCase().includes('_SB') || sessionInfo.accountId.toUpperCase().includes('-SB') || sessionInfo.accountId.toUpperCase().startsWith('TSTDRV'))
-      : false;
-    status.environment = isSandbox ? 'Sandbox/Test' : 'Production';
-    status.writeOperations = isSandbox ? 'enabled' : 'disabled';
+    const sandbox = sessionInfo.accountId ? isSandboxAccount(sessionInfo.accountId) : false;
+    status.environment = sandbox ? 'Sandbox/Test' : 'Production';
+    status.writeOperations = sandbox ? 'enabled' : 'disabled';
   }
 
   return textResult(JSON.stringify(status, null, 2));
@@ -272,78 +185,27 @@ async function appendRecordLink(
 }
 
 // ---------------------------------------------------------------------------
-// Tool definitions (schemas)
+// Tool description enhancement helpers
 // ---------------------------------------------------------------------------
 
-const AUTH_TOOL = {
-  name: 'netsuite_authenticate',
-  description: 'Authenticate with NetSuite using OAuth 2.0 PKCE. Required before using any NetSuite tools. If NETSUITE_ACCOUNT_ID and NETSUITE_CLIENT_ID environment variables are set, they will be used automatically.',
-  inputSchema: {
-    type: 'object' as const,
-    properties: {
-      accountId: {
-        type: 'string',
-        description: 'NetSuite Account ID (e.g. 1234567 or 1234567_SB1). Falls back to NETSUITE_ACCOUNT_ID env var.'
-      },
-      clientId: {
-        type: 'string',
-        description: 'OAuth 2.0 Client ID from NetSuite integration record. Falls back to NETSUITE_CLIENT_ID env var.'
-      }
-    },
-    required: []
-  }
-};
+/** Append suffix to a tool's description string. */
+function enhanceDescription(tool: Record<string, unknown>, suffix: string): Record<string, unknown> {
+  const desc = (tool.description as string) || '';
+  return { ...tool, description: desc ? `${desc}${suffix}` : suffix };
+}
 
-const LOGOUT_TOOL = {
-  name: 'netsuite_logout',
-  description: 'Clear NetSuite authentication session and logout.',
-  inputSchema: { type: 'object' as const, properties: {} }
-};
-
-const RECORD_LINK_TOOL = {
-  name: 'netsuite_get_record_link',
-  description: 'Generate a direct NetSuite UI browser link to view a specific record.',
-  inputSchema: {
-    type: 'object' as const,
-    properties: {
-      recordId: { type: 'string', description: 'Internal ID of the NetSuite record.' },
-      recordType: { type: 'string', description: 'Record type (e.g. salesorder, customer, customrecord_xxx).' },
-      accountId: { type: 'string', description: 'Override account ID (defaults to current authenticated account).' },
-      rectype: { type: 'integer', description: 'Numeric custom record type ID. Auto-resolved if omitted.' }
-    },
-    required: ['recordId']
-  }
-};
-
-const REFRESH_CACHE_TOOL = {
-  name: 'netsuite_refresh_cache',
-  description: 'Force clear local cache and refresh NetSuite internal REST session cache.',
-  inputSchema: { type: 'object' as const, properties: {} }
-};
-
-const PARALLEL_QUERIES_TOOL = {
-  name: 'netsuite_run_parallel_queries',
-  description: 'Execute multiple SuiteQL queries concurrently (max 5). Use this instead of calling ns_runCustomSuiteQL multiple times sequentially.',
-  inputSchema: {
-    type: 'object' as const,
-    properties: {
-      queries: {
-        type: 'array',
-        items: { type: 'string' },
-        description: 'Array of SuiteQL query strings to execute in parallel.'
-      }
-    },
-    required: ['queries']
-  }
-};
-
-const STATUS_TOOL = {
-  name: 'netsuite_status',
-  description: 'Show diagnostic information: authentication state, token expiry, account details, cache statistics, and environment type.',
-  inputSchema: { type: 'object' as const, properties: {} }
-};
-
-const LOCAL_TOOLS = [RECORD_LINK_TOOL, REFRESH_CACHE_TOOL, LOGOUT_TOOL, PARALLEL_QUERIES_TOOL, STATUS_TOOL];
+/** Enhance fetched NetSuite tool descriptions with SuiteQL rules. */
+function enhanceToolDescriptions(tools: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
+  return tools.map(t => {
+    if (t.name === 'ns_runCustomSuiteQL') {
+      return enhanceDescription(t, SUITEQL_RULES_SUFFIX);
+    }
+    if (t.name === 'ns_getSuiteQLMetadata') {
+      return enhanceDescription(t, METADATA_RULES_SUFFIX);
+    }
+    return t;
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Registration
@@ -365,84 +227,34 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
   // --- List Tools ---
   server.setRequestHandler(ListToolsRequestSchema, async () => {
     try {
-      const isMatch = await checkWorkspaceMatch(server, oauthManager);
       const accountId = (await oauthManager.getAccountId()) || process.env.NETSUITE_ACCOUNT_ID;
-      const isSandbox = accountId
-        ? (accountId.toUpperCase().includes('_SB') || accountId.toUpperCase().includes('-SB') || accountId.toUpperCase().startsWith('TSTDRV'))
-        : false;
-
-      const envSuffix = accountId
-        ? ` [Account: ${accountId}, Env: ${isSandbox ? 'Sandbox' : 'Production'}]`
-        : '';
-
-      if (!isMatch) {
-        const warningSuffix = `\n⚠️ [工作空间不匹配警告] 由于当前工作空间的 NetSuite 账户配置与服务器登录账号 (${accountId}) 不一致，除管理工具外，所有 NetSuite 业务工具均已隐藏以防跨环境误操作。您可以通过 netsuite_authenticate 重新登录正确账户。`;
-        const adminTools = [AUTH_TOOL, LOGOUT_TOOL, STATUS_TOOL].map(t => {
-          const originalDesc = (t.description as string) || '';
-          return {
-            ...t,
-            description: originalDesc ? `${originalDesc}${warningSuffix}${envSuffix}` : `${warningSuffix}${envSuffix}`
-          };
-        });
-        return { tools: adminTools };
-      }
+      const envSuffix = buildEnvSuffix(accountId ?? null);
 
       const isAuthenticated = await oauthManager.hasValidSession();
       if (!isAuthenticated) {
-        const unauthTools = [AUTH_TOOL, LOGOUT_TOOL].map(t => {
-          const originalDesc = (t.description as string) || '';
-          return {
-            ...t,
-            description: originalDesc ? `${originalDesc}${envSuffix}` : envSuffix
-          };
-        });
+        const unauthTools = [AUTH_TOOL, LOGOUT_TOOL].map(t => enhanceDescription(t, envSuffix));
         return { tools: unauthTools };
       }
 
       const tools = await mcpTools.fetchTools() as Array<Record<string, unknown>>;
 
       // Filter write tools in production
+      const isSandbox = accountId ? isSandboxAccount(accountId) : false;
       const filteredTools = isSandbox
         ? tools
         : tools.filter(t => t.name !== 'ns_createRecord' && t.name !== 'ns_updateRecord');
 
-      // Enhance ns_runCustomSuiteQL description to guide parallel execution
-      const mappedTools = filteredTools.map(t => {
-        if (t.name === 'ns_runCustomSuiteQL') {
-          const originalDesc = (t.description as string) || '';
-          const suffix = '\n⚠️ CRITICAL: If you need to execute two or more independent SuiteQL queries, you MUST use the \'netsuite_run_parallel_queries\' tool to run them concurrently. Do NOT call this tool (\'ns_runCustomSuiteQL\') multiple times sequentially unless a subsequent query depends on the output of a previous one.';
-          return {
-            ...t,
-            description: originalDesc ? `${originalDesc}${suffix}` : suffix
-          };
-        }
-        return t;
-      });
+      // Enhance SuiteQL tool descriptions with rules
+      const enhancedTools = enhanceToolDescriptions(filteredTools);
 
-      const finalTools = [...mappedTools, ...LOCAL_TOOLS].map(t => {
-        const originalDesc = (t.description as string) || '';
-        return {
-          ...t,
-          description: originalDesc ? `${originalDesc}${envSuffix}` : envSuffix
-        };
-      });
+      // Combine with local tools and append env suffix
+      const finalTools = [...enhancedTools, ...LOCAL_TOOLS].map(t => enhanceDescription(t, envSuffix));
 
       return { tools: finalTools };
     } catch {
       const accountId = (await oauthManager.getAccountId()) || process.env.NETSUITE_ACCOUNT_ID;
-      const isSandbox = accountId
-        ? (accountId.toUpperCase().includes('_SB') || accountId.toUpperCase().includes('-SB') || accountId.toUpperCase().startsWith('TSTDRV'))
-        : false;
-      const envSuffix = accountId
-        ? ` [Account: ${accountId}, Env: ${isSandbox ? 'Sandbox' : 'Production'}]`
-        : '';
-      const fallbackTools = [AUTH_TOOL].map(t => {
-        const originalDesc = (t.description as string) || '';
-        return {
-          ...t,
-          description: originalDesc ? `${originalDesc}${envSuffix}` : envSuffix
-        };
-      });
+      const envSuffix = buildEnvSuffix(accountId ?? null);
+      const fallbackTools = [AUTH_TOOL].map(t => enhanceDescription(t, envSuffix));
       return { tools: fallbackTools };
     }
   });
@@ -453,16 +265,6 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
     const safeArgs = (args || {}) as Record<string, unknown>;
 
     try {
-      const isMatch = await checkWorkspaceMatch(server, oauthManager);
-      const isAdministrativeTool = name === 'netsuite_authenticate' || name === 'netsuite_logout' || name === 'netsuite_status';
-      if (!isMatch && !isAdministrativeTool) {
-        const accountId = (await oauthManager.getAccountId()) || process.env.NETSUITE_ACCOUNT_ID;
-        throw new McpError(
-          ErrorCode.InvalidRequest,
-          `This tool (${name}) is disabled because the active workspace does not match the NetSuite account (${accountId}) for this server instance.`
-        );
-      }
-
       // --- Tools that do NOT require authentication ---
       if (name === 'netsuite_authenticate') {
         return await handleAuthentication(safeArgs);
@@ -494,11 +296,7 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
       // --- Block write operations in production ---
       if (name === 'ns_createRecord' || name === 'ns_updateRecord') {
         const accountId = await oauthManager.getAccountId();
-        const isSandbox = accountId
-          ? (accountId.toUpperCase().includes('_SB') || accountId.toUpperCase().includes('-SB') || accountId.toUpperCase().startsWith('TSTDRV'))
-          : false;
-
-        if (!isSandbox) {
+        if (accountId && !isSandboxAccount(accountId)) {
           throw new McpError(
             ErrorCode.InvalidRequest,
             `Write operations are disabled in production environments: ${name}`
