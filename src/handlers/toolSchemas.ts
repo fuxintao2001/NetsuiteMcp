@@ -94,7 +94,7 @@ export const SUITEQL_RULES_SUFFIX = `
 ⚠️ MANDATORY RULES:
 1. MUST call ns_getSuiteQLMetadata FIRST to verify table/field names before writing any query.
 2. Do NOT use SELECT * — explicitly list all required fields.
-3. MUST include pagination: FETCH FIRST N ROWS ONLY (do NOT use LIMIT).
+3. MUST include pagination: FETCH FIRST N ROWS ONLY or ROWNUM <= N (do NOT use LIMIT).
 4. Use TO_DATE('YYYY-MM-DD', 'YYYY-MM-DD') for date comparisons — never use bare date strings.
 5. Use || for string concatenation (not +).
 6. Use BUILTIN.DF(field) to get display values instead of complex JOINs.
@@ -102,7 +102,9 @@ export const SUITEQL_RULES_SUFFIX = `
 8. Use INNER JOIN / LEFT JOIN explicitly — no implicit comma joins.
 9. Use NVL(field, default) for null handling.
 10. Use id for primary keys (not internalid).
-11. For 2+ independent queries, use netsuite_run_parallel_queries instead of calling this tool multiple times.`;
+11. Use posting = 'T' where GL accuracy is required.
+12. Use approvalstatus = 2 where approved-only data is required.
+13. For 2+ independent queries, use netsuite_run_parallel_queries instead of calling this tool multiple times.`;
 
 /**
  * Metadata usage hint to append to the `ns_getSuiteQLMetadata` tool description.
@@ -112,7 +114,7 @@ export const METADATA_RULES_SUFFIX = `
 
 /**
  * Parallel execution reminder to append to `ns_runCustomSuiteQL`.
- * (Already included in SUITEQL_RULES_SUFFIX rule #11, kept here for
+ * (Already included in SUITEQL_RULES_SUFFIX rule #13, kept here for
  *  backward-compat reference — not appended separately.)
  */
 export const PARALLEL_QUERY_SUFFIX = '\n⚠️ CRITICAL: If you need to execute two or more independent SuiteQL queries, you MUST use the \'netsuite_run_parallel_queries\' tool to run them concurrently. Do NOT call this tool (\'ns_runCustomSuiteQL\') multiple times sequentially unless a subsequent query depends on the output of a previous one.';

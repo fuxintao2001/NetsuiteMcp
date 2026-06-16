@@ -1,5 +1,12 @@
+import { jest } from '@jest/globals';
+
+jest.mock('../utils/browserLauncher.js', () => ({
+  openBrowser: jest.fn().mockImplementation(async () => {})
+}));
+
 import { OAuthManager } from './manager.js';
-import { describe, it, expect, beforeEach, afterEach, jest } from '@jest/globals';
+import { CallbackServer } from './callbackServer.js';
+import { describe, it, expect, beforeEach, afterEach } from '@jest/globals';
 import axios from 'axios';
 import fs from 'fs/promises';
 import path from 'path';
@@ -152,6 +159,119 @@ describe('OAuthManager - Concurrent Refresh', () => {
     expect(token).toBe('already-refreshed-token');
     expect(axiosSpy).not.toHaveBeenCalled();
 
+  });
+});
+
+describe('OAuthManager - startAuthFlow session preservation', () => {
+  const testStoragePath = path.join(process.cwd(), '.test-manager-storage-auth');
+  let manager: OAuthManager;
+
+  beforeEach(async () => {
+    jest.clearAllMocks();
+    await fs.rm(testStoragePath, { recursive: true, force: true });
+    manager = new OAuthManager({ storagePath: testStoragePath });
+  });
+
+  afterEach(async () => {
+    manager.stopProactiveRefresh();
+    await fs.rm(testStoragePath, { recursive: true, force: true });
+  });
+
+  it('should preserve existing session tokens when startAuthFlow is initiated', async () => {
+    // 1. Setup a valid session
+    const mockSession = {
+      authenticated: true,
+      tokens: {
+        access_token: 'existing-access-token',
+        refresh_token: 'existing-refresh-token',
+        expires_in: 3600,
+        expires_at: Date.now() + 3600 * 1000,
+        accountId: '123456',
+        clientId: 'my-client-id'
+      }
+    };
+    await fs.mkdir(testStoragePath, { recursive: true });
+    await fs.writeFile(
+      path.join(testStoragePath, 'session.json'),
+      JSON.stringify(mockSession),
+      'utf-8'
+    );
+
+    // Mock CallbackServer.prototype.start to do nothing and block/wait
+    // or just simulate a successful auth code exchange
+    const startSpy = jest.spyOn(CallbackServer.prototype, 'start')
+      .mockImplementation(async (state, callback) => {
+        // During the startAuthFlow, before callback is executed, the session file should still preserve tokens!
+        const sessionDuringFlow = JSON.parse(
+          await fs.readFile(path.join(testStoragePath, 'session.json'), 'utf-8')
+        );
+        expect(sessionDuringFlow.tokens).toEqual(mockSession.tokens);
+        expect(sessionDuringFlow.pkce).toBeDefined(); // should have PKCE state
+        expect(sessionDuringFlow.state).toBe(state);
+
+        // Execute callback
+        await callback('new-auth-code');
+      });
+
+    // Mock exchangeCodeForTokens helper (which is imported in tokenExchange)
+    // Actually, manager.ts calls exchangeCodeForTokens.
+    // Let's mock axios post for exchangeCodeForTokens
+    const axiosSpy = jest.spyOn(axios, 'post').mockResolvedValue({
+      data: {
+        access_token: 'new-access-token',
+        refresh_token: 'new-refresh-token',
+        expires_in: 3600
+      }
+    } as any);
+
+    await manager.startAuthFlow({ accountId: '123456', clientId: 'my-client-id' });
+
+    // After success, it should have the new tokens
+    const finalSession = JSON.parse(
+      await fs.readFile(path.join(testStoragePath, 'session.json'), 'utf-8')
+    );
+    expect(finalSession.tokens.access_token).toBe('new-access-token');
+    expect(finalSession.tokens.refresh_token).toBe('new-refresh-token');
+    expect(finalSession.authenticated).toBe(true);
+
+    startSpy.mockRestore();
     axiosSpy.mockRestore();
+  });
+
+  it('should restore original session when startAuthFlow callback fails', async () => {
+    // 1. Setup a valid session
+    const mockSession = {
+      authenticated: true,
+      tokens: {
+        access_token: 'existing-access-token',
+        refresh_token: 'existing-refresh-token',
+        expires_in: 3600,
+        expires_at: Date.now() + 3600 * 1000,
+        accountId: '123456',
+        clientId: 'my-client-id'
+      }
+    };
+    await fs.mkdir(testStoragePath, { recursive: true });
+    await fs.writeFile(
+      path.join(testStoragePath, 'session.json'),
+      JSON.stringify(mockSession),
+      'utf-8'
+    );
+
+    // Mock CallbackServer.prototype.start to throw an error
+    const startSpy = jest.spyOn(CallbackServer.prototype, 'start')
+      .mockRejectedValue(new Error('OAuth callback timeout'));
+
+    await expect(
+      manager.startAuthFlow({ accountId: '123456', clientId: 'my-client-id' })
+    ).rejects.toThrow('OAuth callback timeout');
+
+    // After failure, the session file should be restored to the original session
+    const finalSession = JSON.parse(
+      await fs.readFile(path.join(testStoragePath, 'session.json'), 'utf-8')
+    );
+    expect(finalSession).toEqual(mockSession);
+
+    startSpy.mockRestore();
   });
 });

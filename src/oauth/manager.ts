@@ -1,4 +1,6 @@
 import crypto from 'crypto';
+import fs from 'fs/promises';
+import path from 'path';
 import { generatePKCE } from './pkce.js';
 import type { PKCEChallenge } from './pkce.js';
 import { CallbackServer } from './callbackServer.js';
@@ -7,6 +9,50 @@ import type { TokenData } from './sessionStorage.js';
 import { exchangeCodeForTokens, refreshAccessToken, shouldRefreshToken, TokenRefreshError } from './tokenExchange.js';
 import { TokenRefreshScheduler } from '../utils/resilience.js';
 import { openBrowser } from '../utils/browserLauncher.js';
+
+/**
+ * Acquire a cross-process file-based lock by creating a directory.
+ * Autorecovers from stale locks after 20 seconds.
+ */
+async function acquireLock(lockPath: string, timeoutMs = 15000): Promise<boolean> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    try {
+      await fs.mkdir(lockPath);
+      return true;
+    } catch (err: any) {
+      if (err.code === 'EEXIST') {
+        // Check lock age to prevent deadlocks from crashed processes
+        try {
+          const stats = await fs.stat(lockPath);
+          const age = Date.now() - stats.mtimeMs;
+          if (age > 20000) {
+            console.error(`⚠️  Lock is stale (${Math.round(age / 1000)}s old), breaking lock: ${lockPath}`);
+            await fs.rmdir(lockPath);
+            continue; // Retry immediately after breaking lock
+          }
+        } catch {
+          // stats failed, maybe lock was just released
+        }
+        await new Promise((resolve) => setTimeout(resolve, 200));
+      } else {
+        throw err;
+      }
+    }
+  }
+  return false;
+}
+
+/**
+ * Release a cross-process file-based lock by removing the directory.
+ */
+async function releaseLock(lockPath: string): Promise<void> {
+  try {
+    await fs.rmdir(lockPath);
+  } catch {
+    // Ignore error if lock already deleted
+  }
+}
 
 interface OAuthManagerConfig {
   storagePath?: string;
@@ -28,7 +74,6 @@ export class OAuthManager {
   private callbackServer: CallbackServer;
   private tokenRefreshScheduler: TokenRefreshScheduler;
   private refreshPromise: Promise<string> | null = null;
-  private refreshingToken: string | null = null;
 
   constructor(config: OAuthManagerConfig = {}) {
     this.callbackPort = config.callbackPort || 8080;
@@ -51,8 +96,10 @@ export class OAuthManager {
     const state = crypto.randomBytes(16).toString('hex');
     const redirectUri = `http://localhost:${this.callbackPort}/callback`;
 
-    // Store PKCE and config (critical: must persist until callback)
+    // Preserve existing tokens and authenticated state — don't destroy a recoverable session
+    const existingSession = await this.storage.load();
     await this.storage.save({
+      ...existingSession,
       pkce: pkce.code_verifier,
       state,
       config: { accountId, clientId, redirectUri },
@@ -81,6 +128,12 @@ export class OAuthManager {
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       console.error(`❌ Authentication failed: ${message}\n`);
+      // Restore existing session if it had tokens, clearing PKCE/state
+      if (existingSession && existingSession.tokens) {
+        await this.storage.save(existingSession);
+      } else {
+        await this.storage.save(existingSession || {});
+      }
       throw error;
     }
 
@@ -138,13 +191,29 @@ export class OAuthManager {
     });
   }
 
-  /**
-   * Helper to execute a token refresh with a single shared promise to prevent concurrent duplication
-   */
   private async executeTokenRefresh(session: any, tokenToRefresh: string): Promise<string> {
-    this.refreshingToken = tokenToRefresh;
     this.refreshPromise = (async () => {
+      const lockPath = path.join(this.storage.getStoragePath(), 'session.lock');
+      let lockAcquired = false;
       try {
+        lockAcquired = await acquireLock(lockPath);
+        if (!lockAcquired) {
+          console.error('⚠️  Failed to acquire session lock for token refresh, proceeding without lock...');
+        }
+
+        // Reload session from disk after lock is acquired to check for concurrent updates
+        const currentSession = await this.storage.load();
+        if (currentSession && currentSession.tokens) {
+          const currentToken = currentSession.tokens.access_token;
+          // If the token has already been refreshed by another process, reuse it
+          if (tokenToRefresh !== currentToken && !shouldRefreshToken(currentSession.tokens)) {
+            console.error('🔄 Token was refreshed by another process concurrently.');
+            return currentToken;
+          }
+          // Update the session in our scope
+          session = currentSession;
+        }
+
         const newTokens = await refreshAccessToken(session.tokens);
         await this.storage.save({
           ...session,
@@ -158,8 +227,10 @@ export class OAuthManager {
         }
         throw error;
       } finally {
+        if (lockAcquired) {
+          await releaseLock(lockPath);
+        }
         this.refreshPromise = null;
-        this.refreshingToken = null;
       }
     })();
 
@@ -287,21 +358,69 @@ export class OAuthManager {
 
   /**
    * Attempt to auto-recover an expired session using the refresh token.
-   * Called during server startup if a session file exists but token is expired.
-   * Silently fails if refresh token is also expired.
+   * Called during server startup and by the scheduler when the session is lost.
+   *
+   * Retries up to `maxRetries` times for transient network errors.
+   * Immediately gives up on unrecoverable errors (e.g. expired refresh token).
    */
-  async tryAutoRecover(): Promise<void> {
+  async tryAutoRecover(maxRetries = 2): Promise<void> {
     const session = await this.storage.load();
     if (!session?.tokens?.refresh_token) return;
 
-    console.error('🔄 Attempting auto-recovery with refresh token...');
-    const newTokens = await refreshAccessToken(session.tokens);
-    await this.storage.save({
-      ...session,
-      tokens: newTokens,
-      authenticated: true
-    });
-    console.error('✅ Auto-recovery successful');
+    const lockPath = path.join(this.storage.getStoragePath(), 'session.lock');
+    let lockAcquired = false;
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        console.error(`🔄 Auto-recovery attempt ${attempt}/${maxRetries}...`);
+        
+        lockAcquired = await acquireLock(lockPath);
+        if (!lockAcquired) {
+          console.error('⚠️  Failed to acquire session lock for auto-recovery, proceeding without lock...');
+        }
+
+        // Reload session from disk after lock is acquired to check if another process recovered it
+        const currentSession = await this.storage.load();
+        if (currentSession && currentSession.tokens && currentSession.authenticated) {
+          if (!shouldRefreshToken(currentSession.tokens)) {
+            console.error('🔄 Session was already recovered by another process concurrently.');
+            return;
+          }
+        }
+
+        const newTokens = await refreshAccessToken(currentSession?.tokens || session.tokens);
+        await this.storage.save({
+          ...(currentSession || session),
+          tokens: newTokens,
+          authenticated: true
+        });
+        console.error('✅ Auto-recovery successful');
+        return;
+      } catch (error: unknown) {
+        // Unrecoverable: refresh token itself is expired/invalid — don't retry
+        if (error instanceof TokenRefreshError && !error.recoverable) {
+          console.error('🔒 Refresh token expired — re-authentication required');
+          throw error;
+        }
+        // Transient: network timeout, DNS failure, etc. — retry after delay
+        if (attempt < maxRetries) {
+          console.error(`⚠️ Auto-recovery attempt ${attempt} failed (transient), retrying in 2s...`);
+          if (lockAcquired) {
+            await releaseLock(lockPath);
+            lockAcquired = false;
+          }
+          await new Promise(resolve => setTimeout(resolve, 2000));
+        } else {
+          console.error(`⚠️ Auto-recovery failed after ${maxRetries} attempts`);
+          throw error;
+        }
+      } finally {
+        if (lockAcquired) {
+          await releaseLock(lockPath);
+          lockAcquired = false;
+        }
+      }
+    }
   }
 
   /**

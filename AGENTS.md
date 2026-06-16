@@ -176,14 +176,25 @@ Before executing SQL queries, you must strictly follow these rules:
 
 ---
 
-### 3. Server Extensibility
+### 3. SuiteCloud Agent Skills SOP
+
+This MCP server exposes official Oracle NetSuite SuiteCloud Agent Skills as MCP resources under `netsuite://skills/<skill-name>`. You must follow these guidelines:
+- **Tool Selection Strategy:** When deciding which tool to call, strictly adhere to the following priority:
+  `PRIORITY 1 → Reports` | `PRIORITY 2 → Saved Searches` | `PRIORITY 3 → Records` | `PRIORITY 4 → SuiteQL (Last Resort)`.
+- **Domain Knowledge Lookup:** Before writing any SuiteScript code or working on SDF configurations, check the corresponding skill resource (e.g., `netsuite://skills/netsuite-owasp-secure-coding`, `netsuite://skills/netsuite-suitescript-upgrade`, etc.) to align with NetSuite's official standards.
+- **Multi-Subsidiary & Currency Handling:** Before pulling financial datasets, explicitly clarify if the user wants consolidated data or data for a specific subsidiary.
+- **OWASP Secure Coding:** Follow the OWASP Top 10 guidelines provided in `netsuite://skills/netsuite-owasp-secure-coding` for RESTlets, Suitelets, and Client Scripts, especially input validation and output encoding.
+
+---
+
+### 4. Server Extensibility
 
 - **Adding Tools:** Add new tool schemas in `src/handlers/toolSchemas.ts`, then add the handler function in `src/handlers/tools.ts` as a standalone `async function handleXxx()`.
 - **Utilities:** Place reusable utilities in `src/utils/`.
 
 ---
 
-### 4. Caching
+### 5. Caching
 
 - `CacheService` is a singleton configured at startup via `cacheService.configure(projectRoot)`.
 - Metadata cache is self-healing: automatically invalidated for affected tables when a SuiteQL error occurs.
@@ -191,7 +202,7 @@ Before executing SQL queries, you must strictly follow these rules:
 
 ---
 
-### 5. Authentication Lifecycle
+### 6. Authentication Lifecycle
 
 - **Dynamic Mappings:** `fetchCustomRecordMappings()` is called after successful authentication, not in the constructor.
 - **Token Maintenance:** `TokenRefreshScheduler` proactively refreshes tokens before they expire (checked every 60 seconds).
@@ -229,3 +240,4 @@ Before executing SQL queries, you must strictly follow these rules:
 ## 📂 MCP Resources Reference
 
 - **`netsuite://guides/suiteql`**: Access the complete SuiteQL syntax, Oracle SQL subset rules, and query reference guide (including ScriptNote log queries) directly via the MCP Resource.
+- **`netsuite://skills/<skill-name>`**: Access official NetSuite SuiteCloud Agent Skills (e.g., `netsuite-ai-connector-instructions`, `netsuite-owasp-secure-coding`, `netsuite-suitescript-records-reference`, `netsuite-suitescript-upgrade`, etc.) directly via the MCP Resource.

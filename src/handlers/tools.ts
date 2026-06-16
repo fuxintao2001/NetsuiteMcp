@@ -13,7 +13,7 @@ import { asyncJsonParse } from '../utils/json.js';
 import { cacheService } from '../utils/cache.js';
 import { isSandboxAccount, buildEnvSuffix } from '../utils/environment.js';
 import {
-  AUTH_TOOL, LOGOUT_TOOL, LOCAL_TOOLS, STATUS_TOOL,
+  AUTH_TOOL, LOGOUT_TOOL, LOCAL_TOOLS,
   SUITEQL_RULES_SUFFIX, METADATA_RULES_SUFFIX
 } from './toolSchemas.js';
 

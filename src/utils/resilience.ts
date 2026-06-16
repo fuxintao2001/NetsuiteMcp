@@ -8,6 +8,7 @@ interface TokenRefreshTarget {
   hasValidSession(): Promise<boolean>;
   ensureValidToken(): Promise<string>;
   forceRefreshToken(failedToken?: string): Promise<string>;
+  tryAutoRecover(maxRetries?: number): Promise<void>;
 }
 
 /**
@@ -20,6 +21,7 @@ interface TokenRefreshTarget {
  * - All exceptions are caught internally — nothing escapes to global scope.
  * - The interval timer is unref'd so it never prevents process exit.
  * - Calling start() multiple times is safe (idempotent).
+ * - When no valid session is found, attempts auto-recovery via refresh token.
  */
 export class TokenRefreshScheduler {
   private intervalId: ReturnType<typeof setInterval> | null = null;
@@ -41,6 +43,9 @@ export class TokenRefreshScheduler {
 
     this.lastTickTime = Date.now();
     console.error(`🔄 [TokenRefreshScheduler] Started — checking every ${this.intervalMs / 1000}s`);
+
+    // Run first tick immediately to handle startup/wake state
+    void this.tick();
 
     this.intervalId = setInterval(() => {
       void this.tick();
@@ -68,6 +73,7 @@ export class TokenRefreshScheduler {
 
   /**
    * Single tick: check session validity and refresh token if needed.
+   * If no valid session exists, attempts auto-recovery via refresh token.
    * ALL exceptions are caught here — nothing escapes to global scope.
    */
   private async tick(): Promise<void> {
@@ -79,7 +85,13 @@ export class TokenRefreshScheduler {
       this.lastTickTime = now;
 
       const hasSession = await this.target.hasValidSession();
-      if (!hasSession) return;
+
+      if (!hasSession) {
+        // No valid session — attempt auto-recovery using stored refresh token
+        console.error('🔄 [TokenRefreshScheduler] No valid session. Attempting auto-recovery...');
+        await this.target.tryAutoRecover(1);
+        return;
+      }
 
       if (wasSleeping) {
         // Force refresh after sleep — token is very likely expired

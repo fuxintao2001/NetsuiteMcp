@@ -1,8 +1,10 @@
 import axios from 'axios';
 import { cacheService } from '../utils/cache.js';
 import { OAuthManager } from '../oauth/manager.js';
-import { asyncJsonParse } from '../utils/json.js';
 import { TokenRefreshError } from '../oauth/tokenExchange.js';
+import fs from 'fs/promises';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
 
 /**
  * Extracts table names from a SQL query string (used for cache invalidation).
@@ -233,9 +235,142 @@ export class NetSuiteMCPTools {
   }
 
   /**
+   * Seed metadata cache from local records.json reference if it exists.
+   */
+  async seedMetadataFromLocalRecords(accountId: string): Promise<void> {
+    try {
+      const __filename = fileURLToPath(import.meta.url);
+      const __dirname = dirname(__filename);
+      const projectRoot = join(__dirname, '..', '..');
+      const recordsJsonPath = join(projectRoot, 'skills', 'netsuite-suitescript-records-reference', 'references', 'records.json');
+
+      try {
+        await fs.access(recordsJsonPath);
+      } catch {
+        console.error('ℹ️ Local records.json not found. Skipping cache seed.');
+        return;
+      }
+
+      console.error('🚀 Seeding metadata cache from local records.json...');
+      const fileContent = await fs.readFile(recordsJsonPath, 'utf-8');
+      const data = JSON.parse(fileContent);
+      if (!data || !data.records) return;
+
+      const recordTypes = Object.keys(data.records);
+      let seedCount = 0;
+
+      for (const recordType of recordTypes) {
+        const cacheKey = this.metadataCacheKey('ns_getRecordTypeMetadata', { recordType });
+        // Only seed if cache does not exist
+        const existing = await cacheService.get(accountId, cacheKey);
+        if (!existing) {
+          const recordInfo = data.records[recordType];
+          const converted = this.convertRecordInfoToMetadata(recordInfo);
+          await cacheService.set(accountId, cacheKey, converted);
+          seedCount++;
+        }
+      }
+
+      if (seedCount > 0) {
+        console.error(`✅ Seeded ${seedCount} record types into metadata cache.`);
+      } else {
+        console.error('ℹ️ Metadata cache already seeded.');
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`⚠️ Failed to seed metadata cache from records.json: ${msg}`);
+    }
+  }
+
+  /**
+   * Convert a record info from records.json into NetSuite REST API metadata format.
+   */
+  private convertRecordInfoToMetadata(recordInfo: any): unknown {
+    const properties: Record<string, any> = {};
+
+    for (const field of recordInfo.fields || []) {
+      if (!field.internalId) continue;
+
+      const prop: Record<string, any> = {
+        title: field.label || field.internalId,
+        nullable: field.required !== 'true'
+      };
+
+      if (field.help) {
+        prop.description = field.help;
+      }
+
+      const rawType = (field.type || 'text').toLowerCase();
+      if (rawType === 'checkbox' || rawType === 'boolean') {
+        prop.type = 'boolean';
+      } else if (rawType === 'float' || rawType === 'double' || rawType === 'currency') {
+        prop.type = 'number';
+        prop.format = 'double';
+      } else if (rawType === 'integer') {
+        prop.type = 'integer';
+      } else if (rawType === 'date') {
+        prop.type = 'string';
+        prop.format = 'date';
+      } else if (rawType === 'datetime' || rawType === 'date-time') {
+        prop.type = 'string';
+        prop.format = 'date-time';
+      } else if (rawType === 'select' || rawType === 'multiselect') {
+        prop.type = 'object';
+        prop.properties = {
+          id: { title: 'Internal identifier', type: 'string' },
+          refName: { title: 'Reference Name', type: 'string' }
+        };
+      } else {
+        prop.type = 'string';
+      }
+
+      properties[field.internalId] = prop;
+    }
+
+    if (!properties['id']) {
+      properties['id'] = {
+        title: 'Internal ID',
+        type: 'string',
+        description: 'The internal ID for this record',
+        nullable: true
+      };
+    }
+    if (!properties['externalId']) {
+      properties['externalId'] = {
+        title: 'External ID',
+        type: 'string',
+        description: 'The external ID for this record',
+        nullable: true
+      };
+    }
+
+    const metadataResult = {
+      success: true,
+      metadata: {
+        type: 'object',
+        properties
+      }
+    };
+
+    return {
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify(metadataResult)
+        }
+      ]
+    };
+  }
+
+  /**
    * Prefetch metadata for commonly used record types in parallel.
    */
   async prefetchCommonMetadata(): Promise<void> {
+    const accountId = await this.oauthManager.getAccountId();
+    if (accountId) {
+      await this.seedMetadataFromLocalRecords(accountId);
+    }
+
     const types = ['customer', 'salesorder', 'item', 'transaction'];
     console.error(`🚀 Prefetching metadata for: ${types.join(', ')}...`);
 

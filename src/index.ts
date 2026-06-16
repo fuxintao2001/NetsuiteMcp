@@ -223,6 +223,7 @@ class NetSuiteMCPServer {
         }
       } catch {
         // Auto-recovery failed (e.g. refresh token also expired) — user must manually authenticate
+        console.error('⚠️ Auto-recovery failed on startup. Will keep retrying via scheduler.');
       }
     }
 
@@ -233,9 +234,12 @@ class NetSuiteMCPServer {
     const transport = new StdioServerTransport();
     await this.server.connect(transport);
 
-    // If already authenticated, start background tasks
+    // ALWAYS start proactive refresh scheduler — it will self-heal even if
+    // the current session is invalid by attempting auto-recovery each tick
+    this.oauthManager.startProactiveRefresh();
+
+    // If already authenticated, also start background prefetch
     if (this.isAuthenticated) {
-      this.oauthManager.startProactiveRefresh();
       this.backgroundPrefetch();
     }
 

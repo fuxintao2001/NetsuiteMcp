@@ -37,6 +37,13 @@ export class SessionStorage {
   }
 
   /**
+   * Get storage path
+   */
+  getStoragePath(): string {
+    return this.storagePath;
+  }
+
+  /**
    * Save session data to file
    */
   async save(data: SessionData): Promise<void> {
