@@ -170,11 +170,17 @@ class NetSuiteMCPServer {
     }
   }
 
-  private async handleCacheRefresh() {
+  private async handleCacheRefresh(args: Record<string, unknown>) {
     try {
+      const tableName = (args.tableName || args.table || args.recordType || '') as string;
+      if (tableName) {
+        await this.mcpTools.clearTableMetadataCache(tableName);
+        return textResult(`✅ Successfully cleared cache for table/recordType: ${tableName}`);
+      }
+
       await this.mcpTools.refreshSessionCache();
       await this.mcpTools.clearMetadataCache();
-      return textResult('✅ Successfully cleared and refreshed cache!');
+      return textResult('✅ Successfully cleared and refreshed all cache!');
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       return textResult(`❌ Failed to refresh cache: ${message}`, true);

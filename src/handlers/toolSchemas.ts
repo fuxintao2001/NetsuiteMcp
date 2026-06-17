@@ -52,8 +52,16 @@ export const RECORD_LINK_TOOL = {
 
 export const REFRESH_CACHE_TOOL = {
   name: 'netsuite_refresh_cache',
-  description: 'Force clear local cache and refresh NetSuite internal REST session cache.',
-  inputSchema: { type: 'object' as const, properties: {} }
+  description: 'Force clear local cache and refresh NetSuite internal REST session cache. Can optionally clear cache for a single table/recordType.',
+  inputSchema: {
+    type: 'object' as const,
+    properties: {
+      tableName: {
+        type: 'string',
+        description: 'Optional: Specific NetSuite table or record type to clear from cache (e.g. customer, salesorder, customrecord_xxx).'
+      }
+    }
+  }
 };
 
 export const PARALLEL_QUERIES_TOOL = {

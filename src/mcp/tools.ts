@@ -198,6 +198,24 @@ export class NetSuiteMCPTools {
   }
 
   /**
+   * Clear all metadata cache for a specific table or recordType.
+   */
+  async clearTableMetadataCache(tableName: string): Promise<void> {
+    try {
+      const accountId = await this.oauthManager.getAccountId();
+      if (accountId) {
+        const cleanName = tableName.trim();
+        await cacheService.delete(accountId, `ns_getSuiteQLMetadata_${cleanName}`);
+        await cacheService.delete(accountId, `ns_getRecordTypeMetadata_${cleanName}`);
+        console.error(`🗑️ Metadata cache cleared for table: ${cleanName}`);
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`⚠️ Failed to clear metadata cache for ${tableName}: ${msg}`);
+    }
+  }
+
+  /**
    * Fetch custom record type → internal ID mappings from NetSuite.
    * Called after successful authentication, NOT in the constructor.
    */

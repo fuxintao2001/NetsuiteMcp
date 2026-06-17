@@ -39,7 +39,7 @@ export interface ToolHandlerDeps {
   projectRoot: string;
   handleAuthentication: (args: Record<string, unknown>) => Promise<ToolResponse>;
   handleLogout: () => Promise<ToolResponse>;
-  handleCacheRefresh: () => Promise<ToolResponse>;
+  handleCacheRefresh: (args: Record<string, unknown>) => Promise<ToolResponse>;
   resolveCustomRecordRectype: (type: string) => number | null;
 }
 
@@ -281,7 +281,7 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
 
       // --- Local tools (authenticated) ---
       if (name === 'netsuite_refresh_cache') {
-        return await handleCacheRefresh();
+        return await handleCacheRefresh(safeArgs);
       }
       if (name === 'netsuite_get_record_link') {
         return await handleGetRecordLink(safeArgs, oauthManager, resolveCustomRecordRectype);
