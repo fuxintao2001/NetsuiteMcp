@@ -61,7 +61,10 @@ describe('tokenExchange', () => {
       const mockError = {
         response: {
           status: 400,
-          data: { error: 'invalid_grant' }
+          data: {
+            error: 'invalid_grant',
+            error_description: 'The refresh token is invalid or expired.'
+          }
         }
       };
       
@@ -69,7 +72,7 @@ describe('tokenExchange', () => {
 
       await expect(
         exchangeCodeForTokens(mockCode, mockConfig, mockVerifier)
-      ).rejects.toThrow('Failed to exchange authorization code: 400');
+      ).rejects.toThrow('Failed to exchange authorization code: OAuth Error [invalid_grant]: The refresh token is invalid or expired.');
     });
   });
 
@@ -150,7 +153,7 @@ describe('tokenExchange', () => {
           accountId: '123',
           clientId: '456'
         })
-      ).rejects.toThrow('Failed to refresh access token (transient). Please re-authenticate.');
+      ).rejects.toThrow('Failed to refresh access token: Network error. Please re-authenticate.');
     });
   });
 

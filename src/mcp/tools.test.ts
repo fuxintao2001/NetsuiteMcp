@@ -92,11 +92,18 @@ describe('NetSuiteMCPTools', () => {
 
     it('should throw on API error', async () => {
       jest.spyOn(cacheService, 'get').mockResolvedValueOnce(null);
-      const mockError = new Error('Request failed with status code 500');
+      const mockError = new Error('Request failed with status code 400');
       Object.assign(mockError, {
         response: {
-          status: 500,
-          data: { error: 'invalid SuiteQL query' }
+          status: 400,
+          data: {
+            "o:errorDetails": [
+              {
+                "detail": "Search error: The field 'custrecord_invalid' does not exist on table 'transaction'.",
+                "o:errorCode": "INVALID_SEARCH_FIELD"
+              }
+            ]
+          }
         }
       });
       
@@ -104,7 +111,7 @@ describe('NetSuiteMCPTools', () => {
 
       await expect(
         toolsClient.executeTool('ns_runCustomSuiteQL', { sqlQuery: 'SELECT * FROM invalid' })
-      ).rejects.toThrow('Request failed with status code 500');
+      ).rejects.toThrow('NetSuite API Error: [INVALID_SEARCH_FIELD] Search error: The field \'custrecord_invalid\' does not exist on table \'transaction\'.');
     });
 
     it('should retry once on 401 with force-refreshed token', async () => {

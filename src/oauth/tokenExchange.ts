@@ -1,5 +1,6 @@
 import axios from 'axios';
 import type { TokenData } from './sessionStorage.js';
+import { parseNetSuiteError } from '../utils/errors.js';
 
 /**
  * NetSuite OAuth token exchange utilities
@@ -67,9 +68,9 @@ export async function exchangeCodeForTokens(
     return tokens;
 
   } catch (error: unknown) {
-    const err = error as { response?: { data?: unknown; status?: number }; message?: string };
-    console.error('❌ Token exchange error:', err.response?.data || err.message);
-    throw new Error(`Failed to exchange authorization code: ${err.response?.status || err.message}`);
+    const parsed = parseNetSuiteError(error);
+    console.error('❌ Token exchange error:', parsed.message);
+    throw new Error(`Failed to exchange authorization code: ${parsed.message}`);
   }
 }
 
@@ -109,13 +110,14 @@ export async function refreshAccessToken(tokens: TokenData): Promise<TokenData> 
     return newTokens;
 
   } catch (error: unknown) {
-    const err = error as { response?: { data?: unknown; status?: number }; message?: string };
-    console.error('❌ Token refresh failed:', err.response?.data || err.message);
+    const parsed = parseNetSuiteError(error);
+    console.error('❌ Token refresh failed:', parsed.message);
+    const err = error as { response?: { status?: number } };
     const status = err.response?.status;
     // 400/401 means the refresh_token itself is invalid/expired — unrecoverable
     const recoverable = !(status === 400 || status === 401);
     throw new TokenRefreshError(
-      `Failed to refresh access token${recoverable ? ' (transient)' : ' (refresh token expired)'}. Please re-authenticate.`,
+      `Failed to refresh access token: ${parsed.message}. Please re-authenticate.`,
       recoverable
     );
   }

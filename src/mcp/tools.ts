@@ -2,6 +2,7 @@ import axios from 'axios';
 import { cacheService } from '../utils/cache.js';
 import { OAuthManager } from '../oauth/manager.js';
 import { TokenRefreshError } from '../oauth/tokenExchange.js';
+import { parseNetSuiteError } from '../utils/errors.js';
 import fs from 'fs/promises';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
@@ -397,6 +398,17 @@ export class NetSuiteMCPTools {
    * Includes single 401 auto-retry after force-refreshing the token.
    */
   private async jsonRpcCall<T>(method: string, params?: Record<string, unknown>): Promise<T> {
+    try {
+      return await this.jsonRpcCallRaw<T>(method, params);
+    } catch (error: unknown) {
+      throw parseNetSuiteError(error);
+    }
+  }
+
+  /**
+   * Raw execution of JSON-RPC call with retry logic.
+   */
+  private async jsonRpcCallRaw<T>(method: string, params?: Record<string, unknown>): Promise<T> {
     const endpoint = await this.getEndpoint();
 
     const body: Record<string, unknown> = {
@@ -417,7 +429,11 @@ export class NetSuiteMCPTools {
       });
 
       if (response.data?.error) {
-        throw new Error(response.data.error.message || `JSON-RPC error in ${method}`);
+        const rpcErr = response.data.error;
+        const errMsg = rpcErr.message || `JSON-RPC error in ${method}`;
+        const codeMsg = rpcErr.code !== undefined ? ` (code: ${rpcErr.code})` : '';
+        const dataMsg = rpcErr.data ? ` - Details: ${JSON.stringify(rpcErr.data)}` : '';
+        throw new Error(`NetSuite JSON-RPC Error${codeMsg}: ${errMsg}${dataMsg}`);
       }
 
       return response.data?.result as T;
@@ -456,6 +472,7 @@ export class NetSuiteMCPTools {
       throw error;
     }
   }
+
 
   /** Build the NetSuite MCP API endpoint URL. */
   private async getEndpoint(): Promise<string> {
