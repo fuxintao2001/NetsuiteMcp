@@ -45,3 +45,6 @@ scratch/
 
 # Local custom script
 keep-alive.mjs
+
+# Local workspace configurations
+workspace-agents/workspaces.json

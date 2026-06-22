@@ -191,6 +191,7 @@ This MCP server exposes official Oracle NetSuite SuiteCloud Agent Skills as MCP 
 
 - **Adding Tools:** Add new tool schemas in `src/handlers/toolSchemas.ts`, then add the handler function in `src/handlers/tools.ts` as a standalone `async function handleXxx()`.
 - **Utilities:** Place reusable utilities in `src/utils/`.
+- **Workspace AGENTS.md:** The `workspace-agents/` directory contains the AGENTS.md template (`AGENTS.template.md`) and workspace config (`workspaces.json`) for all client NetSuite projects. After modifying MCP tools or behaviors, update the template and run `npm run sync-agents` to propagate changes to all workspaces. Use `npm run sync-agents -- --dry-run` to preview.
 
 ---
 

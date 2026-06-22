@@ -12,6 +12,7 @@
     "dev": "tsx src/index.ts",
     "build": "rimraf dist && tsc",
     "fetch-skills": "node scripts/fetch-skills.js",
+    "sync-agents": "node scripts/sync-agents.js",
     "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js"
   },
   "keywords": [

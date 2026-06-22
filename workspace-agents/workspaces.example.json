@@ -1,0 +1,19 @@
+{
+  "description": "Workspace → MCP server environment mapping. Used by scripts/sync-agents.js to generate environment-specific AGENTS.md files.",
+  "workspaces": [
+    {
+      "projectPath": "/path/to/your/netsuite/production/project",
+      "accountId": "1234567",
+      "envType": "Production",
+      "mcpServerName": "netsuite_1234567",
+      "writeOpsEnabled": false
+    },
+    {
+      "projectPath": "/path/to/your/netsuite/sandbox/project",
+      "accountId": "1234567-sb1",
+      "envType": "Sandbox",
+      "mcpServerName": "netsuite_1234567_sb1",
+      "writeOpsEnabled": true
+    }
+  ]
+}
