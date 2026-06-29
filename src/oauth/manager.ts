@@ -223,7 +223,11 @@ export class OAuthManager {
       } catch (error: unknown) {
         if (error instanceof TokenRefreshError && !error.recoverable) {
           console.error('🔒 Refresh token expired — session requires re-authentication');
-          // Don't clear session — preserve config for potential re-auth
+          // Mark session as unauthenticated while preserving config for potential re-auth
+          const current = await this.storage.load();
+          if (current) {
+            await this.storage.save({ ...current, authenticated: false });
+          }
         }
         throw error;
       } finally {
@@ -363,8 +367,8 @@ export class OAuthManager {
    * Retries up to `maxRetries` times for transient network errors.
    * Immediately gives up on unrecoverable errors (e.g. expired refresh token).
    */
-  async tryAutoRecover(maxRetries = 2): Promise<void> {
-    const session = await this.storage.load();
+  async tryAutoRecover(maxRetries = 4): Promise<void> {
+    let session = await this.storage.load();
     if (!session?.tokens?.refresh_token) return;
 
     const lockPath = path.join(this.storage.getStoragePath(), 'session.lock');
@@ -386,9 +390,14 @@ export class OAuthManager {
             console.error('🔄 Session was already recovered by another process concurrently.');
             return;
           }
+          // Update the session in our scope
+          session = currentSession;
         }
 
-        const newTokens = await refreshAccessToken(currentSession?.tokens || session.tokens);
+        const tokensToRefresh = currentSession?.tokens || session.tokens;
+        if (!tokensToRefresh) return;
+
+        const newTokens = await refreshAccessToken(tokensToRefresh);
         await this.storage.save({
           ...(currentSession || session),
           tokens: newTokens,
@@ -400,16 +409,20 @@ export class OAuthManager {
         // Unrecoverable: refresh token itself is expired/invalid — don't retry
         if (error instanceof TokenRefreshError && !error.recoverable) {
           console.error('🔒 Refresh token expired — re-authentication required');
+          const current = await this.storage.load();
+          if (current) {
+            await this.storage.save({ ...current, authenticated: false });
+          }
           throw error;
         }
         // Transient: network timeout, DNS failure, etc. — retry after delay
         if (attempt < maxRetries) {
-          console.error(`⚠️ Auto-recovery attempt ${attempt} failed (transient), retrying in 2s...`);
+          console.error(`⚠️ Auto-recovery attempt ${attempt} failed (transient network error during wake/connect), retrying in 3s...`);
           if (lockAcquired) {
             await releaseLock(lockPath);
             lockAcquired = false;
           }
-          await new Promise(resolve => setTimeout(resolve, 2000));
+          await new Promise(resolve => setTimeout(resolve, 3000));
         } else {
           console.error(`⚠️ Auto-recovery failed after ${maxRetries} attempts`);
           throw error;

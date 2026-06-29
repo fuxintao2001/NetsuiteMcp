@@ -13,7 +13,7 @@ import { asyncJsonParse } from '../utils/json.js';
 import { cacheService } from '../utils/cache.js';
 import { isSandboxAccount, buildEnvSuffix } from '../utils/environment.js';
 import {
-  AUTH_TOOL, LOGOUT_TOOL, LOCAL_TOOLS,
+  AUTH_TOOL, LOGOUT_TOOL, LOCAL_TOOLS, STATUS_TOOL,
   SUITEQL_RULES_SUFFIX, METADATA_RULES_SUFFIX
 } from './toolSchemas.js';
 
@@ -232,7 +232,7 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
 
       const isAuthenticated = await oauthManager.hasValidSession();
       if (!isAuthenticated) {
-        const unauthTools = [AUTH_TOOL, LOGOUT_TOOL].map(t => enhanceDescription(t, envSuffix));
+        const unauthTools = [AUTH_TOOL, LOGOUT_TOOL, STATUS_TOOL].map(t => enhanceDescription(t, envSuffix));
         return { tools: unauthTools };
       }
 
@@ -254,7 +254,7 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
     } catch {
       const accountId = (await oauthManager.getAccountId()) || process.env.NETSUITE_ACCOUNT_ID;
       const envSuffix = buildEnvSuffix(accountId ?? null);
-      const fallbackTools = [AUTH_TOOL].map(t => enhanceDescription(t, envSuffix));
+      const fallbackTools = [AUTH_TOOL, LOGOUT_TOOL, STATUS_TOOL].map(t => enhanceDescription(t, envSuffix));
       return { tools: fallbackTools };
     }
   });
@@ -272,6 +272,9 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
       if (name === 'netsuite_logout') {
         return await handleLogout();
       }
+      if (name === 'netsuite_status') {
+        return await handleStatus(oauthManager);
+      }
 
       // --- All remaining tools require authentication ---
       const isAuthenticated = await oauthManager.hasValidSession();
@@ -288,9 +291,6 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
       }
       if (name === 'netsuite_run_parallel_queries') {
         return await handleRunParallelQueries(safeArgs, mcpTools);
-      }
-      if (name === 'netsuite_status') {
-        return await handleStatus(oauthManager);
       }
 
       // --- Block write operations in production ---

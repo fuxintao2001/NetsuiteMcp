@@ -115,12 +115,27 @@ try {
       const targetPath = path.join(projectPath, 'AGENTS.md');
       const sizeBytes = Buffer.byteLength(output, 'utf-8');
 
+      // Prepare .agents/skills.json payload linking to master project skills
+      const skillsJsonContent = JSON.stringify({
+        entries: [
+          { path: path.join(projectRoot, 'skills') },
+          { path: path.join(projectRoot, '.agents', 'skills') }
+        ]
+      }, null, 2) + '\n';
+      const agentsDir = path.join(projectPath, '.agents');
+      const skillsJsonPath = path.join(agentsDir, 'skills.json');
+
       if (dryRun) {
         console.log(`🔍 [DRY RUN] ${path.basename(projectPath)}/AGENTS.md`);
         console.log(`   Account: ${accountId} | Env: ${envType} | Write: ${writeOpsEnabled ? '✅' : '❌'} | Size: ${sizeBytes} bytes`);
+        console.log(`🔍 [DRY RUN] ${path.basename(projectPath)}/.agents/skills.json`);
       } else {
         fs.writeFileSync(targetPath, output, 'utf-8');
-        console.log(`✅ Synced: ${path.basename(projectPath)}/AGENTS.md (${sizeBytes} bytes) — ${accountId} [${envType}]`);
+        if (!fs.existsSync(agentsDir)) {
+          fs.mkdirSync(agentsDir, { recursive: true });
+        }
+        fs.writeFileSync(skillsJsonPath, skillsJsonContent, 'utf-8');
+        console.log(`✅ Synced: ${path.basename(projectPath)}/AGENTS.md & .agents/skills.json — ${accountId} [${envType}]`);
       }
 
       successCount++;

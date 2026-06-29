@@ -119,10 +119,3 @@ export const SUITEQL_RULES_SUFFIX = `
  */
 export const METADATA_RULES_SUFFIX = `
 ⚠️ MUST be called before ns_runCustomSuiteQL to verify field names and types. Field names are case-sensitive — use them exactly as returned. Only fields marked x-n:joinable=true can be used in JOIN clauses.`;
-
-/**
- * Parallel execution reminder to append to `ns_runCustomSuiteQL`.
- * (Already included in SUITEQL_RULES_SUFFIX rule #13, kept here for
- *  backward-compat reference — not appended separately.)
- */
-export const PARALLEL_QUERY_SUFFIX = '\n⚠️ CRITICAL: If you need to execute two or more independent SuiteQL queries, you MUST use the \'netsuite_run_parallel_queries\' tool to run them concurrently. Do NOT call this tool (\'ns_runCustomSuiteQL\') multiple times sequentially unless a subsequent query depends on the output of a previous one.';

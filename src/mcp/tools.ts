@@ -472,7 +472,7 @@ export class NetSuiteMCPTools {
       }
 
       // --- Transient error retry: network issues and rate limits ---
-      const transientCodes = new Set(['ECONNABORTED', 'ENOTFOUND', 'ETIMEDOUT', 'EAI_AGAIN', 'ECONNRESET', 'EPIPE']);
+      const transientCodes = new Set(['ECONNABORTED', 'ENOTFOUND', 'ETIMEDOUT', 'EAI_AGAIN', 'ECONNRESET', 'EPIPE', 'ENETUNREACH', 'EHOSTUNREACH', 'ENETDOWN', 'ERR_NETWORK']);
       const retryableStatuses = new Set([429, 503]);
       const isTokenRefreshTransient = error instanceof TokenRefreshError && error.recoverable;
       const isTransient = isTokenRefreshTransient

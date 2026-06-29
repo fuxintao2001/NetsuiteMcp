@@ -95,7 +95,9 @@ export class TokenRefreshScheduler {
 
       if (wasSleeping) {
         // Force refresh after sleep — token is very likely expired
-        console.error(`🔄 [TokenRefreshScheduler] System wake detected (${Math.round(elapsed / 1000)}s since last tick). Force-refreshing token...`);
+        // Wait 5s before refreshing to allow macOS network/Wi-Fi adapter to reconnect after waking up
+        console.error(`🔄 [TokenRefreshScheduler] System wake detected (${Math.round(elapsed / 1000)}s since last tick). Waiting 5s for network to stabilize...`);
+        await new Promise(resolve => setTimeout(resolve, 5000));
         await this.target.forceRefreshToken();
       } else {
         // Normal path: ensureValidToken() auto-refreshes if within the 5-minute window

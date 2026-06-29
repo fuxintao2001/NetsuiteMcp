@@ -250,7 +250,9 @@ describe('MCP Handlers', () => {
     });
 
     it('should read the suiteql guide resource content', async () => {
-      const guidePath = path.join(testWorkspace, 'SUITEQL_GUIDE.md');
+      const guideDir = path.join(testWorkspace, 'skills', 'netsuite-ai-connector-instructions', 'references');
+      await fs.mkdir(guideDir, { recursive: true });
+      const guidePath = path.join(guideDir, 'SUITEQL_GUIDE.md');
       const testContent = '# Test SuiteQL Guide';
       await fs.writeFile(guidePath, testContent, 'utf-8');
 

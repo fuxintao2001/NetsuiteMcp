@@ -107,7 +107,7 @@ export function registerResourceHandlers(server: Server, projectRoot: string): v
     const { uri } = request.params;
 
     if (uri === 'netsuite://guides/suiteql') {
-      const filePath = join(projectRoot, 'SUITEQL_GUIDE.md');
+      const filePath = join(projectRoot, 'skills', 'netsuite-ai-connector-instructions', 'references', 'SUITEQL_GUIDE.md');
       const content = await fs.readFile(filePath, 'utf-8');
       return {
         contents: [

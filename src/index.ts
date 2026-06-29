@@ -26,16 +26,16 @@ import { validateEnv } from './utils/envValidator.js';
 // Instead we log the error and let the event loop continue.
 // ---------------------------------------------------------------------------
 process.on('uncaughtException', (error: any) => {
-  // If the pipe is broken, exit immediately to prevent logging loop
-  if (error?.code === 'EPIPE' || error?.code === 'ECONNRESET') {
+  // If the pipe is broken on stdio (not Axios HTTP), exit immediately to prevent logging loop
+  if ((error?.code === 'EPIPE' || error?.code === 'ECONNRESET') && !error?.config && !error?.request) {
     process.exit(0);
   }
   console.error('[MCP] uncaughtException:', error);
 });
 
 process.on('unhandledRejection', (reason: any) => {
-  // If the reason is a broken pipe, exit immediately
-  if (reason?.code === 'EPIPE' || reason?.code === 'ECONNRESET') {
+  // If the reason is a broken pipe on stdio (not Axios HTTP), exit immediately
+  if ((reason?.code === 'EPIPE' || reason?.code === 'ECONNRESET') && !reason?.config && !reason?.request) {
     process.exit(0);
   }
   console.error('[MCP] unhandledRejection:', reason);
