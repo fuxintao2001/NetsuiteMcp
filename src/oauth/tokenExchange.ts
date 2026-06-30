@@ -1,6 +1,8 @@
 import { httpClient } from '../utils/httpClient.js';
 import type { TokenData } from './sessionStorage.js';
 import { parseNetSuiteError } from '../utils/errors.js';
+import { formatNetSuiteAccountHost } from '../utils/environment.js';
+import { retryWithBackoff } from '../utils/resilience.js';
 
 /**
  * NetSuite OAuth token exchange utilities
@@ -26,6 +28,44 @@ interface OAuthConfig {
   redirectUri: string;
 }
 
+function isRetryableTokenError(error: unknown): boolean {
+  const err = error as { code?: string; message?: string; response?: { status?: number } };
+  if (err.code === 'ECONNABORTED' || err.message?.includes('Network Error')) {
+    return true;
+  }
+
+  const status = err.response?.status;
+  return status === 429 || status === 502 || status === 503 || status === 504;
+}
+
+async function postTokenRequest(
+  tokenUrl: string,
+  params: Record<string, string>
+): Promise<{ data: Record<string, unknown> }> {
+  return retryWithBackoff(
+    () => httpClient.post(tokenUrl, new URLSearchParams(params), {
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      timeout: 15000
+    }),
+    isRetryableTokenError,
+    {
+      retries: 3,
+      minTimeoutMs: 1000,
+      maxTimeoutMs: 8000,
+      factor: 2,
+      jitter: true
+    },
+    (error: unknown, attempt: number, delayMs: number) => {
+      const parsed = parseNetSuiteError(error);
+      console.error(
+        `⚠️ Token endpoint retry ${attempt} in ${Math.round(delayMs)}ms: ${parsed.message}`
+      );
+    }
+  );
+}
+
 /**
  * Exchange authorization code for access/refresh tokens
  */
@@ -34,7 +74,8 @@ export async function exchangeCodeForTokens(
   config: OAuthConfig,
   codeVerifier: string
 ): Promise<TokenData> {
-  const tokenUrl = `https://${config.accountId}.suitetalk.api.netsuite.com/services/rest/auth/oauth2/v1/token`;
+  const accountHost = formatNetSuiteAccountHost(config.accountId);
+  const tokenUrl = `https://${accountHost}.suitetalk.api.netsuite.com/services/rest/auth/oauth2/v1/token`;
 
   // CRITICAL: For Public Client with PKCE - all params in body, NO Authorization header
   const params = {
@@ -48,18 +89,13 @@ export async function exchangeCodeForTokens(
   console.error('🔄 Exchanging authorization code for tokens...');
 
   try {
-    const response = await httpClient.post(tokenUrl, new URLSearchParams(params), {
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded'
-      },
-      timeout: 15000
-    });
+    const response = await postTokenRequest(tokenUrl, params);
 
     const tokens: TokenData = {
-      access_token: response.data.access_token,
-      refresh_token: response.data.refresh_token,
-      expires_in: response.data.expires_in,
-      expires_at: Date.now() + (response.data.expires_in * 1000),
+      access_token: String(response.data.access_token),
+      refresh_token: String(response.data.refresh_token),
+      expires_in: Number(response.data.expires_in),
+      expires_at: Date.now() + (Number(response.data.expires_in) * 1000),
       accountId: config.accountId,
       clientId: config.clientId
     };
@@ -79,7 +115,8 @@ export async function exchangeCodeForTokens(
  */
 export async function refreshAccessToken(tokens: TokenData): Promise<TokenData> {
   const { refresh_token, accountId, clientId } = tokens;
-  const tokenUrl = `https://${accountId}.suitetalk.api.netsuite.com/services/rest/auth/oauth2/v1/token`;
+  const accountHost = formatNetSuiteAccountHost(accountId);
+  const tokenUrl = `https://${accountHost}.suitetalk.api.netsuite.com/services/rest/auth/oauth2/v1/token`;
 
   // For Public Client: include client_id in body
   const params = {
@@ -91,19 +128,14 @@ export async function refreshAccessToken(tokens: TokenData): Promise<TokenData> 
   console.error('🔄 Refreshing access token...');
 
   try {
-    const response = await httpClient.post(tokenUrl, new URLSearchParams(params), {
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded'
-      },
-      timeout: 15000
-    });
+    const response = await postTokenRequest(tokenUrl, params);
 
     const newTokens: TokenData = {
       ...tokens,
-      access_token: response.data.access_token,
-      refresh_token: response.data.refresh_token || refresh_token,
-      expires_in: response.data.expires_in,
-      expires_at: Date.now() + (response.data.expires_in * 1000)
+      access_token: String(response.data.access_token),
+      refresh_token: response.data.refresh_token ? String(response.data.refresh_token) : refresh_token,
+      expires_in: Number(response.data.expires_in),
+      expires_at: Date.now() + (Number(response.data.expires_in) * 1000)
     };
 
     console.error('✅ Token refreshed successfully');

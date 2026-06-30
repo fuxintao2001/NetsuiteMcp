@@ -7,6 +7,7 @@ import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { ConcurrencyLimiter, retryWithBackoff } from '../utils/resilience.js';
 import { httpClient } from '../utils/httpClient.js';
+import { formatNetSuiteAccountHost } from '../utils/environment.js';
 
 /**
  * Extracts table names from a SQL query string (used for cache invalidation).
@@ -168,10 +169,13 @@ export class NetSuiteMCPTools {
     const accountId = await this.oauthManager.getAccountId();
     if (accountId) {
       await cacheService.clearAccountCache(accountId);
+    } else {
+      throw new Error('Account ID not found. Please authenticate first.');
     }
 
     const accessToken = await this.oauthManager.ensureValidToken();
-    const url = `https://${accountId}.suitetalk.api.netsuite.com/services/rest/v1/session/cache/refresh`;
+    const accountHost = formatNetSuiteAccountHost(accountId);
+    const url = `https://${accountHost}.suitetalk.api.netsuite.com/services/rest/v1/session/cache/refresh`;
 
     try {
       await this.callNetSuiteApi(async () => {
@@ -521,7 +525,7 @@ export class NetSuiteMCPTools {
     if (!accountId) {
       throw new Error('Account ID not found. Please authenticate first.');
     }
-    return `https://${accountId}.suitetalk.api.netsuite.com/services/mcp/v1/all`;
+    return `https://${formatNetSuiteAccountHost(accountId)}.suitetalk.api.netsuite.com/services/mcp/v1/all`;
   }
 
   /** Check if a tool name is a metadata tool that should be cached. */

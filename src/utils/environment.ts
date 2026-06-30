@@ -14,6 +14,16 @@ export function isSandboxAccount(accountId: string): boolean {
 }
 
 /**
+ * Format a NetSuite account ID for use as a DNS hostname segment.
+ *
+ * NetSuite account IDs are commonly written as `123456_SB1`, but hostnames
+ * require the sandbox separator as a hyphen and should be lowercase.
+ */
+export function formatNetSuiteAccountHost(accountId: string): string {
+  return accountId.trim().replace(/_/g, '-').toLowerCase();
+}
+
+/**
  * Build the environment suffix that is appended to every tool description
  * during tool discovery (`list_tools`).
  *

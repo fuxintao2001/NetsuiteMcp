@@ -57,6 +57,25 @@ describe('tokenExchange', () => {
       expect(tokens.expires_at).toBeGreaterThan(Date.now());
     });
 
+    it('should format sandbox account IDs in the token endpoint host', async () => {
+      const spy = jest.spyOn(httpClient, 'post').mockResolvedValueOnce({
+        data: {
+          access_token: 'new-access-token',
+          refresh_token: 'new-refresh-token',
+          expires_in: 3600
+        }
+      } as any);
+
+      await exchangeCodeForTokens(mockCode, {
+        ...mockConfig,
+        accountId: '123456_SB1'
+      }, mockVerifier);
+
+      expect(spy.mock.calls[0][0]).toBe(
+        'https://123456-sb1.suitetalk.api.netsuite.com/services/rest/auth/oauth2/v1/token'
+      );
+    });
+
     it('should throw an error if the request fails', async () => {
       const mockError = {
         response: {
@@ -142,6 +161,28 @@ describe('tokenExchange', () => {
 
       const refreshed = await refreshAccessToken(mockTokens);
       expect(refreshed.refresh_token).toBe('my-refresh-token');
+    });
+
+    it('should format sandbox account IDs in the refresh endpoint host', async () => {
+      const spy = jest.spyOn(httpClient, 'post').mockResolvedValueOnce({
+        data: {
+          access_token: 'refreshed-access-token',
+          expires_in: 1800
+        }
+      } as any);
+
+      await refreshAccessToken({
+        access_token: 'old-access-token',
+        refresh_token: 'my-refresh-token',
+        expires_in: 3600,
+        expires_at: Date.now() - 1000,
+        accountId: '123456_SB1',
+        clientId: 'my-client-id'
+      });
+
+      expect(spy.mock.calls[0][0]).toBe(
+        'https://123456-sb1.suitetalk.api.netsuite.com/services/rest/auth/oauth2/v1/token'
+      );
     });
 
     it('should throw an error if refresh fails', async () => {

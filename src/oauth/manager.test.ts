@@ -282,4 +282,25 @@ describe('OAuthManager - startAuthFlow session preservation', () => {
 
     startSpy.mockRestore();
   });
+
+  it('should format sandbox account IDs in the browser authorization URL', async () => {
+    const startSpy = jest.spyOn(CallbackServer.prototype, 'start')
+      .mockImplementation(async (_state, callback) => {
+        await callback('new-auth-code');
+      });
+    const axiosSpy = jest.spyOn(httpClient, 'post').mockResolvedValue({
+      data: {
+        access_token: 'new-access-token',
+        refresh_token: 'new-refresh-token',
+        expires_in: 3600
+      }
+    } as any);
+
+    const authUrl = await manager.startAuthFlow({ accountId: '123456_SB1', clientId: 'my-client-id' });
+
+    expect(authUrl).toContain('https://123456-sb1.app.netsuite.com/app/login/oauth2/authorize.nl?');
+
+    startSpy.mockRestore();
+    axiosSpy.mockRestore();
+  });
 });

@@ -1,3 +1,5 @@
+import { formatNetSuiteAccountHost } from './environment.js';
+
 const RECORD_URL_MAP: Record<string, string> = {
   // Entities
   'customer': '/app/common/entity/custjob.nl',
@@ -80,7 +82,7 @@ export function generateNetSuiteUrl(
   if (!accountId || !recordId) return null;
 
   // DNS-compliant formatting: replace underscores with hyphens, lowercase
-  const formattedAccountId = accountId.toString().replace(/_/g, '-').toLowerCase();
+  const formattedAccountId = formatNetSuiteAccountHost(accountId.toString());
   
   // Normalize record type (lowercase and remove spaces, underscores, hyphens)
   const normalizedType = recordType ? recordType.toLowerCase().replace(/[\s_-]/g, '') : '';

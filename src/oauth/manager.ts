@@ -9,6 +9,7 @@ import type { TokenData } from './sessionStorage.js';
 import { exchangeCodeForTokens, refreshAccessToken, shouldRefreshToken, TokenRefreshError } from './tokenExchange.js';
 import { TokenRefreshScheduler } from '../utils/resilience.js';
 import { openBrowser } from '../utils/browserLauncher.js';
+import { formatNetSuiteAccountHost } from '../utils/environment.js';
 
 /**
  * Acquire a cross-process file-based lock by creating a directory.
@@ -160,7 +161,7 @@ export class OAuthManager {
       code_challenge_method: pkce.code_challenge_method
     });
 
-    return `https://${accountId}.app.netsuite.com/app/login/oauth2/authorize.nl?${params}`;
+    return `https://${formatNetSuiteAccountHost(accountId)}.app.netsuite.com/app/login/oauth2/authorize.nl?${params}`;
   }
 
   /**

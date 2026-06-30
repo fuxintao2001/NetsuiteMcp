@@ -11,52 +11,18 @@ import { readFileSync } from 'fs';
 import http from 'http';
 import https from 'https';
 import axios from 'axios';
+import { installGlobalErrorHandlers } from './utils/globalErrorHandlers.js';
 
 // Import handlers
 import { registerToolHandlers, textResult } from './handlers/tools.js';
 import { registerResourceHandlers } from './handlers/resources.js';
 import type { ToolHandlerDeps } from './handlers/tools.js';
 import { validateEnv } from './utils/envValidator.js';
-import { sanitizeError, sanitizeMessage } from './utils/errors.js';
 
 // ---------------------------------------------------------------------------
-// Global error handlers — LOG SANITIZED, EXIT ON FATAL UNCAUGHT
+// Global error handlers
 // ---------------------------------------------------------------------------
-process.on('uncaughtException', (error: any) => {
-  // If the pipe is broken on stdio (not Axios HTTP), exit immediately to prevent logging loop
-  if ((error?.code === 'EPIPE' || error?.code === 'ECONNRESET') && !error?.config && !error?.request) {
-    process.exit(0);
-  }
-  const sanitized = sanitizeError(error);
-  console.error('[MCP] Fatal Uncaught Exception:', sanitized.message);
-  if (error.stack) {
-    console.error(sanitizeMessage(error.stack));
-  }
-  
-  // Terminate cleanly to let system supervisor process a clean restart
-  console.error('[MCP] Process entering unstable state. Shutting down...');
-  process.exit(1);
-});
-
-process.on('unhandledRejection', (reason: any) => {
-  // If the reason is a broken pipe on stdio (not Axios HTTP), exit immediately
-  if ((reason?.code === 'EPIPE' || reason?.code === 'ECONNRESET') && !reason?.config && !reason?.request) {
-    process.exit(0);
-  }
-  const sanitized = sanitizeError(reason);
-  console.error('[MCP] Unhandled Promise Rejection:', sanitized.message);
-  if (reason instanceof Error && reason.stack) {
-    console.error(sanitizeMessage(reason.stack));
-  }
-});
-
-// Ensure the process exits when parent closes stdin
-process.stdin.on('close', () => {
-  process.exit(0);
-});
-process.stdin.on('end', () => {
-  process.exit(0);
-});
+installGlobalErrorHandlers();
 
 // ---------------------------------------------------------------------------
 // Configure Axios connection pooling

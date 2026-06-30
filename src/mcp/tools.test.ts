@@ -63,6 +63,26 @@ describe('NetSuiteMCPTools', () => {
       expect(globalAxiosPostSpy).toHaveBeenCalled();
       expect(cacheSetSpy).toHaveBeenCalledWith('test-account', 'toolsCache', mockApiResponse.data.result.tools, 3600);
     });
+
+    it('should format sandbox account IDs in the MCP endpoint host', async () => {
+      mockOAuthManager.getAccountId.mockResolvedValue('123456_SB1');
+      jest.spyOn(cacheService, 'get').mockResolvedValueOnce(null);
+      const mockApiResponse = {
+        data: {
+          result: {
+            tools: [{ name: 'ns_getRecord', description: 'Get a record' }]
+          }
+        }
+      };
+      globalAxiosPostSpy.mockResolvedValueOnce(mockApiResponse as any);
+      jest.spyOn(cacheService, 'set').mockResolvedValueOnce(undefined);
+
+      await toolsClient.fetchTools();
+
+      expect(globalAxiosPostSpy.mock.calls[0][0]).toBe(
+        'https://123456-sb1.suitetalk.api.netsuite.com/services/mcp/v1/all'
+      );
+    });
   });
 
   describe('executeTool', () => {

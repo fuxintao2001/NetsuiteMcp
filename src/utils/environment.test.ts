@@ -2,7 +2,7 @@
 // Environment utility tests
 // ---------------------------------------------------------------------------
 
-import { isSandboxAccount, buildEnvSuffix } from './environment.js';
+import { isSandboxAccount, buildEnvSuffix, formatNetSuiteAccountHost } from './environment.js';
 
 describe('isSandboxAccount', () => {
   it('returns true for _SB suffix', () => {
@@ -41,5 +41,13 @@ describe('buildEnvSuffix', () => {
 
   it('returns Production suffix for production account', () => {
     expect(buildEnvSuffix('5848789')).toBe(' [Account: 5848789, Env: Production]');
+  });
+});
+
+describe('formatNetSuiteAccountHost', () => {
+  it('formats account IDs for DNS hostnames', () => {
+    expect(formatNetSuiteAccountHost('5848789_SB1')).toBe('5848789-sb1');
+    expect(formatNetSuiteAccountHost(' 9260916-SB2 ')).toBe('9260916-sb2');
+    expect(formatNetSuiteAccountHost('TSTDRV123456')).toBe('tstdrv123456');
   });
 });
