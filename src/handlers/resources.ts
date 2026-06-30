@@ -12,7 +12,7 @@ import { join, basename } from 'path';
 function parseFrontmatter(content: string): { name?: string; description?: string } {
   const parts = content.split('---');
   if (parts.length < 3) return {};
-  const frontmatterText = parts[1];
+  const frontmatterText = parts[1] ?? '';
   const lines = frontmatterText.split('\n');
   const result: { name?: string; description?: string } = {};
 
@@ -26,11 +26,17 @@ function parseFrontmatter(content: string): { name?: string; description?: strin
     const descMatch = line.match(/^description:\s*(.*)/);
 
     if (nameMatch) {
-      result.name = nameMatch[1].trim();
-      currentKey = 'name';
+      const val = nameMatch[1];
+      if (val !== undefined) {
+        result.name = val.trim();
+        currentKey = 'name';
+      }
     } else if (descMatch) {
-      result.description = descMatch[1].trim();
-      currentKey = 'description';
+      const val = descMatch[1];
+      if (val !== undefined) {
+        result.description = val.trim();
+        currentKey = 'description';
+      }
     } else if (line.match(/^[a-zA-Z0-9_-]+:/)) {
       currentKey = null;
     } else if (currentKey && line.startsWith(' ')) {

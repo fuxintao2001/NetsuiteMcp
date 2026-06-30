@@ -1,5 +1,18 @@
 import http from 'http';
 
+function escapeHtml(str: string): string {
+  return str.replace(/[&<>"']/g, (m) => {
+    const map: Record<string, string> = {
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&#039;'
+    };
+    return map[m] || m;
+  });
+}
+
 /**
  * OAuth callback server for receiving authorization codes.
  * Handles the redirect from NetSuite after user authentication.
@@ -57,8 +70,9 @@ export class CallbackServer {
         settle('reject', error);
       });
 
-      this.server.listen(this.port, () => {
-        console.error(`🌐 OAuth callback server listening on http://localhost:${this.port}`);
+      // 绑定 127.0.0.1 回环口，防止局域网暴露
+      this.server.listen(this.port, '127.0.0.1', () => {
+        console.error(`🌐 OAuth callback server listening strictly on http://127.0.0.1:${this.port}`);
       });
 
       // 5-minute authentication timeout
@@ -98,11 +112,10 @@ export class CallbackServer {
         return;
       }
 
-      // CSRF validation
+      // CSRF validation - 过滤非致命的无效 state 错误请求，不触发 settle() 关闭
       if (state !== expectedState) {
         this.sendErrorPage(res, 'Invalid State', 'CSRF validation failed. Please try again.');
-        settle('reject', new Error('Invalid state parameter'));
-        return;
+        return; // 直接返回，不破坏当前服务器生命周期，允许真实认证请求重试
       }
 
       if (!code) {
@@ -142,10 +155,10 @@ export class CallbackServer {
     const statusCode = title.includes('Invalid') ? 400 : 500;
     res.writeHead(statusCode, { 'Content-Type': 'text/html; charset=utf-8' });
     res.end(`<!DOCTYPE html>
-<html><head><meta charset="UTF-8"><title>${title}</title></head>
+<html><head><meta charset="UTF-8"><title>${escapeHtml(title)}</title></head>
 <body style="font-family:system-ui;text-align:center;padding:50px;">
-<h1>❌ ${title}</h1>
-<p style="color:#d32f2f;font-size:1.1em;">${message}</p>
+<h1>❌ ${escapeHtml(title)}</h1>
+<p style="color:#d32f2f;font-size:1.1em;">${escapeHtml(message)}</p>
 <p style="color:#666;margin-top:30px;">You can close this window.</p>
 </body></html>`);
   }

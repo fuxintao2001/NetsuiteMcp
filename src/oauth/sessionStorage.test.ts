@@ -1,7 +1,18 @@
-import { SessionStorage } from './sessionStorage.js';
-import { describe, it, expect, beforeEach, afterEach } from '@jest/globals';
+import { describe, it, expect, beforeEach, afterEach, jest } from '@jest/globals';
 import fs from 'fs/promises';
 import path from 'path';
+
+jest.mock('./sessionStorage.js', () => {
+  const original = jest.requireActual('./sessionStorage.js') as any;
+  return {
+    ...original,
+    encrypt: (text: string) => text,
+    decrypt: (text: string) => text
+  };
+});
+
+import { SessionStorage } from './sessionStorage.js';
+
 
 describe('SessionStorage', () => {
   const testStoragePath = path.join(process.cwd(), '.test-session-storage');

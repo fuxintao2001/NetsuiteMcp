@@ -1,4 +1,4 @@
-import axios from 'axios';
+import { httpClient } from '../utils/httpClient.js';
 import type { TokenData } from './sessionStorage.js';
 import { parseNetSuiteError } from '../utils/errors.js';
 
@@ -48,7 +48,7 @@ export async function exchangeCodeForTokens(
   console.error('🔄 Exchanging authorization code for tokens...');
 
   try {
-    const response = await axios.post(tokenUrl, new URLSearchParams(params), {
+    const response = await httpClient.post(tokenUrl, new URLSearchParams(params), {
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded'
       },
@@ -91,7 +91,7 @@ export async function refreshAccessToken(tokens: TokenData): Promise<TokenData> 
   console.error('🔄 Refreshing access token...');
 
   try {
-    const response = await axios.post(tokenUrl, new URLSearchParams(params), {
+    const response = await httpClient.post(tokenUrl, new URLSearchParams(params), {
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded'
       },

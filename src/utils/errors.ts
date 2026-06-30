@@ -86,7 +86,7 @@ export function parseNetSuiteError(error: unknown): Error {
       const status = err.response.status || 'Unknown';
       const statusText = err.response.statusText || '';
       const titleMatch = data.match(/<title>([\s\S]*?)<\/title>/i);
-      const title = titleMatch ? titleMatch[1].trim() : '';
+      const title = titleMatch?.[1]?.trim() ?? '';
       return new Error(
         `HTTP ${status} (${statusText || 'Error'}): Server returned HTML response instead of JSON. ${
           title ? `Title: "${title}"` : ''
@@ -154,4 +154,50 @@ export function parseNetSuiteError(error: unknown): Error {
 
   return new Error(String(error));
 }
+
+export function sanitizeMessage(message: string): string {
+  if (!message) return message;
+  let sanitized = message;
+
+  // 正则过滤各种凭证敏感串
+  sanitized = sanitized.replace(/Bearer\s+[a-zA-Z0-9_\-\.]+/gi, 'Bearer [REDACTED]');
+  sanitized = sanitized.replace(/refresh_token=[a-zA-Z0-9_\-\.]+/gi, 'refresh_token=[REDACTED]');
+  sanitized = sanitized.replace(/client_id=[a-zA-Z0-9_\-\.]+/gi, 'client_id=[REDACTED]');
+  sanitized = sanitized.replace(/code_verifier=[a-zA-Z0-9_\-\.]+/gi, 'code_verifier=[REDACTED]');
+  sanitized = sanitized.replace(/"access_token"\s*:\s*"[^"]+"/gi, '"access_token":"[REDACTED]"');
+  sanitized = sanitized.replace(/"refresh_token"\s*:\s*"[^"]+"/gi, '"refresh_token":"[REDACTED]"');
+
+  // 正则过滤操作系统的绝对工作目录与用户物理路径
+  const cwd = process.cwd();
+  if (cwd) {
+    const registrySafe = cwd.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    sanitized = sanitized.replace(new RegExp(registrySafe, 'g'), '<PROJECT_ROOT>');
+  }
+  sanitized = sanitized.replace(/\/Users\/[a-zA-Z0-9_\-\.]+/gi, '/Users/<USER>');
+  sanitized = sanitized.replace(/\/home\/[a-zA-Z0-9_\-\.]+/gi, '/home/<USER>');
+
+  return sanitized;
+}
+
+/**
+ * 脱敏错误信息：优先提取 NetSuite 具体的 API 返回体（如 INVALID_SQL 详情），
+ * 然后对其做脱敏，同时避免 Axios 大对象泄露敏感 config 凭证。
+ */
+export function sanitizeError(error: unknown): Error {
+  if (!error) return new Error('Unknown error');
+
+  // 1. 提取 NetSuite 精确内部报错详情以防止 INVALID_SQL 等信息流失
+  const parsedError = parseNetSuiteError(error);
+
+  // 2. 对返回的报错 message 进行敏感路径与 credential 脱敏
+  const cleanMsg = sanitizeMessage(parsedError.message);
+  const cleanErr = new Error(cleanMsg);
+  
+  if (parsedError.stack) {
+    cleanErr.stack = sanitizeMessage(parsedError.stack);
+  }
+  
+  return cleanErr;
+}
+
 

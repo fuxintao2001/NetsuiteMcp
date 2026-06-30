@@ -17,20 +17,25 @@ import { registerToolHandlers, textResult } from './handlers/tools.js';
 import { registerResourceHandlers } from './handlers/resources.js';
 import type { ToolHandlerDeps } from './handlers/tools.js';
 import { validateEnv } from './utils/envValidator.js';
+import { sanitizeError, sanitizeMessage } from './utils/errors.js';
 
 // ---------------------------------------------------------------------------
-// Global error handlers — LOG ONLY, NEVER EXIT
-//
-// For a stdio MCP server, killing the process on transient errors (network
-// timeouts, DNS failures, etc.) causes the MCP client to see a disconnect.
-// Instead we log the error and let the event loop continue.
+// Global error handlers — LOG SANITIZED, EXIT ON FATAL UNCAUGHT
 // ---------------------------------------------------------------------------
 process.on('uncaughtException', (error: any) => {
   // If the pipe is broken on stdio (not Axios HTTP), exit immediately to prevent logging loop
   if ((error?.code === 'EPIPE' || error?.code === 'ECONNRESET') && !error?.config && !error?.request) {
     process.exit(0);
   }
-  console.error('[MCP] uncaughtException:', error);
+  const sanitized = sanitizeError(error);
+  console.error('[MCP] Fatal Uncaught Exception:', sanitized.message);
+  if (error.stack) {
+    console.error(sanitizeMessage(error.stack));
+  }
+  
+  // Terminate cleanly to let system supervisor process a clean restart
+  console.error('[MCP] Process entering unstable state. Shutting down...');
+  process.exit(1);
 });
 
 process.on('unhandledRejection', (reason: any) => {
@@ -38,7 +43,11 @@ process.on('unhandledRejection', (reason: any) => {
   if ((reason?.code === 'EPIPE' || reason?.code === 'ECONNRESET') && !reason?.config && !reason?.request) {
     process.exit(0);
   }
-  console.error('[MCP] unhandledRejection:', reason);
+  const sanitized = sanitizeError(reason);
+  console.error('[MCP] Unhandled Promise Rejection:', sanitized.message);
+  if (reason instanceof Error && reason.stack) {
+    console.error(sanitizeMessage(reason.stack));
+  }
 });
 
 // Ensure the process exits when parent closes stdin

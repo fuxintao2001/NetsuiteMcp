@@ -80,6 +80,51 @@ export const PARALLEL_QUERIES_TOOL = {
   }
 };
 
+export const PARALLEL_RECORDS_TOOL = {
+  name: 'netsuite_get_parallel_records',
+  description: 'Concurrently retrieve multiple NetSuite records (max 5). Use this instead of calling ns_getRecord multiple times sequentially.',
+  inputSchema: {
+    type: 'object' as const,
+    properties: {
+      records: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            recordType: { type: 'string', description: 'Record type (e.g. customer, salesorder, customrecord_xxx).' },
+            recordId: { type: 'string', description: 'Internal ID of the record.' },
+            fields: { type: 'string', description: 'Optional comma-separated list of fields to fetch.' }
+          },
+          required: ['recordType', 'recordId']
+        },
+        description: 'Array of records to fetch in parallel.'
+      }
+    },
+    required: ['records']
+  }
+};
+
+export const PARALLEL_METADATA_TOOL = {
+  name: 'netsuite_get_parallel_metadata',
+  description: 'Concurrently retrieve schemas/metadata for multiple NetSuite tables or record types (max 5). Use this instead of calling metadata tools multiple times sequentially.',
+  inputSchema: {
+    type: 'object' as const,
+    properties: {
+      recordTypes: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Array of table or record type names (e.g. ["customer", "salesorder"]).'
+      },
+      type: {
+        type: 'string',
+        enum: ['record', 'suiteql'],
+        description: 'The type of metadata to retrieve: "record" (standard Record Schema) or "suiteql" (SuiteQL Table Schema). Defaults to "record".'
+      }
+    },
+    required: ['recordTypes']
+  }
+};
+
 export const STATUS_TOOL = {
   name: 'netsuite_status',
   description: 'Show diagnostic information: authentication state, token expiry, account details, cache statistics, and environment type.',
@@ -87,7 +132,15 @@ export const STATUS_TOOL = {
 };
 
 /** All locally-handled tools (excluding AUTH_TOOL which has special routing). */
-export const LOCAL_TOOLS = [RECORD_LINK_TOOL, REFRESH_CACHE_TOOL, LOGOUT_TOOL, PARALLEL_QUERIES_TOOL, STATUS_TOOL];
+export const LOCAL_TOOLS = [
+  RECORD_LINK_TOOL,
+  REFRESH_CACHE_TOOL,
+  LOGOUT_TOOL,
+  PARALLEL_QUERIES_TOOL,
+  STATUS_TOOL,
+  PARALLEL_RECORDS_TOOL,
+  PARALLEL_METADATA_TOOL
+];
 
 // ---------------------------------------------------------------------------
 // Tool description enhancement suffixes

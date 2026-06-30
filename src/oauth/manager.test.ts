@@ -1,13 +1,21 @@
-import { jest } from '@jest/globals';
+import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals';
 
 jest.mock('../utils/browserLauncher.js', () => ({
   openBrowser: jest.fn().mockImplementation(async () => {})
 }));
 
+jest.mock('./sessionStorage.js', () => {
+  const original = jest.requireActual('./sessionStorage.js') as any;
+  return {
+    ...original,
+    encrypt: (text: string) => text,
+    decrypt: (text: string) => text
+  };
+});
+
 import { OAuthManager } from './manager.js';
 import { CallbackServer } from './callbackServer.js';
-import { describe, it, expect, beforeEach, afterEach } from '@jest/globals';
-import axios from 'axios';
+import { httpClient } from '../utils/httpClient.js';
 import fs from 'fs/promises';
 import path from 'path';
 
@@ -49,7 +57,7 @@ describe('OAuthManager - Concurrent Refresh', () => {
 
     // Mock axios post with a slight delay to simulate concurrency overlapping
     let postCallCount = 0;
-    const axiosSpy = jest.spyOn(axios, 'post').mockImplementation(() => {
+    const axiosSpy = jest.spyOn(httpClient, 'post').mockImplementation(() => {
       postCallCount++;
       return new Promise((resolve) => {
         setTimeout(() => {
@@ -101,7 +109,7 @@ describe('OAuthManager - Concurrent Refresh', () => {
     );
 
     let postCallCount = 0;
-    const axiosSpy = jest.spyOn(axios, 'post').mockImplementation(() => {
+    const axiosSpy = jest.spyOn(httpClient, 'post').mockImplementation(() => {
       postCallCount++;
       return new Promise((resolve) => {
         setTimeout(() => {
@@ -149,7 +157,7 @@ describe('OAuthManager - Concurrent Refresh', () => {
       'utf-8'
     );
 
-    const axiosSpy = jest.spyOn(axios, 'post');
+    const axiosSpy = jest.spyOn(httpClient, 'post');
 
     // Call with the token we think failed (which is 'old-token')
     // But current token is 'already-refreshed-token'.
@@ -216,7 +224,7 @@ describe('OAuthManager - startAuthFlow session preservation', () => {
     // Mock exchangeCodeForTokens helper (which is imported in tokenExchange)
     // Actually, manager.ts calls exchangeCodeForTokens.
     // Let's mock axios post for exchangeCodeForTokens
-    const axiosSpy = jest.spyOn(axios, 'post').mockResolvedValue({
+    const axiosSpy = jest.spyOn(httpClient, 'post').mockResolvedValue({
       data: {
         access_token: 'new-access-token',
         refresh_token: 'new-refresh-token',

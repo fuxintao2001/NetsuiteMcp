@@ -245,24 +245,31 @@ export class OAuthManager {
    * Ensure token is valid, auto-refresh if expiring soon
    */
   async ensureValidToken(): Promise<string> {
-    const session = await this.storage.load();
-
-    if (!session || !session.tokens) {
-      throw new Error('Not authenticated. Please run authentication first.');
-    }
-
+    // 1. Instantly return running promise to resolve concurrent race condition
     if (this.refreshPromise) {
       return this.refreshPromise;
     }
 
-    // Refresh if expiring in < 5 minutes,
-    // OR if past halfway through the token's lifetime (to keep refresh token alive)
-    if (shouldRefreshToken(session.tokens) || this.shouldProactivelyRenew(session.tokens)) {
-      console.error('⚠️  Token expiring soon or proactive renewal triggered, refreshing...');
-      return this.executeTokenRefresh(session, session.tokens.access_token);
-    }
+    // 2. Wrap load, expiration check, and validation inside a single cached promise
+    this.refreshPromise = (async () => {
+      try {
+        const session = await this.storage.load();
+        if (!session || !session.tokens) {
+          throw new Error('Not authenticated. Please run authentication first.');
+        }
 
-    return session.tokens.access_token;
+        if (shouldRefreshToken(session.tokens) || this.shouldProactivelyRenew(session.tokens)) {
+          console.error('⚠️ Token expiring soon or proactive renewal triggered, refreshing...');
+          return await this.executeTokenRefresh(session, session.tokens.access_token);
+        }
+
+        return session.tokens.access_token;
+      } finally {
+        this.refreshPromise = null;
+      }
+    })();
+
+    return this.refreshPromise;
   }
 
   /**
@@ -328,7 +335,7 @@ export class OAuthManager {
     accountId?: string;
     clientId?: string;
     tokenExpiresAt?: number;
-    tokenExpiresIn?: number;
+    tokenExpiresIn?: number | undefined;
     refreshSchedulerActive: boolean;
   }> {
     const session = await this.storage.load();

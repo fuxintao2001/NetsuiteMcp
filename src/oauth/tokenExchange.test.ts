@@ -1,6 +1,6 @@
 import { exchangeCodeForTokens, refreshAccessToken, shouldRefreshToken } from './tokenExchange.js';
 import { describe, it, expect, jest, beforeEach } from '@jest/globals';
-import axios from 'axios';
+import { httpClient } from '../utils/httpClient.js';
 
 describe('tokenExchange', () => {
   const mockConfig = {
@@ -25,7 +25,7 @@ describe('tokenExchange', () => {
         }
       };
 
-      const spy = jest.spyOn(axios, 'post').mockResolvedValueOnce(mockResponse as any);
+      const spy = jest.spyOn(httpClient, 'post').mockResolvedValueOnce(mockResponse as any);
 
       const tokens = await exchangeCodeForTokens(mockCode, mockConfig, mockVerifier);
 
@@ -68,7 +68,7 @@ describe('tokenExchange', () => {
         }
       };
       
-      jest.spyOn(axios, 'post').mockRejectedValueOnce(mockError as any);
+      jest.spyOn(httpClient, 'post').mockRejectedValueOnce(mockError as any);
 
       await expect(
         exchangeCodeForTokens(mockCode, mockConfig, mockVerifier)
@@ -95,7 +95,7 @@ describe('tokenExchange', () => {
         }
       };
 
-      const spy = jest.spyOn(axios, 'post').mockResolvedValueOnce(mockResponse as any);
+      const spy = jest.spyOn(httpClient, 'post').mockResolvedValueOnce(mockResponse as any);
 
       const refreshed = await refreshAccessToken(mockTokens);
 
@@ -138,14 +138,14 @@ describe('tokenExchange', () => {
         }
       };
 
-      jest.spyOn(axios, 'post').mockResolvedValueOnce(mockResponse as any);
+      jest.spyOn(httpClient, 'post').mockResolvedValueOnce(mockResponse as any);
 
       const refreshed = await refreshAccessToken(mockTokens);
       expect(refreshed.refresh_token).toBe('my-refresh-token');
     });
 
     it('should throw an error if refresh fails', async () => {
-      jest.spyOn(axios, 'post').mockRejectedValueOnce(new Error('Network error') as any);
+      jest.spyOn(httpClient, 'post').mockRejectedValueOnce(new Error('Network error') as any);
 
       await expect(
         refreshAccessToken({

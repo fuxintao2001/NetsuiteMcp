@@ -62,7 +62,13 @@ Detailed knowledge is organized into Antigravity Skills. Read the corresponding 
   - `ns_` prefix: NetSuite-proxied tools (routed to NetSuite REST API).
   - `netsuite_` prefix: Local tools (handled entirely within the MCP server).
 
-### Parallel Query Rule
+### Parallel Decision-Making Rules
 
 > [!IMPORTANT]
-> **🚨 Parallel Query Rule:** If you need to execute two or more independent SuiteQL queries, you **MUST** run them concurrently using `netsuite_run_parallel_queries`. **Directly calling `ns_runCustomSuiteQL` sequentially is strictly prohibited** unless a subsequent query depends on the output of a previous one.
+> **🚨 Parallel Execution Constraint:** To minimize slow NetSuite network round-trip latencies, you **MUST** execute independent actions in parallel.
+>
+> 1. **Parallel Queries:** If you need to execute 2+ independent SuiteQL queries, you **MUST** run them concurrently using `netsuite_run_parallel_queries`. Sequential execution of `ns_runCustomSuiteQL` is strictly prohibited unless there is a dependency.
+> 2. **Parallel Records:** If you need to retrieve 2+ records, you **MUST** fetch them concurrently using `netsuite_get_parallel_records`. Avoid multiple sequential calls to `ns_getRecord`.
+> 3. **Parallel Metadata:** If you need to query schema/metadata for 2+ tables or record types, you **MUST** retrieve them concurrently using `netsuite_get_parallel_metadata`.
+> 4. **Multi-Tool Concurrent Invocation:** When using MCP clients that support parallel tool calling, you **MUST** output all independent tool calls in a single turn instead of sequentially.
+

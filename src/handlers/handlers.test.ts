@@ -122,6 +122,65 @@ describe('MCP Handlers', () => {
       expect(result.individualResults[1].result).toEqual({ data: [2] });
     });
 
+    it('should retrieve multiple records in parallel', async () => {
+      const mockRecord1 = { id: '101', name: 'Cust 1' };
+      const mockRecord2 = { id: '102', name: 'Cust 2' };
+      mockMCPTools.executeTool
+        .mockResolvedValueOnce(mockRecord1)
+        .mockResolvedValueOnce(mockRecord2);
+
+      const callHandler = toolHandlers.get(CallToolRequestSchema);
+      const response = await callHandler!({
+        params: {
+          name: 'netsuite_get_parallel_records',
+          arguments: {
+            records: [
+              { recordType: 'customer', recordId: '101' },
+              { recordType: 'customer', recordId: '102' }
+            ]
+          }
+        }
+      });
+
+      const result = JSON.parse(response.content[0].text);
+      expect(result.totalRecords).toBe(2);
+      expect(result.successfulRecords).toBe(2);
+      expect(result.failedRecords).toBe(0);
+      expect(result.individualResults[0].result).toEqual(mockRecord1);
+      expect(result.individualResults[1].result).toEqual(mockRecord2);
+    });
+
+    it('should retrieve multiple metadata definitions in parallel', async () => {
+      const mockMeta1 = {
+        success: true,
+        metadata: {
+          properties: {
+            fieldA: { type: 'string', title: 'Field A' }
+          }
+        }
+      };
+      mockMCPTools.executeTool
+        .mockResolvedValueOnce(mockMeta1)
+        .mockResolvedValueOnce(mockMeta1);
+
+      const callHandler = toolHandlers.get(CallToolRequestSchema);
+      const response = await callHandler!({
+        params: {
+          name: 'netsuite_get_parallel_metadata',
+          arguments: {
+            recordTypes: ['customer', 'salesorder'],
+            type: 'record'
+          }
+        }
+      });
+
+      const result = JSON.parse(response.content[0].text);
+      expect(result.totalMetadataRequests).toBe(2);
+      expect(result.type).toBe('record');
+      expect(result.successfulRequests).toBe(2);
+      expect(result.individualResults[0].result).toContain('| fieldA | string | Field A |');
+    });
+
     it('should generate NetSuite deep links and append to record actions', async () => {
       mockMCPTools.executeTool.mockResolvedValue({ id: 100, type: 'customer' });
       const callHandler = toolHandlers.get(CallToolRequestSchema);

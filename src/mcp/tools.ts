@@ -1,4 +1,3 @@
-import axios from 'axios';
 import { cacheService } from '../utils/cache.js';
 import { OAuthManager } from '../oauth/manager.js';
 import { TokenRefreshError } from '../oauth/tokenExchange.js';
@@ -6,6 +5,8 @@ import { parseNetSuiteError } from '../utils/errors.js';
 import fs from 'fs/promises';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
+import { ConcurrencyLimiter, retryWithBackoff } from '../utils/resilience.js';
+import { httpClient } from '../utils/httpClient.js';
 
 /**
  * Extracts table names from a SQL query string (used for cache invalidation).
@@ -16,7 +17,10 @@ function extractTableNames(sqlQuery: string): string[] {
   const regex = /\b(?:from|join)\s+([a-zA-Z0-9_-]+)\b/g;
   let match;
   while ((match = regex.exec(normalized)) !== null) {
-    if (match[1]) tables.add(match[1]);
+    const tableName = match[1];
+    if (tableName !== undefined) {
+      tables.add(tableName);
+    }
   }
   return Array.from(tables);
 }
@@ -36,6 +40,8 @@ export class NetSuiteMCPTools {
   private readonly oauthManager: OAuthManager;
   customRecordMappings: Map<string, number> = new Map();
   hasFetchedMappings = false;
+
+  private netsuiteLimiter = new ConcurrencyLimiter(5);
 
   constructor(oauthManager: OAuthManager) {
     this.oauthManager = oauthManager;
@@ -168,12 +174,14 @@ export class NetSuiteMCPTools {
     const url = `https://${accountId}.suitetalk.api.netsuite.com/services/rest/v1/session/cache/refresh`;
 
     try {
-      await axios.post(url, {}, {
-        headers: {
-          'Authorization': `Bearer ${accessToken}`,
-          'Content-Type': 'application/json'
-        },
-        timeout: 10000
+      await this.callNetSuiteApi(async () => {
+        await httpClient.post(url, {}, {
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Content-Type': 'application/json'
+          },
+          timeout: 10000
+        });
       });
       console.error('✅ NetSuite REST session cache refreshed');
     } catch (error: unknown) {
@@ -284,6 +292,7 @@ export class NetSuiteMCPTools {
         const existing = await cacheService.get(accountId, cacheKey);
         if (!existing) {
           const recordInfo = data.records[recordType];
+          if (!recordInfo) continue;
           const converted = this.convertRecordInfoToMetadata(recordInfo);
           await cacheService.set(accountId, cacheKey, converted);
           seedCount++;
@@ -411,6 +420,36 @@ export class NetSuiteMCPTools {
   // Private helpers
   // ---------------------------------------------------------------------------
 
+  private isRetryableError(error: any): boolean {
+    if (error.code === 'ECONNABORTED' || error.message?.includes('Network Error')) {
+      return true;
+    }
+    const status = error.response?.status;
+    return status === 429 || status === 503;
+  }
+
+  async callNetSuiteApi<T>(requestFn: () => Promise<T>): Promise<T> {
+    return this.netsuiteLimiter.run(async () => {
+      return retryWithBackoff(
+        requestFn,
+        this.isRetryableError.bind(this),
+        {
+          retries: 3,
+          minTimeoutMs: 1000,
+          maxTimeoutMs: 15000,
+          factor: 2,
+          jitter: true
+        },
+        (error: any, attempt: number, delayMs: number) => {
+          console.error(
+            `⚠️ [NetSuite Request Retry] Attempt ${attempt} failed. ` +
+            `Retrying in ${Math.round(delayMs)}ms... Error: ${error.message || error}`
+          );
+        }
+      );
+    });
+  }
+
   /**
    * Core JSON-RPC 2.0 call to NetSuite MCP API.
    * Includes single 401 auto-retry after force-refreshing the token.
@@ -437,7 +476,7 @@ export class NetSuiteMCPTools {
     if (params) body.params = params;
 
     const makeRequest = async (token: string): Promise<T> => {
-      const response = await axios.post(endpoint, body, {
+      const response = await httpClient.post(endpoint, body, {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
@@ -460,7 +499,7 @@ export class NetSuiteMCPTools {
     let accessToken = '';
     try {
       accessToken = await this.oauthManager.ensureValidToken();
-      return await makeRequest(accessToken);
+      return await this.callNetSuiteApi(() => makeRequest(accessToken));
     } catch (error: unknown) {
       const axiosErr = error as { response?: { status?: number }; code?: string };
 
@@ -468,23 +507,7 @@ export class NetSuiteMCPTools {
       if (axiosErr.response?.status === 401) {
         console.error('🔄 [401 Retry] Force-refreshing token and retrying...');
         accessToken = await this.oauthManager.forceRefreshToken(accessToken);
-        return await makeRequest(accessToken);
-      }
-
-      // --- Transient error retry: network issues and rate limits ---
-      const transientCodes = new Set(['ECONNABORTED', 'ENOTFOUND', 'ETIMEDOUT', 'EAI_AGAIN', 'ECONNRESET', 'EPIPE', 'ENETUNREACH', 'EHOSTUNREACH', 'ENETDOWN', 'ERR_NETWORK']);
-      const retryableStatuses = new Set([429, 503]);
-      const isTokenRefreshTransient = error instanceof TokenRefreshError && error.recoverable;
-      const isTransient = isTokenRefreshTransient
-        || transientCodes.has(axiosErr.code || '')
-        || retryableStatuses.has(axiosErr.response?.status || 0);
-
-      if (isTransient) {
-        const reason = isTokenRefreshTransient ? 'token refresh timeout/network error' : (axiosErr.code || `HTTP ${axiosErr.response?.status}`);
-        console.error(`🔄 [Transient Retry] ${reason} — waiting 2s then retrying...`);
-        await new Promise(resolve => setTimeout(resolve, 2000));
-        const nextToken = await this.oauthManager.ensureValidToken();
-        return await makeRequest(nextToken);
+        return await this.callNetSuiteApi(() => makeRequest(accessToken));
       }
 
       throw error;
@@ -508,7 +531,8 @@ export class NetSuiteMCPTools {
 
   /** Generate a cache key for metadata tools. */
   private metadataCacheKey(toolName: string, params: Record<string, unknown>): string {
-    const recordType = (params.recordType as string) || (params.tableName as string) || 'all';
+    const recordTypeRaw = params.recordType ?? params.tableName ?? 'all';
+    const recordType = typeof recordTypeRaw === 'string' ? recordTypeRaw.toLowerCase() : 'all';
     return `${toolName}_${recordType}`;
   }
 
@@ -527,7 +551,8 @@ export class NetSuiteMCPTools {
     }
     // Wrapped shape: { content: [{ text: '...' }] }
     else if (Array.isArray(resObj.content)) {
-      const firstContent = (resObj.content as Array<{ text?: string }>)[0];
+      const contentList = resObj.content as Array<{ text?: string }>;
+      const firstContent = contentList[0];
       if (firstContent?.text && typeof firstContent.text === 'string') {
         try {
           const parsed = JSON.parse(firstContent.text) as Record<string, unknown>;
@@ -573,7 +598,8 @@ export class NetSuiteMCPTools {
 
     // Unwrap content wrapper
     if (Array.isArray(data.content)) {
-      const content = (data.content as Array<{ text?: string }>)[0];
+      const contentList = data.content as Array<{ text?: string }>;
+      const content = contentList[0];
       if (content?.text && typeof content.text === 'string') {
         try {
           data = JSON.parse(content.text) as Record<string, unknown>;

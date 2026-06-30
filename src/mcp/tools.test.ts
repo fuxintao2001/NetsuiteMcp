@@ -1,7 +1,8 @@
 import { NetSuiteMCPTools } from './tools.js';
 import { cacheService } from '../utils/cache.js';
 import { describe, it, expect, jest, beforeEach, afterEach } from '@jest/globals';
-import axios from 'axios';
+import { httpClient } from '../utils/httpClient.js';
+
 
 describe('NetSuiteMCPTools', () => {
   let mockOAuthManager: any;
@@ -18,7 +19,7 @@ describe('NetSuiteMCPTools', () => {
     };
 
     // Pre-emptively mock axios.post globally to intercept constructor background calls
-    globalAxiosPostSpy = jest.spyOn(axios, 'post').mockResolvedValue({
+    globalAxiosPostSpy = jest.spyOn(httpClient, 'post').mockResolvedValue({
       data: {
         result: {
           records: [],

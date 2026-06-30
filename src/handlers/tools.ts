@@ -12,6 +12,7 @@ import { generateNetSuiteUrl } from '../utils/netsuiteUrls.js';
 import { asyncJsonParse } from '../utils/json.js';
 import { cacheService } from '../utils/cache.js';
 import { isSandboxAccount, buildEnvSuffix } from '../utils/environment.js';
+import { cleanRecordPayload, formatMetadataToCompactMarkdown } from '../utils/contextSlimmer.js';
 import {
   AUTH_TOOL, LOGOUT_TOOL, LOCAL_TOOLS, STATUS_TOOL,
   SUITEQL_RULES_SUFFIX, METADATA_RULES_SUFFIX
@@ -115,6 +116,136 @@ async function handleRunParallelQueries(
     totalQueries: queries.length,
     successfulQueries: results.filter(r => r.success).length,
     failedQueries: results.filter(r => !r.success).length,
+    totalDurationMs: Date.now() - startTime,
+    individualResults: results
+  }, null, 2));
+}
+
+interface RecordToFetch {
+  recordType: string;
+  recordId: string;
+  fields?: string;
+}
+
+async function handleGetParallelRecords(
+  args: Record<string, unknown>,
+  mcpTools: NetSuiteMCPTools
+): Promise<ToolResponse> {
+  const records = args.records as RecordToFetch[] | undefined;
+  if (!Array.isArray(records) || records.length === 0) {
+    return textResult('❌ Invalid arguments: records must be a non-empty array.', true);
+  }
+
+  const startTime = Date.now();
+  const concurrencyLimit = 5;
+  const results: Array<Record<string, unknown>> = new Array(records.length);
+  let nextIndex = 0;
+
+  const worker = async (): Promise<void> => {
+    while (nextIndex < records.length) {
+      const index = nextIndex++;
+      const item = records[index];
+      if (!item) continue;
+      const queryStart = Date.now();
+      try {
+        const result = await mcpTools.executeTool('ns_getRecord', {
+          recordType: item.recordType,
+          recordId: item.recordId,
+          fields: item.fields
+        });
+        const parsedResult = typeof result === 'string' ? await asyncJsonParse(result) : result;
+        results[index] = {
+          index,
+          success: true,
+          durationMs: Date.now() - queryStart,
+          recordType: item.recordType,
+          recordId: item.recordId,
+          result: cleanRecordPayload(parsedResult)
+        };
+      } catch (err: unknown) {
+        results[index] = {
+          index,
+          success: false,
+          durationMs: Date.now() - queryStart,
+          recordType: item.recordType,
+          recordId: item.recordId,
+          error: err instanceof Error ? err.message : String(err)
+        };
+      }
+    }
+  };
+
+  const workers: Promise<void>[] = [];
+  for (let i = 0; i < Math.min(concurrencyLimit, records.length); i++) {
+    workers.push(worker());
+  }
+  await Promise.all(workers);
+
+  return textResult(JSON.stringify({
+    totalRecords: records.length,
+    successfulRecords: results.filter(r => r.success).length,
+    failedRecords: results.filter(r => !r.success).length,
+    totalDurationMs: Date.now() - startTime,
+    individualResults: results
+  }, null, 2));
+}
+
+async function handleGetParallelMetadata(
+  args: Record<string, unknown>,
+  mcpTools: NetSuiteMCPTools
+): Promise<ToolResponse> {
+  const recordTypes = args.recordTypes as string[] | undefined;
+  const metaType = (args.type || 'record') as 'record' | 'suiteql';
+
+  if (!Array.isArray(recordTypes) || recordTypes.length === 0) {
+    return textResult('❌ Invalid arguments: recordTypes must be a non-empty array.', true);
+  }
+
+  const toolName = metaType === 'suiteql' ? 'ns_getSuiteQLMetadata' : 'ns_getRecordTypeMetadata';
+  const startTime = Date.now();
+  const concurrencyLimit = 5;
+  const results: Array<Record<string, unknown>> = new Array(recordTypes.length);
+  let nextIndex = 0;
+
+  const worker = async (): Promise<void> => {
+    while (nextIndex < recordTypes.length) {
+      const index = nextIndex++;
+      const recordType = recordTypes[index];
+      if (!recordType) continue;
+      const queryStart = Date.now();
+      try {
+        const result = await mcpTools.executeTool(toolName, { recordType });
+        const parsedResult = typeof result === 'string' ? await asyncJsonParse(result) : result;
+        results[index] = {
+          index,
+          success: true,
+          durationMs: Date.now() - queryStart,
+          recordType,
+          result: formatMetadataToCompactMarkdown(parsedResult)
+        };
+      } catch (err: unknown) {
+        results[index] = {
+          index,
+          success: false,
+          durationMs: Date.now() - queryStart,
+          recordType,
+          error: err instanceof Error ? err.message : String(err)
+        };
+      }
+    }
+  };
+
+  const workers: Promise<void>[] = [];
+  for (let i = 0; i < Math.min(concurrencyLimit, recordTypes.length); i++) {
+    workers.push(worker());
+  }
+  await Promise.all(workers);
+
+  return textResult(JSON.stringify({
+    totalMetadataRequests: recordTypes.length,
+    type: metaType,
+    successfulRequests: results.filter(r => r.success).length,
+    failedRequests: results.filter(r => !r.success).length,
     totalDurationMs: Date.now() - startTime,
     individualResults: results
   }, null, 2));
@@ -292,6 +423,12 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
       if (name === 'netsuite_run_parallel_queries') {
         return await handleRunParallelQueries(safeArgs, mcpTools);
       }
+      if (name === 'netsuite_get_parallel_records') {
+        return await handleGetParallelRecords(safeArgs, mcpTools);
+      }
+      if (name === 'netsuite_get_parallel_metadata') {
+        return await handleGetParallelMetadata(safeArgs, mcpTools);
+      }
 
       // --- Block write operations in production ---
       if (name === 'ns_createRecord' || name === 'ns_updateRecord') {
@@ -305,7 +442,17 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
       }
 
       // --- Proxy to NetSuite MCP API ---
-      const result = await mcpTools.executeTool(name, safeArgs);
+      let result = await mcpTools.executeTool(name, safeArgs);
+
+      if (name === 'ns_getRecordTypeMetadata' || name === 'ns_getSuiteQLMetadata') {
+        const compactMarkdown = formatMetadataToCompactMarkdown(result);
+        return textResult(compactMarkdown);
+      }
+
+      if (name === 'ns_getRecord' || name === 'ns_createRecord' || name === 'ns_updateRecord') {
+        result = cleanRecordPayload(result);
+      }
+
       let responseText = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
 
       // Auto-append UI deep link for record operations

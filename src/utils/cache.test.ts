@@ -28,14 +28,8 @@ describe('CacheService', () => {
     await cacheService.set(accountId, key, data);
     
     // Reach into the class to clear just the memory cache to test L2 fallback
-    // We can simulate this by clearing account cache (which deletes L2), then rewriting the file manually
-    await cacheService.clearAccountCache(accountId);
-    
-    // Manually write to L2
-    const projectRoot = process.cwd();
-    const fsPath = path.join(projectRoot, '.cache', accountId.toLowerCase().replace(/_/g, '-'), `${key}.json`);
-    await fs.mkdir(path.dirname(fsPath), { recursive: true });
-    await fs.writeFile(fsPath, JSON.stringify(data), 'utf-8');
+    const memKey = `${accountId.toLowerCase()}::${key.toLowerCase()}`;
+    cacheService['memoryCache'].del(memKey);
 
     const result = await cacheService.get(accountId, key);
     expect(result).toEqual(data);
