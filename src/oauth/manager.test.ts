@@ -4,15 +4,6 @@ jest.mock('../utils/browserLauncher.js', () => ({
   openBrowser: jest.fn().mockImplementation(async () => {})
 }));
 
-jest.mock('./sessionStorage.js', () => {
-  const original = jest.requireActual('./sessionStorage.js') as any;
-  return {
-    ...original,
-    encrypt: (text: string) => text,
-    decrypt: (text: string) => text
-  };
-});
-
 import { OAuthManager } from './manager.js';
 import { CallbackServer } from './callbackServer.js';
 import { httpClient } from '../utils/httpClient.js';

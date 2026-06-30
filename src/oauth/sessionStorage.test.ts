@@ -1,15 +1,6 @@
-import { describe, it, expect, beforeEach, afterEach, jest } from '@jest/globals';
+import { describe, it, expect, beforeEach, afterEach } from '@jest/globals';
 import fs from 'fs/promises';
 import path from 'path';
-
-jest.mock('./sessionStorage.js', () => {
-  const original = jest.requireActual('./sessionStorage.js') as any;
-  return {
-    ...original,
-    encrypt: (text: string) => text,
-    decrypt: (text: string) => text
-  };
-});
 
 import { SessionStorage } from './sessionStorage.js';
 
@@ -61,6 +52,27 @@ describe('SessionStorage', () => {
     it('should return null if session file does not exist', async () => {
       const result = await sessionStorage.load();
       expect(result).toBeNull();
+    });
+
+    it('should rename corrupted session file instead of deleting it', async () => {
+      // Setup file with invalid JSON content
+      await fs.mkdir(testStoragePath, { recursive: true });
+      await fs.writeFile(sessionFile, 'invalid-json-content', 'utf-8');
+
+      const result = await sessionStorage.load();
+      expect(result).toBeNull();
+
+      // Verify session file no longer exists (it was renamed)
+      const fileExists = await fs.stat(sessionFile).then(() => true).catch(() => false);
+      expect(fileExists).toBe(false);
+
+      // Verify a backup corrupted file was created in the storage directory
+      const files = await fs.readdir(testStoragePath);
+      const corruptedFile = files.find(f => f.startsWith('session.corrupted.'));
+      expect(corruptedFile).toBeDefined();
+
+      const corruptedContent = await fs.readFile(path.join(testStoragePath, corruptedFile!), 'utf-8');
+      expect(corruptedContent).toBe('invalid-json-content');
     });
   });
 
