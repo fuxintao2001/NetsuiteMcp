@@ -50,18 +50,37 @@ describe('Resilience Utilities', () => {
       const limiter = new ConcurrencyLimiter(2);
       const activeJobs: number[] = [];
       const order: number[] = [];
+      const resolves: (() => void)[] = [];
 
-      const job = async (id: number, delay: number) => {
+      const job = async (id: number) => {
         await limiter.run(async () => {
           activeJobs.push(id);
           expect(activeJobs.length).toBeLessThanOrEqual(2);
-          await new Promise(resolve => setTimeout(resolve, delay));
+          await new Promise<void>(resolve => {
+            resolves.push(resolve);
+          });
           activeJobs.splice(activeJobs.indexOf(id), 1);
           order.push(id);
         });
       };
 
-      await Promise.all([job(1, 10), job(2, 5), job(3, 1)]);
+      const promise = Promise.all([job(1), job(2), job(3)]);
+
+      // Wait a tiny bit to let all run() calls reach their limit/queues
+      await new Promise(resolve => setTimeout(resolve, 5));
+
+      // Resolve job 2 first (resolves[1])
+      resolves[1]();
+      await new Promise(resolve => setTimeout(resolve, 5));
+
+      // Resolve job 3 (resolves[2]) which was queued and starts after job 2 finished
+      resolves[2]();
+      await new Promise(resolve => setTimeout(resolve, 5));
+
+      // Resolve job 1 (resolves[0])
+      resolves[0]();
+
+      await promise;
       expect(order).toEqual([2, 3, 1]);
     });
   });
