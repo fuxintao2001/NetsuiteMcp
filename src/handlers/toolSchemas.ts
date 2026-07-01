@@ -64,67 +64,6 @@ export const REFRESH_CACHE_TOOL = {
   }
 };
 
-export const PARALLEL_QUERIES_TOOL = {
-  name: 'netsuite_run_parallel_queries',
-  description: 'Execute multiple SuiteQL queries concurrently (max 5). Use this instead of calling ns_runCustomSuiteQL multiple times sequentially.',
-  inputSchema: {
-    type: 'object' as const,
-    properties: {
-      queries: {
-        type: 'array',
-        items: { type: 'string' },
-        description: 'Array of SuiteQL query strings to execute in parallel.'
-      }
-    },
-    required: ['queries']
-  }
-};
-
-export const PARALLEL_RECORDS_TOOL = {
-  name: 'netsuite_get_parallel_records',
-  description: 'Concurrently retrieve multiple NetSuite records (max 5). Use this instead of calling ns_getRecord multiple times sequentially.',
-  inputSchema: {
-    type: 'object' as const,
-    properties: {
-      records: {
-        type: 'array',
-        items: {
-          type: 'object',
-          properties: {
-            recordType: { type: 'string', description: 'Record type (e.g. customer, salesorder, customrecord_xxx).' },
-            recordId: { type: 'string', description: 'Internal ID of the record.' },
-            fields: { type: 'string', description: 'Optional comma-separated list of fields to fetch.' }
-          },
-          required: ['recordType', 'recordId']
-        },
-        description: 'Array of records to fetch in parallel.'
-      }
-    },
-    required: ['records']
-  }
-};
-
-export const PARALLEL_METADATA_TOOL = {
-  name: 'netsuite_get_parallel_metadata',
-  description: 'Concurrently retrieve schemas/metadata for multiple NetSuite tables or record types (max 5). Use this instead of calling metadata tools multiple times sequentially.',
-  inputSchema: {
-    type: 'object' as const,
-    properties: {
-      recordTypes: {
-        type: 'array',
-        items: { type: 'string' },
-        description: 'Array of table or record type names (e.g. ["customer", "salesorder"]).'
-      },
-      type: {
-        type: 'string',
-        enum: ['record', 'suiteql'],
-        description: 'The type of metadata to retrieve: "record" (standard Record Schema) or "suiteql" (SuiteQL Table Schema). Defaults to "record".'
-      }
-    },
-    required: ['recordTypes']
-  }
-};
-
 export const STATUS_TOOL = {
   name: 'netsuite_status',
   description: 'Show diagnostic information: authentication state, token expiry, account details, cache statistics, and environment type.',
@@ -136,10 +75,7 @@ export const LOCAL_TOOLS = [
   RECORD_LINK_TOOL,
   REFRESH_CACHE_TOOL,
   LOGOUT_TOOL,
-  PARALLEL_QUERIES_TOOL,
-  STATUS_TOOL,
-  PARALLEL_RECORDS_TOOL,
-  PARALLEL_METADATA_TOOL
+  STATUS_TOOL
 ];
 
 // ---------------------------------------------------------------------------
@@ -153,19 +89,12 @@ export const LOCAL_TOOLS = [
  */
 export const SUITEQL_RULES_SUFFIX = `
 ⚠️ MANDATORY RULES:
-1. MUST call ns_getSuiteQLMetadata FIRST to verify table/field names before writing any query.
-2. Do NOT use SELECT * — explicitly list all required fields.
-3. MUST include pagination: FETCH FIRST N ROWS ONLY or ROWNUM <= N (do NOT use LIMIT).
-4. Use TO_DATE('YYYY-MM-DD', 'YYYY-MM-DD') for date comparisons — never use bare date strings.
-5. Use || for string concatenation (not +).
-6. Use BUILTIN.DF(field) to get display values instead of complex JOINs.
-7. Do NOT use WITH/CTE, ILIKE, :: type casting, or square brackets [].
-8. Use INNER JOIN / LEFT JOIN explicitly — no implicit comma joins.
-9. Use NVL(field, default) for null handling.
-10. Use id for primary keys (not internalid).
-11. Use posting = 'T' where GL accuracy is required.
-12. Use approvalstatus = 2 where approved-only data is required.
-13. For 2+ independent queries, use netsuite_run_parallel_queries instead of calling this tool multiple times.`;
+1. MUST call ns_getSuiteQLMetadata FIRST to verify table/field names.
+2. Do NOT use SELECT * — explicitly list required fields.
+3. MUST include pagination: FETCH FIRST N ROWS ONLY or ROWNUM <= N (NOT LIMIT).
+4. Use TO_DATE('YYYY-MM-DD', 'YYYY-MM-DD') for dates (no bare strings).
+5. Use BUILTIN.DF(field) for display values instead of complex JOINs.
+6. Use id for primary keys (not internalid).`;
 
 /**
  * Metadata usage hint to append to the `ns_getSuiteQLMetadata` tool description.

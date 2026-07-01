@@ -2,7 +2,7 @@
 
 > 🔒 **Environment Lock:** Account `{{ACCOUNT_ID}}` | Type: **{{ENV_TYPE}}** | Write Ops: {{WRITE_OPS_BADGE}} | MCP Server: `{{MCP_SERVER_NAME}}`
 
-> **MCP Server Architecture Reference:** See [AGENTS.md](file:///Users/fuxintao/WebstormProjects/netsuite-mcp-server-master/AGENTS.md) for the MCP server's internal architecture, design patterns, and tool definitions.
+> **MCP Server Architecture Reference:** See [AGENTS.md](file:///Users/fuxintao/WebstormProjects/NetsuiteMcp/AGENTS.md) for the MCP server's internal architecture, design patterns, and tool definitions.
 
 ## 0. CORE DIRECTIVE (LANGUAGE PROTOCOL)
 
@@ -47,7 +47,6 @@ When fulfilling a user request, select tools in this priority order:
 |:---|:---|:---|
 | `ns_runCustomSuiteQL` | Execute SuiteQL query | `sqlQuery` (required), `pageSize`, `pageIndex` (for native pagination) |
 | `ns_getSuiteQLMetadata` | Get table schema — **MUST call before any query** | `recordType` (optional) |
-| `netsuite_run_parallel_queries` | Run 2–5 independent queries concurrently | `queries` (string array, required) |
 
 ### Record Tools
 
@@ -107,7 +106,7 @@ When fulfilling a user request, select tools in this priority order:
 | ① Schema | Query target table schema — **NEVER guess field names** | `ns_getSuiteQLMetadata` |
 | ② Build | Write query per schema; add `ROWNUM` limit for large tables | — |
 | ③ Test | Validate with `WHERE ROWNUM <= 5` before full execution | `ns_runCustomSuiteQL` |
-| ④ Execute | Run final query (2+ independent queries → **MUST use parallel**) | `ns_runCustomSuiteQL` / `netsuite_run_parallel_queries` |
+| ④ Execute | Run final query | `ns_runCustomSuiteQL` |
 
 ### Supplementary Rules (not covered in tool descriptions)
 
@@ -117,8 +116,6 @@ When fulfilling a user request, select tools in this priority order:
 - **Status Fields:** Always use `BUILTIN.DF(status)` to get human-readable display names instead of raw encoded values.
 - **Multi-Subsidiary Queries:** Before pulling financial data, explicitly clarify if user wants consolidated or subsidiary-specific results.
 
-> [!IMPORTANT]
-> **🚨 Parallel Query Rule:** 2+ independent SuiteQL queries **MUST** run concurrently via `netsuite_run_parallel_queries`. Sequential `ns_runCustomSuiteQL` calls are **strictly prohibited** unless query B depends on query A's output.
 
 ## 6. Record Operations SOP
 

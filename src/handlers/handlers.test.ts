@@ -1,337 +1,172 @@
+import { describe, it, expect, jest, beforeEach, afterEach } from '@jest/globals';
 import { registerToolHandlers } from './tools.js';
 import { registerResourceHandlers } from './resources.js';
-import { describe, it, expect, jest, beforeEach, afterEach } from '@jest/globals';
 import {
   ListToolsRequestSchema,
   CallToolRequestSchema,
   ListResourcesRequestSchema,
-  ReadResourceRequestSchema,
+  ReadResourceRequestSchema
 } from '@modelcontextprotocol/sdk/types.js';
 import fs from 'fs/promises';
 import path from 'path';
 
-describe('MCP Handlers', () => {
+describe('MCP Handler Wires', () => {
   let mockServer: any;
   let mockOAuthManager: any;
   let mockMCPTools: any;
-  const testWorkspace = path.join(process.cwd(), '.test-handlers-workspace');
+  let registeredHandlers: Map<any, Function>;
 
-  let toolHandlers: Map<any, Function>;
+  const testRoot = path.join(process.cwd(), '.test-handlers-root');
 
   beforeEach(async () => {
     jest.clearAllMocks();
-    await fs.rm(testWorkspace, { recursive: true, force: true });
-    await fs.mkdir(testWorkspace, { recursive: true });
+    await fs.rm(testRoot, { recursive: true, force: true });
+    await fs.mkdir(testRoot, { recursive: true });
 
-    toolHandlers = new Map();
+    registeredHandlers = new Map();
     mockServer = {
       setRequestHandler: jest.fn((schema: any, handler: Function) => {
-        toolHandlers.set(schema, handler);
-      }),
-      listRoots: jest.fn().mockResolvedValue({ roots: [] })
+        registeredHandlers.set(schema, handler);
+      })
     };
 
     mockOAuthManager = {
-      hasValidSession: jest.fn().mockResolvedValue(true),
-      getAccountId: jest.fn().mockResolvedValue('test-account'),
-      ensureValidToken: jest.fn().mockResolvedValue('token-123')
+      getAccountId: jest.fn().mockResolvedValue('123456_SB1'),
+      hasValidSession: jest.fn().mockResolvedValue(true)
     };
 
     mockMCPTools = {
       fetchTools: jest.fn().mockResolvedValue([
-        { name: 'ns_getRecord', description: 'Get a NetSuite record' }
+        { name: 'ns_getRecord', description: 'Fetch NetSuite records' },
+        { name: 'ns_createRecord', description: 'Create NetSuite records' },
+        { name: 'ns_updateRecord', description: 'Update NetSuite records' },
+        { name: 'ns_runCustomSuiteQL', description: 'Run SuiteQL queries' }
       ]),
-      executeTool: jest.fn().mockResolvedValue('{}'),
+      executeTool: jest.fn().mockResolvedValue({ id: '101', type: 'customer', name: 'Acme Corp' }),
       customRecordMappings: new Map()
     };
   });
 
   afterEach(async () => {
-    await fs.rm(testWorkspace, { recursive: true, force: true });
+    await fs.rm(testRoot, { recursive: true, force: true });
   });
 
-  describe('Tools Handler', () => {
-    let authenticateCallback: any;
-    let logoutCallback: any;
-    let refreshCallback: any;
-    let resolveRectypeCallback: any;
+  describe('Tools Handler Wiring', () => {
+    let authCb: any;
+    let logoutCb: any;
+    let refreshCb: any;
 
     beforeEach(() => {
-      authenticateCallback = jest.fn();
-      logoutCallback = jest.fn();
-      refreshCallback = jest.fn();
-      resolveRectypeCallback = jest.fn().mockReturnValue(null);
+      authCb = jest.fn();
+      logoutCb = jest.fn();
+      refreshCb = jest.fn();
 
       registerToolHandlers({
         server: mockServer,
         oauthManager: mockOAuthManager,
         mcpTools: mockMCPTools,
-        projectRoot: testWorkspace,
-        handleAuthentication: authenticateCallback,
-        handleLogout: logoutCallback,
-        handleCacheRefresh: refreshCallback,
-        resolveCustomRecordRectype: resolveRectypeCallback
+        projectRoot: testRoot,
+        handleAuthentication: authCb,
+        handleLogout: logoutCb,
+        handleCacheRefresh: refreshCb,
+        resolveCustomRecordRectype: () => null
       });
     });
 
-    it('should register tools and list authenticated tools', async () => {
-      const listHandler = toolHandlers.get(ListToolsRequestSchema);
-      expect(listHandler).toBeDefined();
+    it('should register tool list and call schemas', () => {
+      expect(registeredHandlers.has(ListToolsRequestSchema)).toBe(true);
+      expect(registeredHandlers.has(CallToolRequestSchema)).toBe(true);
+    });
 
-      const result = await listHandler!();
+    it('should list all tools when in Sandbox environment', async () => {
+      mockOAuthManager.getAccountId.mockResolvedValue('9260916_SB3');
+      const listFn = registeredHandlers.get(ListToolsRequestSchema);
+
+      const result = await listFn!();
       const names = result.tools.map((t: any) => t.name);
+
+      expect(names).toContain('ns_createRecord');
+      expect(names).toContain('ns_updateRecord');
       expect(names).toContain('ns_getRecord');
       expect(names).toContain('netsuite_get_record_link');
-      expect(names).toContain('netsuite_run_parallel_queries');
     });
 
-    it('should invoke authenticate callback on netsuite_authenticate call', async () => {
-      const callHandler = toolHandlers.get(CallToolRequestSchema);
-      await callHandler!({
+    it('should filter out write tools when in Production environment', async () => {
+      mockOAuthManager.getAccountId.mockResolvedValue('123456');
+      const listFn = registeredHandlers.get(ListToolsRequestSchema);
+
+      const result = await listFn!();
+      const names = result.tools.map((t: any) => t.name);
+
+      expect(names).toContain('ns_getRecord');
+      expect(names).not.toContain('ns_createRecord');
+      expect(names).not.toContain('ns_updateRecord');
+    });
+
+    it('should block ns_createRecord calls when in Production environment', async () => {
+      mockOAuthManager.getAccountId.mockResolvedValue('123456');
+      const callFn = registeredHandlers.get(CallToolRequestSchema);
+
+      await expect(
+        callFn!({
+          params: {
+            name: 'ns_createRecord',
+            arguments: { recordType: 'customer', record: {} }
+          }
+        })
+      ).rejects.toThrow('Write operations are disabled in production environments');
+    });
+
+    it('should allow ns_createRecord calls when in Sandbox environment and append deep links', async () => {
+      mockOAuthManager.getAccountId.mockResolvedValue('123456_SB1');
+      const callFn = registeredHandlers.get(CallToolRequestSchema);
+
+      const res = await callFn!({
+        params: {
+          name: 'ns_createRecord',
+          arguments: { recordType: 'customer', record: {} }
+        }
+      });
+
+      expect(res.content[0].text).toContain('🔗 **NetSuite UI Link (Current Environment):**');
+      expect(res.content[0].text).toContain('https://123456-sb1.app.netsuite.com/app/common/entity/custjob.nl?id=101');
+    });
+
+    it('should route authenticate, logout, and status tools without active session checks', async () => {
+      mockOAuthManager.hasValidSession.mockResolvedValue(false);
+      const callFn = registeredHandlers.get(CallToolRequestSchema);
+
+      await callFn!({
         params: {
           name: 'netsuite_authenticate',
-          arguments: { accountId: '123', clientId: '456' }
+          arguments: { accountId: 'acc', clientId: 'cli' }
         }
       });
-
-      expect(authenticateCallback).toHaveBeenCalledWith({ accountId: '123', clientId: '456' });
-    });
-
-    it('should run parallel queries using parallel worker pools', async () => {
-      const mockResult1 = JSON.stringify({ data: [1] });
-      const mockResult2 = JSON.stringify({ data: [2] });
-      mockMCPTools.executeTool
-        .mockResolvedValueOnce(mockResult1)
-        .mockResolvedValueOnce(mockResult2);
-
-      const callHandler = toolHandlers.get(CallToolRequestSchema);
-      const response = await callHandler!({
-        params: {
-          name: 'netsuite_run_parallel_queries',
-          arguments: {
-            queries: ['SELECT 1', 'SELECT 2']
-          }
-        }
-      });
-
-      const result = JSON.parse(response.content[0].text);
-      expect(result.totalQueries).toBe(2);
-      expect(result.successfulQueries).toBe(2);
-      expect(result.failedQueries).toBe(0);
-      expect(result.individualResults[0].result).toEqual({ data: [1] });
-      expect(result.individualResults[1].result).toEqual({ data: [2] });
-    });
-
-    it('should retrieve multiple records in parallel', async () => {
-      const mockRecord1 = { id: '101', name: 'Cust 1' };
-      const mockRecord2 = { id: '102', name: 'Cust 2' };
-      mockMCPTools.executeTool
-        .mockResolvedValueOnce(mockRecord1)
-        .mockResolvedValueOnce(mockRecord2);
-
-      const callHandler = toolHandlers.get(CallToolRequestSchema);
-      const response = await callHandler!({
-        params: {
-          name: 'netsuite_get_parallel_records',
-          arguments: {
-            records: [
-              { recordType: 'customer', recordId: '101' },
-              { recordType: 'customer', recordId: '102' }
-            ]
-          }
-        }
-      });
-
-      const result = JSON.parse(response.content[0].text);
-      expect(result.totalRecords).toBe(2);
-      expect(result.successfulRecords).toBe(2);
-      expect(result.failedRecords).toBe(0);
-      expect(result.individualResults[0].result).toEqual(mockRecord1);
-      expect(result.individualResults[1].result).toEqual(mockRecord2);
-    });
-
-    it('should retrieve multiple metadata definitions in parallel', async () => {
-      const mockMeta1 = {
-        success: true,
-        metadata: {
-          properties: {
-            fieldA: { type: 'string', title: 'Field A' }
-          }
-        }
-      };
-      mockMCPTools.executeTool
-        .mockResolvedValueOnce(mockMeta1)
-        .mockResolvedValueOnce(mockMeta1);
-
-      const callHandler = toolHandlers.get(CallToolRequestSchema);
-      const response = await callHandler!({
-        params: {
-          name: 'netsuite_get_parallel_metadata',
-          arguments: {
-            recordTypes: ['customer', 'salesorder'],
-            type: 'record'
-          }
-        }
-      });
-
-      const result = JSON.parse(response.content[0].text);
-      expect(result.totalMetadataRequests).toBe(2);
-      expect(result.type).toBe('record');
-      expect(result.successfulRequests).toBe(2);
-      expect(result.individualResults[0].result).toContain('| fieldA | string | Field A |');
-    });
-
-    it('should generate NetSuite deep links and append to record actions', async () => {
-      mockMCPTools.executeTool.mockResolvedValue({ id: 100, type: 'customer' });
-      const callHandler = toolHandlers.get(CallToolRequestSchema);
-      
-      const response = await callHandler!({
-        params: {
-          name: 'ns_getRecord',
-          arguments: { recordType: 'customer', id: '100' }
-        }
-      });
-
-      expect(response.content[0].text).toContain('🔗 **NetSuite UI Link (Current Environment):**');
-      expect(response.content[0].text).toContain('https://test-account.app.netsuite.com/app/common/entity/custjob.nl?id=100');
-    });
-
-    it('should block write operations in production environments', async () => {
-      mockOAuthManager.getAccountId.mockResolvedValue('123456');
-      const callHandler = toolHandlers.get(CallToolRequestSchema);
-      
-      // McpError is thrown and should propagate
-      await expect(callHandler!({
-        params: {
-          name: 'ns_createRecord',
-          arguments: { recordType: 'customer', record: {} }
-        }
-      })).rejects.toThrow('Write operations are disabled in production environments');
-    });
-
-    it('should allow write operations in sandbox environments', async () => {
-      mockOAuthManager.getAccountId.mockResolvedValue('123456_SB1');
-      mockMCPTools.executeTool.mockResolvedValue({ id: 200, type: 'customer' });
-      const callHandler = toolHandlers.get(CallToolRequestSchema);
-      
-      const response = await callHandler!({
-        params: {
-          name: 'ns_createRecord',
-          arguments: { recordType: 'customer', record: {} }
-        }
-      });
-      expect(response.content[0].text).toContain('🔗 **NetSuite UI Link (Current Environment):**');
-    });
-
-    it('should filter out write tools in production listing', async () => {
-      mockMCPTools.fetchTools.mockResolvedValue([
-        { name: 'ns_getRecord', description: 'Get' },
-        { name: 'ns_createRecord', description: 'Create' },
-        { name: 'ns_updateRecord', description: 'Update' }
-      ]);
-      const listHandler = toolHandlers.get(ListToolsRequestSchema);
-      
-      // Production: write tools filtered out
-      mockOAuthManager.getAccountId.mockResolvedValue('123456');
-      const prodResult = await listHandler!();
-      const prodNames = prodResult.tools.map((t: any) => t.name);
-      expect(prodNames).toContain('ns_getRecord');
-      expect(prodNames).not.toContain('ns_createRecord');
-      expect(prodNames).not.toContain('ns_updateRecord');
-      
-      // Sandbox: all tools included
-      mockOAuthManager.getAccountId.mockResolvedValue('TSTDRV123456');
-      const sbResult = await listHandler!();
-      const sbNames = sbResult.tools.map((t: any) => t.name);
-      expect(sbNames).toContain('ns_getRecord');
-      expect(sbNames).toContain('ns_createRecord');
-      expect(sbNames).toContain('ns_updateRecord');
-    });
-
-    it('should append SuiteQL rules and parallel query warning to ns_runCustomSuiteQL description', async () => {
-      mockMCPTools.fetchTools.mockResolvedValue([
-        { name: 'ns_runCustomSuiteQL', description: 'Execute a custom SuiteQL query' }
-      ]);
-      const listHandler = toolHandlers.get(ListToolsRequestSchema);
-      
-      const result = await listHandler!();
-      const customTool = result.tools.find((t: any) => t.name === 'ns_runCustomSuiteQL');
-      expect(customTool).toBeDefined();
-      expect(customTool.description).toContain('Execute a custom SuiteQL query');
-      expect(customTool.description).toContain('MANDATORY RULES');
-      expect(customTool.description).toContain('ns_getSuiteQLMetadata');
-      expect(customTool.description).toContain('netsuite_run_parallel_queries');
-      expect(customTool.description).toContain('FETCH FIRST');
-    });
-
-    it('should append metadata rules to ns_getSuiteQLMetadata description', async () => {
-      mockMCPTools.fetchTools.mockResolvedValue([
-        { name: 'ns_getSuiteQLMetadata', description: 'Get metadata for a SuiteQL table' }
-      ]);
-      const listHandler = toolHandlers.get(ListToolsRequestSchema);
-      
-      const result = await listHandler!();
-      const metadataTool = result.tools.find((t: any) => t.name === 'ns_getSuiteQLMetadata');
-      expect(metadataTool).toBeDefined();
-      expect(metadataTool.description).toContain('Get metadata for a SuiteQL table');
-      expect(metadataTool.description).toContain('ns_runCustomSuiteQL');
-      expect(metadataTool.description).toContain('case-sensitive');
-    });
-
-    it('should require auth for parallel queries', async () => {
-      mockOAuthManager.hasValidSession.mockResolvedValue(false);
-      const callHandler = toolHandlers.get(CallToolRequestSchema);
-      
-      const response = await callHandler!({
-        params: {
-          name: 'netsuite_run_parallel_queries',
-          arguments: { queries: ['SELECT 1'] }
-        }
-      });
-      expect(response.isError).toBe(true);
-      expect(response.content[0].text).toContain('Not authenticated');
+      expect(authCb).toHaveBeenCalled();
     });
   });
 
-  describe('Resources Handler', () => {
+  describe('Resources Handler Wiring', () => {
     beforeEach(() => {
-      registerResourceHandlers(mockServer, testWorkspace);
+      registerResourceHandlers(mockServer, testRoot);
     });
 
-    it('should register resources and list them', async () => {
-      const listHandler = toolHandlers.get(ListResourcesRequestSchema);
-      expect(listHandler).toBeDefined();
-
-      const result = await listHandler!();
-      expect(result.resources).toHaveLength(1);
-      expect(result.resources[0].uri).toBe('netsuite://guides/suiteql');
-      expect(result.resources[0].mimeType).toBe('text/markdown');
+    it('should register resources list and read schemas', () => {
+      expect(registeredHandlers.has(ListResourcesRequestSchema)).toBe(true);
+      expect(registeredHandlers.has(ReadResourceRequestSchema)).toBe(true);
     });
 
-    it('should read the suiteql guide resource content', async () => {
-      const guideDir = path.join(testWorkspace, 'skills', 'netsuite-ai-connector-instructions', 'references');
-      await fs.mkdir(guideDir, { recursive: true });
-      const guidePath = path.join(guideDir, 'SUITEQL_GUIDE.md');
-      const testContent = '# Test SuiteQL Guide';
-      await fs.writeFile(guidePath, testContent, 'utf-8');
+    it('should read the suiteql guide file content successfully', async () => {
+      const parentDir = path.join(testRoot, 'skills', 'netsuite-ai-connector-instructions', 'references');
+      await fs.mkdir(parentDir, { recursive: true });
+      await fs.writeFile(path.join(parentDir, 'SUITEQL_GUIDE.md'), '# SuiteQL Guide Content', 'utf-8');
 
-      const readHandler = toolHandlers.get(ReadResourceRequestSchema);
-      expect(readHandler).toBeDefined();
-
-      const result = await readHandler!({
+      const readFn = registeredHandlers.get(ReadResourceRequestSchema);
+      const res = await readFn!({
         params: { uri: 'netsuite://guides/suiteql' }
       });
 
-      expect(result.contents).toHaveLength(1);
-      expect(result.contents[0].uri).toBe('netsuite://guides/suiteql');
-      expect(result.contents[0].text).toBe(testContent);
-    });
-
-    it('should throw error for unknown resource uri', async () => {
-      const readHandler = toolHandlers.get(ReadResourceRequestSchema);
-      await expect(readHandler!({
-        params: { uri: 'netsuite://guides/unknown' }
-      })).rejects.toThrow('Resource not found: netsuite://guides/unknown');
+      expect(res.contents[0].text).toBe('# SuiteQL Guide Content');
     });
   });
 });

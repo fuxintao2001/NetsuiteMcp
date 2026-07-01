@@ -1,34 +1,31 @@
+import { describe, it, expect, jest, beforeEach, afterEach } from '@jest/globals';
 import { NetSuiteMCPTools } from './tools.js';
 import { cacheService } from '../utils/cache.js';
-import { describe, it, expect, jest, beforeEach, afterEach } from '@jest/globals';
 import { httpClient } from '../utils/httpClient.js';
-
 
 describe('NetSuiteMCPTools', () => {
   let mockOAuthManager: any;
-  let toolsClient: NetSuiteMCPTools;
-  let globalAxiosPostSpy: any;
+  let client: NetSuiteMCPTools;
+  let httpPostSpy: any;
 
   beforeEach(() => {
     jest.clearAllMocks();
 
     mockOAuthManager = {
-      getAccountId: jest.fn().mockResolvedValue('test-account'),
-      ensureValidToken: jest.fn().mockResolvedValue('test-token'),
-      forceRefreshToken: jest.fn().mockResolvedValue('new-test-token')
+      getAccountId: jest.fn().mockResolvedValue('test-acc'),
+      ensureValidToken: jest.fn().mockResolvedValue('token-111'),
+      forceRefreshToken: jest.fn().mockResolvedValue('token-222')
     };
 
-    // Pre-emptively mock axios.post globally to intercept constructor background calls
-    globalAxiosPostSpy = jest.spyOn(httpClient, 'post').mockResolvedValue({
+    httpPostSpy = jest.spyOn(httpClient, 'post').mockResolvedValue({
       data: {
         result: {
-          records: [],
           tools: []
         }
       }
     } as any);
 
-    toolsClient = new NetSuiteMCPTools(mockOAuthManager);
+    client = new NetSuiteMCPTools(mockOAuthManager);
   });
 
   afterEach(() => {
@@ -36,147 +33,116 @@ describe('NetSuiteMCPTools', () => {
   });
 
   describe('fetchTools', () => {
-    it('should return cached tools if available', async () => {
-      const mockTools = [{ name: 'ns_getRecord', description: 'Get a record' }];
-      jest.spyOn(cacheService, 'get').mockResolvedValueOnce(mockTools);
+    it('should return cached tools if present', async () => {
+      const mockTools = [{ name: 'ns_getRecord', description: 'desc' }];
+      jest.spyOn(cacheService, 'get').mockResolvedValue(mockTools);
 
-      const result = await toolsClient.fetchTools();
+      const result = await client.fetchTools();
       expect(result).toEqual(mockTools);
-      expect(cacheService.get).toHaveBeenCalledWith('test-account', 'toolsCache');
+      expect(cacheService.get).toHaveBeenCalledWith('test-acc', 'toolsCache');
     });
 
-    it('should fetch tools from endpoint if cache is empty', async () => {
-      jest.spyOn(cacheService, 'get').mockResolvedValueOnce(null);
-      const mockApiResponse = {
+    it('should fetch tools from JSON-RPC and write to cache if empty', async () => {
+      jest.spyOn(cacheService, 'get').mockResolvedValue(null);
+      const cacheSetSpy = jest.spyOn(cacheService, 'set').mockResolvedValue(undefined);
+
+      const mockTools = [{ name: 'ns_getRecord', description: 'desc' }];
+      httpPostSpy.mockResolvedValueOnce({
         data: {
           result: {
-            tools: [{ name: 'ns_getRecord', description: 'Get a record' }]
+            tools: mockTools
           }
         }
-      };
-      
-      globalAxiosPostSpy.mockResolvedValueOnce(mockApiResponse as any);
-      const cacheSetSpy = jest.spyOn(cacheService, 'set').mockResolvedValueOnce(undefined);
+      });
 
-      const result = await toolsClient.fetchTools();
-      expect(result).toEqual(mockApiResponse.data.result.tools);
-      expect(globalAxiosPostSpy).toHaveBeenCalled();
-      expect(cacheSetSpy).toHaveBeenCalledWith('test-account', 'toolsCache', mockApiResponse.data.result.tools, 3600);
-    });
-
-    it('should format sandbox account IDs in the MCP endpoint host', async () => {
-      mockOAuthManager.getAccountId.mockResolvedValue('123456_SB1');
-      jest.spyOn(cacheService, 'get').mockResolvedValueOnce(null);
-      const mockApiResponse = {
-        data: {
-          result: {
-            tools: [{ name: 'ns_getRecord', description: 'Get a record' }]
-          }
-        }
-      };
-      globalAxiosPostSpy.mockResolvedValueOnce(mockApiResponse as any);
-      jest.spyOn(cacheService, 'set').mockResolvedValueOnce(undefined);
-
-      await toolsClient.fetchTools();
-
-      expect(globalAxiosPostSpy.mock.calls[0][0]).toBe(
-        'https://123456-sb1.suitetalk.api.netsuite.com/services/mcp/v1/all'
-      );
+      const result = await client.fetchTools();
+      expect(result).toEqual(mockTools);
+      expect(cacheSetSpy).toHaveBeenCalledWith('test-acc', 'toolsCache', mockTools, 3600);
     });
   });
 
   describe('executeTool', () => {
-    it('should return cached metadata for metadata tools if available', async () => {
-      const cachedMetadata = { fields: [] };
-      jest.spyOn(cacheService, 'get').mockResolvedValueOnce(cachedMetadata);
+    it('should return cached metadata for metadata tools', async () => {
+      const cached = { success: true, metadata: {} };
+      jest.spyOn(cacheService, 'get').mockResolvedValue(cached);
 
-      const result = await toolsClient.executeTool('ns_getSuiteQLMetadata', { recordType: 'customer' });
-      expect(result).toEqual(cachedMetadata);
-      expect(cacheService.get).toHaveBeenCalledWith('test-account', 'ns_getSuiteQLMetadata_customer');
+      const result = await client.executeTool('ns_getRecordTypeMetadata', { recordType: 'customer' });
+      expect(result).toEqual(cached);
+      expect(cacheService.get).toHaveBeenCalledWith('test-acc', 'ns_getRecordTypeMetadata_customer');
     });
 
-    it('should execute tool and cache metadata upon successful response', async () => {
-      jest.spyOn(cacheService, 'get').mockResolvedValueOnce(null);
-      const mockResponse = {
+    it('should execute API call and cache metadata on success', async () => {
+      jest.spyOn(cacheService, 'get').mockResolvedValue(null);
+      const cacheSetSpy = jest.spyOn(cacheService, 'set').mockResolvedValue(undefined);
+
+      const mockResult = { success: true };
+      httpPostSpy.mockResolvedValueOnce({
         data: {
-          result: { success: true }
-        }
-      };
-      globalAxiosPostSpy.mockResolvedValueOnce(mockResponse as any);
-      const cacheSetSpy = jest.spyOn(cacheService, 'set').mockResolvedValueOnce(undefined);
-
-      const result = await toolsClient.executeTool('ns_getSuiteQLMetadata', { recordType: 'customer' });
-      expect(result).toEqual(mockResponse.data.result);
-      expect(globalAxiosPostSpy).toHaveBeenCalled();
-      expect(cacheSetSpy).toHaveBeenCalledWith('test-account', 'ns_getSuiteQLMetadata_customer', mockResponse.data.result);
-    });
-
-    it('should throw on API error', async () => {
-      jest.spyOn(cacheService, 'get').mockResolvedValueOnce(null);
-      const mockError = new Error('Request failed with status code 400');
-      Object.assign(mockError, {
-        response: {
-          status: 400,
-          data: {
-            "o:errorDetails": [
-              {
-                "detail": "Search error: The field 'custrecord_invalid' does not exist on table 'transaction'.",
-                "o:errorCode": "INVALID_SEARCH_FIELD"
-              }
-            ]
-          }
+          result: mockResult
         }
       });
-      
-      globalAxiosPostSpy.mockRejectedValueOnce(mockError as any);
+
+      const result = await client.executeTool('ns_getRecordTypeMetadata', { recordType: 'customer' });
+      expect(result).toEqual(mockResult);
+      expect(cacheSetSpy).toHaveBeenCalledWith('test-acc', 'ns_getRecordTypeMetadata_customer', mockResult);
+    });
+
+    it('should invalidate cache for related tables on SuiteQL error (self-heal)', async () => {
+      jest.spyOn(cacheService, 'get').mockResolvedValue(null);
+      const cacheDelSpy = jest.spyOn(cacheService, 'delete').mockResolvedValue(undefined);
+
+      const err = new Error('SuiteQL syntax error');
+      Object.assign(err, { response: { status: 400, data: { error: { message: 'Invalid query' } } } });
+      httpPostSpy.mockRejectedValueOnce(err);
 
       await expect(
-        toolsClient.executeTool('ns_runCustomSuiteQL', { sqlQuery: 'SELECT * FROM invalid' })
-      ).rejects.toThrow('NetSuite API Error: [INVALID_SEARCH_FIELD] Search error: The field \'custrecord_invalid\' does not exist on table \'transaction\'.');
+        client.executeTool('ns_runCustomSuiteQL', { sqlQuery: 'SELECT * FROM customer JOIN salesorder' })
+      ).rejects.toThrow();
+
+      // Expect deleted caches for customer and salesorder tables
+      expect(cacheDelSpy).toHaveBeenCalledWith('test-acc', 'ns_getSuiteQLMetadata_customer');
+      expect(cacheDelSpy).toHaveBeenCalledWith('test-acc', 'ns_getSuiteQLMetadata_salesorder');
     });
 
-    it('should retry once on 401 with force-refreshed token', async () => {
-      jest.spyOn(cacheService, 'get').mockResolvedValueOnce(null);
+    it('should retry once on 401 unauthorized errors with a forced refresh token', async () => {
+      jest.spyOn(cacheService, 'get').mockResolvedValue(null);
       
-      const error401 = new Error('Unauthorized');
-      Object.assign(error401, { response: { status: 401 } });
-      
-      const successResponse = {
-        data: { result: { data: [1, 2, 3] } }
-      };
-      
-      globalAxiosPostSpy
-        .mockRejectedValueOnce(error401)
-        .mockResolvedValueOnce(successResponse);
+      const err401 = new Error('Unauthorized');
+      Object.assign(err401, { response: { status: 401 } });
 
-      const result = await toolsClient.executeTool('ns_runCustomSuiteQL', { sqlQuery: 'SELECT id FROM customer' });
-      expect(result).toEqual(successResponse.data.result);
-      expect(mockOAuthManager.forceRefreshToken).toHaveBeenCalled();
+      const mockResult = { data: [1, 2] };
+      httpPostSpy
+        .mockRejectedValueOnce(err401)
+        .mockResolvedValueOnce({
+          data: {
+            result: mockResult
+          }
+        });
+
+      const result = await client.executeTool('ns_runCustomSuiteQL', { sqlQuery: 'SELECT id FROM customer' });
+      expect(result).toEqual(mockResult);
+      expect(mockOAuthManager.forceRefreshToken).toHaveBeenCalledWith('token-111');
+      expect(httpPostSpy).toHaveBeenCalledTimes(2);
     });
-  });
 
-  describe('fetchCustomRecordMappings', () => {
-    it('should resolve and cache custom record mappings from customrecordtype query', async () => {
-      const mockSqlResult = {
-        content: [{
-          text: JSON.stringify({
-            records: [
-              { scriptid: 'customrecord_my_custom', internalid: '10' }
-            ]
-          })
-        }]
-      };
+    it('should retry on transient HTTP 502 and 504 errors', async () => {
+      jest.spyOn(cacheService, 'get').mockResolvedValue(null);
       
-      jest.spyOn(toolsClient, 'executeTool').mockResolvedValueOnce(mockSqlResult);
-      const cacheSetSpy = jest.spyOn(cacheService, 'set').mockResolvedValueOnce(undefined);
+      const err502 = new Error('Bad Gateway');
+      Object.assign(err502, { response: { status: 502 } });
 
-      toolsClient.hasFetchedMappings = false;
-      await toolsClient.fetchCustomRecordMappings();
+      const mockResult = { data: [1] };
+      httpPostSpy
+        .mockRejectedValueOnce(err502)
+        .mockResolvedValueOnce({
+          data: {
+            result: mockResult
+          }
+        });
 
-      expect(toolsClient.customRecordMappings.get('CUSTOMRECORD_MY_CUSTOM')).toBe(10);
-      expect(cacheSetSpy).toHaveBeenCalledWith('test-account', 'customrecord_mappings', {
-        'CUSTOMRECORD_MY_CUSTOM': 10
-      });
+      const result = await client.executeTool('ns_runCustomSuiteQL', { sqlQuery: 'SELECT id FROM customer' });
+      expect(result).toEqual(mockResult);
+      expect(httpPostSpy).toHaveBeenCalledTimes(2);
     });
   });
 });

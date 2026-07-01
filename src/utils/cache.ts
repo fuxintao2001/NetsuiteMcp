@@ -133,6 +133,30 @@ export class CacheService {
   }
 
   /**
+   * 一次性清理指定账户下的旧格式（未带哈希）缓存文件
+   */
+  async migrateFromLegacyFormat(accountId: string): Promise<void> {
+    const dummyPath = this.getFileSystemCachePath(accountId, 'dummy');
+    const cacheDir = path.dirname(dummyPath);
+    try {
+      const files = await fs.readdir(cacheDir);
+      let cleaned = 0;
+      for (const file of files) {
+        // 旧格式文件特征：文件名以 .json 结尾，且不带 _[a-f0-9]{16}.json 模式
+        if (file.endsWith('.json') && !/_[a-f0-9]{16}\.json$/.test(file)) {
+          await fs.unlink(path.join(cacheDir, file)).catch(() => {});
+          cleaned++;
+        }
+      }
+      if (cleaned > 0) {
+        console.error(`🧹 Cleaned ${cleaned} legacy cache files for ${accountId}`);
+      }
+    } catch {
+      // 目录不存在则忽略
+    }
+  }
+
+  /**
    * 获取缓存诊断状态指标
    */
   getStats(): { l1KeyCount: number; l2CacheDir: string } {

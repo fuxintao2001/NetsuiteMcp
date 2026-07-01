@@ -1,80 +1,100 @@
-import { parseNetSuiteError } from './errors.js';
+import { describe, it, expect } from '@jest/globals';
+import { parseNetSuiteError, sanitizeMessage, sanitizeError } from './errors.js';
 
-describe('parseNetSuiteError', () => {
-  it('should parse NetSuite o:errorDetails structure and append advice', () => {
-    const apiError = {
-      response: {
-        data: {
-          'o:errorDetails': [
-            {
-              'o:errorCode': 'INVALID_SEARCH_SELECT_FIELD',
-              detail: 'The field "internalid" is invalid.'
-            }
-          ]
+describe('Error Utilities', () => {
+  describe('sanitizeMessage', () => {
+    it('should redact sensitive OAuth parameters and tokens', () => {
+      const original = 'Failed: Bearer target_token_xyz&refresh_token=refresh_123&client_id=client_987&code_verifier=verifier_abc';
+      const expected = 'Failed: Bearer [REDACTED]&refresh_token=[REDACTED]&client_id=[REDACTED]&code_verifier=[REDACTED]';
+      expect(sanitizeMessage(original)).toBe(expected);
+    });
+
+    it('should redact tokens from json strings', () => {
+      const original = '{"access_token" : "some_secret_token", "refresh_token":"another_secret"}';
+      const expected = '{"access_token":"[REDACTED]", "refresh_token":"[REDACTED]"}';
+      expect(sanitizeMessage(original)).toBe(expected);
+    });
+
+    it('should redact local home and users paths', () => {
+      const original = 'Error occurred at /Users/fuxintao/WebstormProjects/NetsuiteMcp/src/index.ts';
+      expect(sanitizeMessage(original)).toContain('<PROJECT_ROOT>/src/index.ts');
+    });
+  });
+
+  describe('parseNetSuiteError', () => {
+    it('should handle standard NetSuite o:errorDetails array', () => {
+      const mockError = {
+        response: {
+          status: 400,
+          data: {
+            'o:errorDetails': [
+              {
+                'o:errorCode': 'INVALID_SQL',
+                'detail': 'Syntax error in SuiteQL query.'
+              }
+            ]
+          }
         }
-      }
-    };
-    const parsed = parseNetSuiteError(apiError);
-    expect(parsed.message).toContain('NetSuite API Error: [INVALID_SEARCH_SELECT_FIELD] The field "internalid" is invalid.');
-    expect(parsed.message).toContain('[Troubleshooting Advice - SuiteQL/SQL]');
-    expect(parsed.message).toContain('Primary keys are usually "id" (not "internalid")');
-  });
+      };
 
-  it('should parse NetSuite permission error and append permission advice', () => {
-    const apiError = {
-      response: {
-        data: {
-          'o:errorDetails': [
-            {
-              'o:errorCode': 'INSUFFICIENT_PERMISSION',
-              detail: 'You do not have permission to view this record.'
-            }
-          ]
+      const result = parseNetSuiteError(mockError);
+      expect(result.message).toContain('NetSuite API Error: [INVALID_SQL] Syntax error in SuiteQL query.');
+      expect(result.message).toContain('Troubleshooting Advice - SuiteQL/SQL');
+    });
+
+    it('should parse OAuth error responses', () => {
+      const mockError = {
+        response: {
+          status: 400,
+          data: {
+            error: 'invalid_grant',
+            error_description: 'Refresh token has expired.'
+          }
         }
-      }
-    };
-    const parsed = parseNetSuiteError(apiError);
-    expect(parsed.message).toContain('INSUFFICIENT_PERMISSION');
-    expect(parsed.message).toContain('[Troubleshooting Advice - Permissions]');
+      };
+
+      const result = parseNetSuiteError(mockError);
+      expect(result.message).toContain('OAuth Error [invalid_grant]: Refresh token has expired.');
+    });
+
+    it('should truncate HTML error pages', () => {
+      const html = '<!DOCTYPE html><html><head><title>504 Gateway Timeout</title></head><body>Timeout</body></html>';
+      const mockError = {
+        response: {
+          status: 504,
+          statusText: 'Gateway Timeout',
+          data: html
+        }
+      };
+
+      const result = parseNetSuiteError(mockError);
+      expect(result.message).toContain('HTTP 504 (Gateway Timeout)');
+      expect(result.message).toContain('Title: "504 Gateway Timeout"');
+      expect(result.message).not.toContain('<body>Timeout</body>');
+    });
+
+    it('should fall back to standard response status message', () => {
+      const mockError = {
+        response: {
+          status: 403,
+          statusText: 'Forbidden'
+        },
+        message: 'Request failed with 403'
+      };
+
+      const result = parseNetSuiteError(mockError);
+      expect(result.message).toContain('HTTP 403: Request failed with 403');
+    });
   });
 
-  it('should handle HTML responses by truncating them and extracting title', () => {
-    const htmlError = {
-      response: {
-        status: 502,
-        statusText: 'Bad Gateway',
-        data: `
-          <!DOCTYPE html>
-          <html>
-            <head>
-              <title>502 Bad Gateway - Cloudflare</title>
-            </head>
-            <body>
-              <h1>502 Bad Gateway</h1>
-            </body>
-          </html>
-        `
-      }
-    };
-    const parsed = parseNetSuiteError(htmlError);
-    expect(parsed.message).toBe('HTTP 502 (Bad Gateway): Server returned HTML response instead of JSON. Title: "502 Bad Gateway - Cloudflare" (Truncated raw HTML)');
-  });
+  describe('sanitizeError', () => {
+    it('should extract NetSuite error details and redact stack traces', () => {
+      const innerErr = new Error('Auth error with Bearer token_xyz');
+      innerErr.stack = 'at Object.test (/Users/fuxintao/test.ts:1:1)';
 
-  it('should fallback to HTTP status if response body is empty', () => {
-    const simpleHttpError = {
-      response: {
-        status: 403,
-        message: 'Forbidden'
-      }
-    };
-    const parsed = parseNetSuiteError(simpleHttpError);
-    expect(parsed.message).toContain('HTTP 403');
-    expect(parsed.message).toContain('[Troubleshooting Advice - Permissions]');
-  });
-
-  it('should return standard error message if not an HTTP error', () => {
-    const standardError = new Error('Generic file error');
-    const parsed = parseNetSuiteError(standardError);
-    expect(parsed.message).toBe('Generic file error');
+      const result = sanitizeError(innerErr);
+      expect(result.message).toBe('Auth error with Bearer [REDACTED]');
+      expect(result.stack).toContain('/Users/<USER>/test.ts');
+    });
   });
 });

@@ -287,10 +287,16 @@ export class NetSuiteMCPTools {
       const data = JSON.parse(fileContent);
       if (!data || !data.records) return;
 
-      const recordTypes = Object.keys(data.records);
+      const highFrequencyTypes = [
+        'customer', 'salesorder', 'invoice', 'transaction',
+        'item', 'vendor', 'employee', 'contact',
+        'vendorbill', 'purchaseorder', 'journalentry',
+        'customrecordtype'
+      ];
+
       let seedCount = 0;
 
-      for (const recordType of recordTypes) {
+      for (const recordType of highFrequencyTypes) {
         const cacheKey = this.metadataCacheKey('ns_getRecordTypeMetadata', { recordType });
         // Only seed if cache does not exist
         const existing = await cacheService.get(accountId, cacheKey);
@@ -429,7 +435,7 @@ export class NetSuiteMCPTools {
       return true;
     }
     const status = error.response?.status;
-    return status === 429 || status === 503;
+    return status === 429 || status === 502 || status === 503 || status === 504;
   }
 
   async callNetSuiteApi<T>(requestFn: () => Promise<T>): Promise<T> {

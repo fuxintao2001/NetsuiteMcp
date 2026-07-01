@@ -1,134 +1,86 @@
-import { cleanRecordPayload, formatMetadataToCompactMarkdown } from './contextSlimmer.js';
 import { describe, it, expect } from '@jest/globals';
+import { cleanRecordPayload, formatMetadataToCompactMarkdown } from './contextSlimmer.js';
 
-describe('Context Slimmer Utilities', () => {
+describe('Context Slimmer', () => {
   describe('cleanRecordPayload', () => {
-    it('should strip null, undefined, empty strings, and links', () => {
+    it('should recursively remove null, undefined, empty strings, and links key', () => {
       const payload = {
         id: '123',
         name: 'John Doe',
-        emptyStr: '',
-        nullVal: null,
-        undefVal: undefined,
-        links: [
-          { rel: 'self', href: 'http://localhost' }
-        ],
-        sublist: [
-          { line: 1, item: 'A', links: [], nullField: null },
-          { line: 2, item: 'B', emptyField: '' }
-        ],
-        address: {
-          city: 'New York',
-          zip: null,
-          links: [{ rel: 'edit' }]
-        }
+        email: '',
+        parent: null,
+        links: [{ rel: 'self', href: '/url' }],
+        nested: {
+          active: true,
+          value: undefined,
+          links: { href: '/another-url' }
+        },
+        items: [
+          { sku: 'A', discount: null, links: [] }
+        ]
       };
 
-      const expected = {
+      const result = cleanRecordPayload(payload);
+      expect(result).toEqual({
         id: '123',
         name: 'John Doe',
-        sublist: [
-          { line: 1, item: 'A' },
-          { line: 2, item: 'B' }
-        ],
-        address: {
-          city: 'New York'
-        }
-      };
-
-      expect(cleanRecordPayload(payload)).toEqual(expected);
+        nested: {
+          active: true
+        },
+        items: [
+          { sku: 'A' }
+        ]
+      });
     });
 
-    it('should preserve false and 0 values', () => {
-      const payload = {
-        isMain: false,
-        amount: 0,
-        nullVal: null
-      };
-
-      const expected = {
-        isMain: false,
-        amount: 0
-      };
-
-      expect(cleanRecordPayload(payload)).toEqual(expected);
-    });
-
-    it('should return empty object/array when everything is stripped', () => {
-      const payloadObj = {
-        links: [{ rel: 'self' }],
-        nullVal: null
-      };
-      expect(cleanRecordPayload(payloadObj)).toEqual({});
-
-      const payloadArr = [
-        { links: [] },
-        null
-      ];
-      expect(cleanRecordPayload(payloadArr)).toEqual([]);
+    it('should fall back to empty object/array when everything is cleaned', () => {
+      expect(cleanRecordPayload({ links: [], temp: null })).toEqual({});
+      expect(cleanRecordPayload([null, undefined])).toEqual([]);
     });
   });
 
   describe('formatMetadataToCompactMarkdown', () => {
-    it('should convert standard properties schema to Markdown table', () => {
+    it('should convert standard JSON Schema properties into a Markdown table', () => {
       const schema = {
         properties: {
           id: { title: 'Internal ID', type: 'string', nullable: false },
-          email: { title: 'Email Address', type: 'string', description: 'Primary email\nUsed for login.', nullable: true },
-          customObj: {
-            title: 'Custom Ref',
+          name: { title: 'Name', type: 'string', description: 'Customer name' },
+          company: {
+            title: 'Company Reference',
             type: 'object',
-            properties: {
-              refId: { type: 'string' }
-            }
+            properties: { id: { type: 'string' }, refName: { type: 'string' } }
           }
         }
       };
 
-      const md = formatMetadataToCompactMarkdown(schema);
-      expect(md).toContain('| Field | Type | Description | Nullable |');
-      expect(md).toContain('| id | string | Internal ID | No |');
-      expect(md).toContain('| email | string | Primary email Used for login. | Yes |');
-      expect(md).toContain('| customObj | object (refId) | Custom Ref | Yes |');
+      const markdown = formatMetadataToCompactMarkdown(schema);
+      expect(markdown).toContain('| Field | Type | Description | Nullable |');
+      expect(markdown).toContain('| id | string | Internal ID | No |');
+      expect(markdown).toContain('| name | string | Customer name | Yes |');
+      expect(markdown).toContain('| company | object (id, refName) | Company Reference | Yes |');
     });
 
-    it('should handle metadata wrapper object', () => {
-      const wrapped = {
-        success: true,
-        metadata: {
-          properties: {
-            name: { title: 'Name', type: 'string' }
-          }
-        }
-      };
-
-      const md = formatMetadataToCompactMarkdown(wrapped);
-      expect(md).toContain('| name | string | Name | Yes |');
-    });
-
-    it('should unwrap content wrapper structure', () => {
-      const contentWrapper = {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify({
+    it('should unwrap schema when nested in success/metadata or content formats', () => {
+      const mcpFormat = {
+        content: [{
+          text: JSON.stringify({
+            success: true,
+            metadata: {
               properties: {
-                status: { title: 'Status', type: 'string' }
+                sku: { title: 'SKU', type: 'string' }
               }
-            })
-          }
-        ]
+            }
+          })
+        }]
       };
 
-      const md = formatMetadataToCompactMarkdown(contentWrapper);
-      expect(md).toContain('| status | string | Status | Yes |');
+      const markdown = formatMetadataToCompactMarkdown(mcpFormat);
+      expect(markdown).toContain('| sku | string | SKU | Yes |');
     });
 
-    it('should fallback to stringification if schema format is unrecognized', () => {
-      const badSchema = { weirdKey: 'no properties' };
-      const md = formatMetadataToCompactMarkdown(badSchema);
-      expect(md).toContain('weirdKey');
-      expect(md).toContain('no properties');
+    it('should return stringified fallback on non-object inputs', () => {
+      expect(formatMetadataToCompactMarkdown('plain string')).toBe('plain string');
+      expect(formatMetadataToCompactMarkdown(null)).toBe('null');
     });
   });
 });

@@ -153,9 +153,23 @@ class NetSuiteMCPServer {
         return textResult(`✅ Successfully cleared cache for table/recordType: ${tableName}`);
       }
 
-      await this.mcpTools.refreshSessionCache();
+      // Clear local cache first so it's guaranteed to run
       await this.mcpTools.clearMetadataCache();
-      return textResult('✅ Successfully cleared and refreshed all cache!');
+
+      let restRefreshed = false;
+      let restError = '';
+      try {
+        await this.mcpTools.refreshSessionCache();
+        restRefreshed = true;
+      } catch (err: unknown) {
+        restError = err instanceof Error ? err.message : String(err);
+      }
+
+      if (restRefreshed) {
+        return textResult('✅ Successfully cleared and refreshed all cache!');
+      } else {
+        return textResult(`⚠️ Local cache cleared successfully, but NetSuite session cache refresh failed/skipped: ${restError}`);
+      }
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       return textResult(`❌ Failed to refresh cache: ${message}`, true);
@@ -175,6 +189,10 @@ class NetSuiteMCPServer {
   private backgroundPrefetch(): void {
     (async () => {
       try {
+        const accountId = await this.oauthManager.getAccountId();
+        if (accountId) {
+          await cacheService.migrateFromLegacyFormat(accountId);
+        }
         await this.mcpTools.fetchCustomRecordMappings();
         await this.mcpTools.prefetchCommonMetadata();
       } catch (err: unknown) {

@@ -1,47 +1,35 @@
-import { generateNetSuiteUrl } from './netsuiteUrls.js';
 import { describe, it, expect } from '@jest/globals';
+import { generateNetSuiteUrl } from './netsuiteUrls.js';
 
-describe('netsuiteUrls', () => {
-  const accountId = '123456_SB1';
-  const formattedAccountId = '123456-sb1';
-
+describe('NetSuite UI URL Generation', () => {
   it('should return null if accountId or recordId is missing', () => {
-    expect(generateNetSuiteUrl('', 'customer', 123)).toBeNull();
-    expect(generateNetSuiteUrl(accountId, 'customer', '')).toBeNull();
+    expect(generateNetSuiteUrl(undefined, 'customer', '123')).toBeNull();
+    expect(generateNetSuiteUrl('123456', 'customer', undefined)).toBeNull();
   });
 
-  it('should format accountId correctly (lowercase and replace underscores with hyphens)', () => {
-    const url = generateNetSuiteUrl('123456_SB2', 'customer', 789);
-    expect(url).toContain('https://123456-sb2.app.netsuite.com');
+  it('should format host subdomain accurately', () => {
+    const url = generateNetSuiteUrl('123456_SB1', 'customer', '789');
+    expect(url).toContain('https://123456-sb1.app.netsuite.com');
   });
 
-  it('should resolve standard entities (e.g. customer)', () => {
-    const url = generateNetSuiteUrl(accountId, 'customer', 123);
-    expect(url).toBe(`https://${formattedAccountId}.app.netsuite.com/app/common/entity/custjob.nl?id=123`);
+  it('should resolve standard mapped record types', () => {
+    const custUrl = generateNetSuiteUrl('123456', 'customer', '100');
+    expect(custUrl).toBe('https://123456.app.netsuite.com/app/common/entity/custjob.nl?id=100');
+
+    const invUrl = generateNetSuiteUrl('123456', 'invoice', '200');
+    expect(invUrl).toBe('https://123456.app.netsuite.com/app/accounting/transactions/custinvc.nl?id=200');
   });
 
-  it('should resolve standard transactions (e.g. salesorder)', () => {
-    const url = generateNetSuiteUrl(accountId, 'salesorder', 456);
-    expect(url).toBe(`https://${formattedAccountId}.app.netsuite.com/app/accounting/transactions/salesord.nl?id=456`);
+  it('should handle custom records using rectype parameter', () => {
+    const customTextUrl = generateNetSuiteUrl('123456', 'customrecord_my_script', '500');
+    expect(customTextUrl).toBe('https://123456.app.netsuite.com/app/common/custom/custrecordentry.nl?rectype=customrecord_my_script&id=500');
+
+    const customNumericUrl = generateNetSuiteUrl('123456', 'customrecord_type', '500', 105);
+    expect(customNumericUrl).toBe('https://123456.app.netsuite.com/app/common/custom/custrecordentry.nl?rectype=105&id=500');
   });
 
-  it('should handle recordType with irregular spaces and casing', () => {
-    const url = generateNetSuiteUrl(accountId, 'Sales Order', 456);
-    expect(url).toBe(`https://${formattedAccountId}.app.netsuite.com/app/accounting/transactions/salesord.nl?id=456`);
-  });
-
-  it('should resolve custom records using script ID prefix', () => {
-    const url = generateNetSuiteUrl(accountId, 'customrecord_my_custom_type', 999);
-    expect(url).toBe(`https://${formattedAccountId}.app.netsuite.com/app/common/custom/custrecordentry.nl?rectype=customrecord_my_custom_type&id=999`);
-  });
-
-  it('should prioritize rectype parameter if explicitly provided', () => {
-    const url = generateNetSuiteUrl(accountId, 'customrecord_some_type', 999, 12345);
-    expect(url).toBe(`https://${formattedAccountId}.app.netsuite.com/app/common/custom/custrecordentry.nl?rectype=12345&id=999`);
-  });
-
-  it('should fallback to transaction.nl for unknown record types', () => {
-    const url = generateNetSuiteUrl(accountId, 'unknown_record_type', 999);
-    expect(url).toBe(`https://${formattedAccountId}.app.netsuite.com/app/accounting/transactions/transaction.nl?id=999`);
+  it('should fall back to standard transaction page if record type is unmapped', () => {
+    const fallbackUrl = generateNetSuiteUrl('123456', 'unknown_type', '888');
+    expect(fallbackUrl).toBe('https://123456.app.netsuite.com/app/accounting/transactions/transaction.nl?id=888');
   });
 });

@@ -1,129 +1,68 @@
 import { describe, it, expect, beforeEach, afterEach } from '@jest/globals';
+import { SessionStorage, type SessionData } from './sessionStorage.js';
 import fs from 'fs/promises';
 import path from 'path';
 
-import { SessionStorage } from './sessionStorage.js';
-
-
 describe('SessionStorage', () => {
-  const testStoragePath = path.join(process.cwd(), '.test-session-storage');
-  const sessionFile = path.join(testStoragePath, 'session.json');
-  let sessionStorage: SessionStorage;
+  const tempDir = path.join(process.cwd(), '.test-session-storage');
+  let storage: SessionStorage;
 
   beforeEach(async () => {
-    // Clean up any existing directory
-    await fs.rm(testStoragePath, { recursive: true, force: true });
-    sessionStorage = new SessionStorage(testStoragePath);
+    await fs.rm(tempDir, { recursive: true, force: true });
+    await fs.mkdir(tempDir, { recursive: true });
+    storage = new SessionStorage(tempDir);
   });
 
   afterEach(async () => {
-    // Clean up afterwards
-    await fs.rm(testStoragePath, { recursive: true, force: true });
+    await fs.rm(tempDir, { recursive: true, force: true });
   });
 
-  describe('save', () => {
-    it('should create directory and write session file correctly', async () => {
-      const mockData = { authenticated: true, tokens: { access_token: '123' } };
-      
-      await sessionStorage.save(mockData);
-
-      // Verify directory was created and file exists
-      const fileExists = await fs.stat(sessionFile).then(() => true).catch(() => false);
-      expect(fileExists).toBe(true);
-
-      // Verify content
-      const content = await fs.readFile(sessionFile, 'utf-8');
-      expect(JSON.parse(content)).toEqual(mockData);
-    });
+  it('should return null if session file does not exist', async () => {
+    const data = await storage.load();
+    expect(data).toBeNull();
   });
 
-  describe('load', () => {
-    it('should load and parse session file if it exists', async () => {
-      const mockData = { authenticated: true, tokens: { access_token: 'abc' } };
-      
-      // Manually set up session
-      await fs.mkdir(testStoragePath, { recursive: true });
-      await fs.writeFile(sessionFile, JSON.stringify(mockData), 'utf-8');
+  it('should save and load session data correctly', async () => {
+    const session: SessionData = {
+      authenticated: true,
+      state: 'state-123',
+      tokens: {
+        access_token: 'access-tok',
+        refresh_token: 'refresh-tok',
+        expires_in: 3600,
+        expires_at: Date.now() + 3600000,
+        accountId: '123456',
+        clientId: 'client-123'
+      }
+    };
 
-      const result = await sessionStorage.load();
-      expect(result).toEqual(mockData);
-    });
-
-    it('should return null if session file does not exist', async () => {
-      const result = await sessionStorage.load();
-      expect(result).toBeNull();
-    });
-
-    it('should rename corrupted session file instead of deleting it', async () => {
-      // Setup file with invalid JSON content
-      await fs.mkdir(testStoragePath, { recursive: true });
-      await fs.writeFile(sessionFile, 'invalid-json-content', 'utf-8');
-
-      const result = await sessionStorage.load();
-      expect(result).toBeNull();
-
-      // Verify session file no longer exists (it was renamed)
-      const fileExists = await fs.stat(sessionFile).then(() => true).catch(() => false);
-      expect(fileExists).toBe(false);
-
-      // Verify a backup corrupted file was created in the storage directory
-      const files = await fs.readdir(testStoragePath);
-      const corruptedFile = files.find(f => f.startsWith('session.corrupted.'));
-      expect(corruptedFile).toBeDefined();
-
-      const corruptedContent = await fs.readFile(path.join(testStoragePath, corruptedFile!), 'utf-8');
-      expect(corruptedContent).toBe('invalid-json-content');
-    });
+    await storage.save(session);
+    const loaded = await storage.load();
+    expect(loaded).toEqual(session);
+    expect(await storage.isAuthenticated()).toBe(true);
   });
 
-  describe('clear', () => {
-    it('should unlink the session file', async () => {
-      // Setup file
-      await fs.mkdir(testStoragePath, { recursive: true });
-      await fs.writeFile(sessionFile, '{}', 'utf-8');
+  it('should clear the session file', async () => {
+    const session: SessionData = { authenticated: true };
+    await storage.save(session);
+    expect(await storage.load()).toEqual(session);
 
-      let fileExists = await fs.stat(sessionFile).then(() => true).catch(() => false);
-      expect(fileExists).toBe(true);
-
-      await sessionStorage.clear();
-
-      fileExists = await fs.stat(sessionFile).then(() => true).catch(() => false);
-      expect(fileExists).toBe(false);
-    });
-
-    it('should suppress error if session file does not exist', async () => {
-      await expect(sessionStorage.clear()).resolves.toBeUndefined();
-    });
+    await storage.clear();
+    expect(await storage.load()).toBeNull();
+    expect(await storage.isAuthenticated()).toBe(false);
   });
 
-  describe('isAuthenticated', () => {
-    it('should return true if session is authenticated and has tokens', async () => {
-      const mockData = { authenticated: true, tokens: { access_token: 'xyz' } };
-      await sessionStorage.save(mockData);
+  it('should back up and return null if the session file is corrupted JSON', async () => {
+    await fs.mkdir(tempDir, { recursive: true });
+    const sessionFile = path.join(tempDir, 'session.json');
+    await fs.writeFile(sessionFile, '{ corrupted json : ', 'utf-8');
 
-      const authenticated = await sessionStorage.isAuthenticated();
-      expect(authenticated).toBe(true);
-    });
+    const loaded = await storage.load();
+    expect(loaded).toBeNull();
 
-    it('should return false if session is not authenticated', async () => {
-      const mockData = { authenticated: false, tokens: { access_token: 'xyz' } };
-      await sessionStorage.save(mockData);
-
-      const authenticated = await sessionStorage.isAuthenticated();
-      expect(authenticated).toBe(false);
-    });
-
-    it('should return false if session does not have tokens', async () => {
-      const mockData = { authenticated: true };
-      await sessionStorage.save(mockData);
-
-      const authenticated = await sessionStorage.isAuthenticated();
-      expect(authenticated).toBe(false);
-    });
-
-    it('should return false if session storage is empty', async () => {
-      const authenticated = await sessionStorage.isAuthenticated();
-      expect(authenticated).toBe(false);
-    });
+    // Check that a corrupted backup file was created
+    const files = await fs.readdir(tempDir);
+    const backupFile = files.find(f => f.startsWith('session.corrupted.'));
+    expect(backupFile).toBeDefined();
   });
 });

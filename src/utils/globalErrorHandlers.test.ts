@@ -1,76 +1,69 @@
-import { describe, expect, it, jest } from '@jest/globals';
+import { describe, it, expect, jest, beforeEach } from '@jest/globals';
 import { installGlobalErrorHandlers } from './globalErrorHandlers.js';
 
-type Handler = (arg?: unknown) => void;
+describe('Global Error Handlers', () => {
+  let mockProcess: any;
+  let mockLogger: any;
+  let eventListeners: Record<string, Function>;
+  let stdinListeners: Record<string, Function>;
 
-function createMockProcess() {
-  const processHandlers = new Map<string, Handler>();
-  const stdinHandlers = new Map<string, Handler>();
-  const proc = {
-    exitCode: undefined as number | string | null | undefined,
-    on: jest.fn((event: string, listener: Handler) => {
-      processHandlers.set(event, listener);
-      return proc;
-    }),
-    stdin: {
-      on: jest.fn((event: string, listener: Handler) => {
-        stdinHandlers.set(event, listener);
-        return proc.stdin;
-      })
-    },
-    exit: jest.fn((() => {
-      throw new Error('exit called');
-    }) as (code?: number) => never)
-  };
-
-  return { proc, processHandlers, stdinHandlers };
-}
-
-describe('installGlobalErrorHandlers', () => {
-  it('logs uncaught exceptions without exiting the process', () => {
-    const { proc, processHandlers } = createMockProcess();
-    const logger = { error: jest.fn() };
-
-    installGlobalErrorHandlers(proc, logger);
-
-    processHandlers.get('uncaughtException')?.(new Error('network wake failure'));
-
-    expect(proc.exit).not.toHaveBeenCalled();
-    expect(logger.error).toHaveBeenCalledWith('[MCP] Uncaught Exception:', 'network wake failure');
+  beforeEach(() => {
+    eventListeners = {};
+    stdinListeners = {};
+    mockProcess = {
+      on: jest.fn((event: string, listener: Function) => {
+        eventListeners[event] = listener;
+      }),
+      stdin: {
+        on: jest.fn((event: string, listener: Function) => {
+          stdinListeners[event] = listener;
+        })
+      },
+      exit: jest.fn(),
+      exitCode: undefined
+    };
+    mockLogger = {
+      error: jest.fn()
+    };
   });
 
-  it('logs unhandled rejections without exiting the process', () => {
-    const { proc, processHandlers } = createMockProcess();
-    const logger = { error: jest.fn() };
-
-    installGlobalErrorHandlers(proc, logger);
-
-    processHandlers.get('unhandledRejection')?.(new Error('refresh failed'));
-
-    expect(proc.exit).not.toHaveBeenCalled();
-    expect(logger.error).toHaveBeenCalledWith('[MCP] Unhandled Promise Rejection:', 'refresh failed');
+  it('should register listeners on startup', () => {
+    installGlobalErrorHandlers(mockProcess, mockLogger);
+    expect(mockProcess.on).toHaveBeenCalledWith('uncaughtException', expect.any(Function));
+    expect(mockProcess.on).toHaveBeenCalledWith('unhandledRejection', expect.any(Function));
+    expect(mockProcess.on).toHaveBeenCalledWith('SIGTERM', expect.any(Function));
+    expect(mockProcess.stdin.on).toHaveBeenCalledWith('close', expect.any(Function));
+    expect(mockProcess.stdin.on).toHaveBeenCalledWith('end', expect.any(Function));
   });
 
-  it('marks broken stdio errors as clean without forcing exit from global handlers', () => {
-    const { proc, processHandlers } = createMockProcess();
-    const logger = { error: jest.fn() };
+  it('should swallow and log uncaught exceptions without exiting', () => {
+    installGlobalErrorHandlers(mockProcess, mockLogger);
+    
+    const error = new Error('Test Exception');
+    eventListeners['uncaughtException'](error);
 
-    installGlobalErrorHandlers(proc, logger);
-
-    processHandlers.get('uncaughtException')?.({ code: 'EPIPE' });
-
-    expect(proc.exit).not.toHaveBeenCalled();
-    expect(proc.exitCode).toBe(0);
-    expect(logger.error).not.toHaveBeenCalled();
+    expect(mockLogger.error).toHaveBeenCalledWith('[MCP] Uncaught Exception:', expect.stringContaining('Test Exception'));
+    expect(mockProcess.exit).not.toHaveBeenCalled();
   });
 
-  it('exits cleanly when stdin closes', () => {
-    const { proc, stdinHandlers } = createMockProcess();
-    const logger = { error: jest.fn() };
+  it('should set exitCode to 0 and swallow on broken stdio error (EPIPE/ECONNRESET)', () => {
+    installGlobalErrorHandlers(mockProcess, mockLogger);
+    
+    const brokenStdioError = { code: 'EPIPE' };
+    eventListeners['uncaughtException'](brokenStdioError);
 
-    installGlobalErrorHandlers(proc, logger);
+    expect(mockProcess.exitCode).toBe(0);
+    expect(mockLogger.error).not.toHaveBeenCalled();
+    expect(mockProcess.exit).not.toHaveBeenCalled();
+  });
 
-    expect(() => stdinHandlers.get('close')?.()).toThrow('exit called');
-    expect(proc.exit).toHaveBeenCalledWith(0);
+  it('should exit with 0 on SIGTERM or stdin close', () => {
+    installGlobalErrorHandlers(mockProcess, mockLogger);
+    
+    eventListeners['SIGTERM']();
+    expect(mockProcess.exit).toHaveBeenCalledWith(0);
+
+    stdinListeners['close']();
+    expect(mockProcess.exit).toHaveBeenCalledWith(0);
   });
 });

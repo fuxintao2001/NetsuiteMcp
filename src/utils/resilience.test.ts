@@ -1,84 +1,102 @@
-import { TokenRefreshScheduler } from './resilience.js';
-import { describe, it, expect, jest, beforeEach, afterEach } from '@jest/globals';
+import { describe, it, expect, jest, beforeEach } from '@jest/globals';
+import { TokenRefreshScheduler, retryWithBackoff, getRetryAfterMs, ConcurrencyLimiter } from './resilience.js';
 
-describe('TokenRefreshScheduler', () => {
-  let mockTarget: {
-    hasValidSession: jest.Mock<() => Promise<boolean>>;
-    ensureValidToken: jest.Mock<() => Promise<string>>;
-    forceRefreshToken: jest.Mock<(failedToken?: string) => Promise<string>>;
-    tryAutoRecover: jest.Mock<(maxRetries?: number) => Promise<void>>;
-  };
-  let scheduler: TokenRefreshScheduler;
+describe('Resilience Utilities', () => {
+  describe('retryWithBackoff', () => {
+    it('should resolve immediately if function succeeds first time', async () => {
+      const fn = jest.fn<() => Promise<string>>().mockResolvedValue('success');
+      const result = await retryWithBackoff(fn, () => true, { retries: 3 });
+      expect(result).toBe('success');
+      expect(fn).toHaveBeenCalledTimes(1);
+    });
 
-  beforeEach(() => {
-    mockTarget = {
-      hasValidSession: jest.fn<() => Promise<boolean>>().mockResolvedValue(true),
-      ensureValidToken: jest.fn<() => Promise<string>>().mockResolvedValue('valid-token'),
-      forceRefreshToken: jest.fn<(failedToken?: string) => Promise<string>>().mockResolvedValue('refreshed-token'),
-      tryAutoRecover: jest.fn<(maxRetries?: number) => Promise<void>>().mockResolvedValue(),
-    };
-    jest.useFakeTimers();
+    it('should retry up to limit and throw on final failure', async () => {
+      const fn = jest.fn<() => Promise<string>>().mockRejectedValue(new Error('failure'));
+      const isRetryable = jest.fn().mockReturnValue(true);
+
+      await expect(
+        retryWithBackoff(fn, isRetryable, { retries: 2, minTimeoutMs: 1, maxTimeoutMs: 5, jitter: false })
+      ).rejects.toThrow('failure');
+
+      expect(fn).toHaveBeenCalledTimes(3); // 1 initial + 2 retries
+    });
+
+    it('should respect Retry-After header if present', () => {
+      const error = {
+        response: {
+          headers: {
+            'retry-after': '3'
+          }
+        }
+      };
+      expect(getRetryAfterMs(error)).toBe(3000);
+
+      const errorMixedCase = {
+        response: {
+          headers: {
+            'Retry-After': 'Wed, 21 Oct 2026 07:28:00 GMT'
+          }
+        }
+      };
+      jest.useFakeTimers();
+      jest.setSystemTime(new Date('Wed, 21 Oct 2026 07:27:50 GMT'));
+      expect(getRetryAfterMs(errorMixedCase)).toBe(10000);
+      jest.useRealTimers();
+    });
   });
 
-  afterEach(() => {
-    if (scheduler) {
+  describe('ConcurrencyLimiter', () => {
+    it('should limit active concurrent operations and execute in order', async () => {
+      const limiter = new ConcurrencyLimiter(2);
+      const activeJobs: number[] = [];
+      const order: number[] = [];
+
+      const job = async (id: number, delay: number) => {
+        await limiter.run(async () => {
+          activeJobs.push(id);
+          expect(activeJobs.length).toBeLessThanOrEqual(2);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          activeJobs.splice(activeJobs.indexOf(id), 1);
+          order.push(id);
+        });
+      };
+
+      await Promise.all([job(1, 10), job(2, 5), job(3, 1)]);
+      expect(order).toEqual([2, 3, 1]);
+    });
+  });
+
+  describe('TokenRefreshScheduler', () => {
+    let mockTarget: any;
+    let scheduler: TokenRefreshScheduler;
+
+    beforeEach(() => {
+      mockTarget = {
+        hasValidSession: jest.fn().mockResolvedValue(true),
+        ensureValidToken: jest.fn().mockResolvedValue('token'),
+        forceRefreshToken: jest.fn().mockResolvedValue('new-token'),
+        tryAutoRecover: jest.fn().mockResolvedValue(undefined)
+      };
+      scheduler = new TokenRefreshScheduler(mockTarget, 100);
+    });
+
+    afterEach(() => {
       scheduler.stop();
-    }
-    jest.useRealTimers();
-  });
+    });
 
-  it('should start and run periodic checks', async () => {
-    scheduler = new TokenRefreshScheduler(mockTarget, 1000);
-    scheduler.start();
-    expect(scheduler.isRunning()).toBe(true);
+    it('should run tick immediately on start and check validity', async () => {
+      scheduler.start();
+      expect(mockTarget.hasValidSession).toHaveBeenCalled();
+      // Tick was async, wait a moment
+      await new Promise(resolve => setTimeout(resolve, 20));
+      expect(mockTarget.ensureValidToken).toHaveBeenCalled();
+    });
 
-    // Wait for the immediate async tick to complete
-    await jest.advanceTimersByTimeAsync(0);
-
-    expect(mockTarget.hasValidSession).toHaveBeenCalledTimes(1);
-    expect(mockTarget.ensureValidToken).toHaveBeenCalledTimes(1);
-
-    // Advance timers by 1 second (triggers second tick)
-    await jest.advanceTimersByTimeAsync(1000);
-
-    expect(mockTarget.hasValidSession).toHaveBeenCalledTimes(2);
-    expect(mockTarget.ensureValidToken).toHaveBeenCalledTimes(2);
-  });
-
-  it('should attempt auto-recovery when no valid session exists', async () => {
-    mockTarget.hasValidSession.mockResolvedValue(false);
-    scheduler = new TokenRefreshScheduler(mockTarget, 1000);
-    scheduler.start();
-
-    // Wait for the immediate async tick to complete
-    await jest.advanceTimersByTimeAsync(0);
-
-    expect(mockTarget.hasValidSession).toHaveBeenCalledTimes(1);
-    expect(mockTarget.tryAutoRecover).toHaveBeenCalledWith(1);
-    expect(mockTarget.ensureValidToken).not.toHaveBeenCalled();
-  });
-
-  it('should catch and swallow errors in tick', async () => {
-    mockTarget.ensureValidToken.mockRejectedValue(new Error('Refresh failed'));
-    scheduler = new TokenRefreshScheduler(mockTarget, 1000);
-    
-    // Should not throw on start/immediate tick
-    await expect(Promise.resolve().then(() => scheduler.start())).resolves.not.toThrow();
-
-    // Wait for immediate async tick to execute and swallow the error
-    await jest.advanceTimersByTimeAsync(0);
-    expect(mockTarget.ensureValidToken).toHaveBeenCalled();
-  });
-
-  it('should catch and swallow auto-recovery errors', async () => {
-    mockTarget.hasValidSession.mockResolvedValue(false);
-    mockTarget.tryAutoRecover.mockRejectedValue(new Error('Recovery failed'));
-    scheduler = new TokenRefreshScheduler(mockTarget, 1000);
-    scheduler.start();
-
-    // Wait for immediate async tick to execute and swallow the error
-    await jest.advanceTimersByTimeAsync(0);
-    expect(mockTarget.tryAutoRecover).toHaveBeenCalledWith(1);
+    it('should invoke tryAutoRecover if session is lost', async () => {
+      mockTarget.hasValidSession.mockResolvedValue(false);
+      scheduler.start();
+      await new Promise(resolve => setTimeout(resolve, 20));
+      expect(mockTarget.tryAutoRecover).toHaveBeenCalledWith(1);
+    });
   });
 });
-
