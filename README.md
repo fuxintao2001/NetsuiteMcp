@@ -229,7 +229,9 @@ netsuite-mcp-server/
 │   │   ├── sessionStorage.ts  # Session file management
 │   │   └── tokenExchange.ts   # Token exchange & refresh operations
 │   └── utils/
-│       ├── cache.ts           # Dual-layer cache (L1 memory + L2 filesystem)
+│       ├── cache.ts           # CacheService facade
+│       ├── cacheProvider.ts   # CacheProvider interface & NoopCacheProvider
+│       ├── redisCacheProvider.ts # RedisCacheProvider (pure Redis cache via ioredis)
 │       ├── envValidator.ts    # Zod-based environment variable validation
 │       ├── resilience.ts      # Token refresh scheduler
 │       ├── netsuiteUrls.ts    # NetSuite UI deep link generation
@@ -237,7 +239,6 @@ netsuite-mcp-server/
 │       └── json.ts            # Non-blocking JSON parser
 ├── dist/                      # Compiled JavaScript (gitignored)
 ├── sessions/                  # OAuth tokens (gitignored)
-├── .cache/                    # Metadata cache (gitignored)
 ├── AGENTS.md                  # AI agent operating procedures
 ├── package.json
 ├── tsconfig.json

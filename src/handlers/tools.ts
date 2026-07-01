@@ -258,7 +258,7 @@ async function handleStatus(
   oauthManager: OAuthManager
 ): Promise<ToolResponse> {
   const sessionInfo = await oauthManager.getSessionInfo();
-  const cacheStats = cacheService.getStats();
+  const cacheStats = await cacheService.getStats();
 
   const status: Record<string, unknown> = {
     server: 'netsuite-mcp',

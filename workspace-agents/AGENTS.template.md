@@ -89,7 +89,7 @@ When fulfilling a user request, select tools in this priority order:
 | Tool | Purpose |
 |:---|:---|
 | `netsuite_status` | Check auth state, token expiry, cache stats, environment type |
-| `netsuite_refresh_cache` | Clear L1/L2 caches (optional: `tableName` for single table) |
+| `netsuite_refresh_cache` | Clear Redis caches (optional: `tableName` for single table) |
 | `netsuite_logout` | Clear authentication session |
 
 ## 5. SuiteQL Protocol
@@ -144,7 +144,7 @@ When fulfilling a user request, select tools in this priority order:
 | **401 Unauthorized** | Auth token expired | MCP Server auto-retries once after force-refresh. If still fails → `netsuite_authenticate` |
 | **SuiteQL Timeout** | Query too broad / too many rows | Add `WHERE ROWNUM <= N`, narrow date range with `TO_DATE()`, reduce JOINs |
 | **Field Not Found** | Stale metadata or wrong field name | `netsuite_refresh_cache` (or pass `tableName` for single table), then re-verify with `ns_getSuiteQLMetadata` |
-| **Metadata Inconsistent** | Cache TTL expired (1 hour) | `netsuite_refresh_cache` to clear L1 (in-memory) + L2 (file system) caches |
+| **Metadata Inconsistent** | Stale metadata (cache has no TTL) | `netsuite_refresh_cache` to clear Redis caches |
 | **Unknown / Transient** | Network issues, 5xx errors | `netsuite_status` to diagnose auth state and cache stats first |
 
 ## 9. Authentication & System
@@ -152,7 +152,7 @@ When fulfilling a user request, select tools in this priority order:
 - **Authenticate:** `netsuite_authenticate` — provide `accountId` and `clientId` if env vars not set.
 - **Status:** `netsuite_status` — check auth state, token expiry, cache stats, environment type. **Call this first when diagnosing any issue.**
 - **Logout:** `netsuite_logout` — clear session.
-- **Cache:** `netsuite_refresh_cache` — clear all caches (optional: `tableName` for single table). Cache TTL = 1 hour (3600s).
+- **Cache:** `netsuite_refresh_cache` — clear Redis caches (optional: `tableName` for single table). Cache is persistent (no TTL) until cleared manually.
 
 ## 10. SuiteCloud Agent Skills
 

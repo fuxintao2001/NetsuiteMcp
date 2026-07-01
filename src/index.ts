@@ -5,6 +5,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { OAuthManager } from './oauth/manager.js';
 import { NetSuiteMCPTools } from './mcp/tools.js';
 import { cacheService } from './utils/cache.js';
+import { RedisCacheProvider } from './utils/redisCacheProvider.js';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { readFileSync } from 'fs';
@@ -47,6 +48,7 @@ const SERVER_VERSION = packageJson.version;
 class NetSuiteMCPServer {
   private readonly oauthManager: OAuthManager;
   private readonly mcpTools: NetSuiteMCPTools;
+  private readonly cacheProvider: RedisCacheProvider;
   private readonly server: Server;
   private isAuthenticated = false;
 
@@ -62,10 +64,11 @@ class NetSuiteMCPServer {
       console.error('⚠️  NETSUITE_CLIENT_ID not set. User must provide clientId during authentication.');
     }
 
-    // Configure cache with stable project root
-    cacheService.configure(projectRoot);
+    // Configure cache provider with Redis URL
+    const redisUrl = envConfig.REDIS_URL;
+    this.cacheProvider = new RedisCacheProvider(redisUrl);
+    cacheService.configure(this.cacheProvider);
 
-    // Session storage path — scoped by account ID to prevent cross-environment pollution
     const sessionsPath = envConfig.NETSUITE_SESSION_PATH
       || (envConfig.NETSUITE_ACCOUNT_ID
         ? join(projectRoot, 'sessions', envConfig.NETSUITE_ACCOUNT_ID.toLowerCase())
@@ -189,10 +192,6 @@ class NetSuiteMCPServer {
   private backgroundPrefetch(): void {
     (async () => {
       try {
-        const accountId = await this.oauthManager.getAccountId();
-        if (accountId) {
-          await cacheService.migrateFromLegacyFormat(accountId);
-        }
         await this.mcpTools.fetchCustomRecordMappings();
         await this.mcpTools.prefetchCommonMetadata();
       } catch (err: unknown) {
@@ -208,6 +207,14 @@ class NetSuiteMCPServer {
 
   async start(): Promise<void> {
     console.error('🚀 NetSuite MCP Server starting...');
+
+    // Connect to Redis
+    try {
+      await this.cacheProvider.connect();
+    } catch (err) {
+      console.error('❌ Failed to connect to Redis on startup:', err);
+      throw err;
+    }
 
     // Check for existing authentication
     this.isAuthenticated = await this.oauthManager.hasValidSession();
@@ -244,14 +251,32 @@ class NetSuiteMCPServer {
 
     console.error('✅ NetSuite MCP Server ready!\n');
   }
+
+  async shutdown(): Promise<void> {
+    console.error('🔌 Shutting down NetSuite MCP Server...');
+    this.oauthManager.stopProactiveRefresh();
+    await this.cacheProvider.disconnect();
+  }
 }
 
 // ---------------------------------------------------------------------------
 // Main
-// ---------------------------------------------------------------------------
 async function main(): Promise<void> {
   try {
     const server = new NetSuiteMCPServer();
+
+    const shutdown = async () => {
+      try {
+        await server.shutdown();
+      } catch (err) {
+        console.error('Error during shutdown:', err);
+      }
+      process.exit(0);
+    };
+
+    process.on('SIGINT', shutdown);
+    process.on('SIGTERM', shutdown);
+
     await server.start();
   } catch (error) {
     console.error('❌ Fatal error starting MCP server:', error);

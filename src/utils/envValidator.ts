@@ -16,6 +16,7 @@ export const envSchema = z.object({
   NETSUITE_ACCOUNT_ID: z.string().optional(),
   NETSUITE_CLIENT_ID: z.string().optional(),
   NETSUITE_SESSION_PATH: z.string().optional(),
+  REDIS_URL: z.string().optional().default('redis://localhost:6379'),
 });
 
 export type EnvConfig = z.infer<typeof envSchema>;

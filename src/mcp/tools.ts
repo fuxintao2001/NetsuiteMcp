@@ -158,7 +158,7 @@ export class NetSuiteMCPTools {
   async clearCache(): Promise<void> {
     const accountId = await this.oauthManager.getAccountId();
     if (accountId) {
-      await cacheService.set(accountId, 'toolsCache', null);
+      await cacheService.delete(accountId, 'toolsCache');
     }
   }
 

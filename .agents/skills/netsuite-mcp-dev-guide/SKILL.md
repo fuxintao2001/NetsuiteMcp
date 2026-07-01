@@ -48,7 +48,9 @@ src/
 │   ├── pkce.ts                # PKCE challenge & verifier generation
 │   └── *.test.ts              # Unit tests for OAuth components
 └── utils/
-    ├── cache.ts               # CacheService singleton (L1 + L2)
+    ├── cache.ts               # CacheService facade singleton
+    ├── cacheProvider.ts       # CacheProvider interface & NoopCacheProvider
+    ├── redisCacheProvider.ts  # RedisCacheProvider (pure Redis cache via ioredis)
     ├── errors.ts              # Error formatting with actionable advice
     ├── environment.ts         # isSandboxAccount() + buildEnvSuffix() shared helpers
     ├── envValidator.ts        # Startup environment configuration schema (Zod validation)
@@ -141,7 +143,10 @@ interface ToolHandlerDeps {
 
 ## 🔄 Caching
 
-- `CacheService` is a singleton configured at startup via `cacheService.configure(projectRoot)`.
+- `CacheService` is a facade singleton configured at startup with a `CacheProvider` (typically `RedisCacheProvider`).
+- Uses pure Redis cache (backed by `ioredis`) under the `nsmcp:{accountId}:{key}` namespace, completely replacing the previous dual-layer (L1 Memory + L2 File) system.
+- Defaults to a safe `NoopCacheProvider` if no provider is configured, ensuring robustness in test environments.
+- Connection address is configured via the `REDIS_URL` environment variable.
 - Metadata cache is self-healing: automatically invalidated for affected tables when a SuiteQL error occurs.
 - Use `netsuite_refresh_cache` to clear all caches.
 
