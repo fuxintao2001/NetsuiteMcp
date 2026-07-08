@@ -372,10 +372,12 @@ export class OAuthManager {
    * Attempt to auto-recover an expired session using the refresh token.
    * Called during server startup and by the scheduler when the session is lost.
    *
-   * Retries up to `maxRetries` times for transient network errors.
+   * Retries up to `maxRetries` times for transient network errors with exponential backoff.
    * Immediately gives up on unrecoverable errors (e.g. expired refresh token).
+   * Before each retry, re-reads the session file — the keepalive daemon may have
+   * already refreshed the token while we were waiting.
    */
-  async tryAutoRecover(maxRetries = 4): Promise<void> {
+  async tryAutoRecover(maxRetries = 8): Promise<void> {
     let session = await this.storage.load();
     if (!session?.tokens?.refresh_token) return;
 
@@ -423,14 +425,23 @@ export class OAuthManager {
           }
           throw error;
         }
-        // Transient: network timeout, DNS failure, etc. — retry after delay
+        // Transient: network timeout, DNS failure, etc. — retry after exponential backoff
         if (attempt < maxRetries) {
-          console.error(`⚠️ Auto-recovery attempt ${attempt} failed (transient network error during wake/connect), retrying in 3s...`);
+          // Exponential backoff: 3s, 6s, 12s, capped at 15s
+          const delay = Math.min(3000 * Math.pow(2, attempt - 1), 15000);
+          console.error(`⚠️ Auto-recovery attempt ${attempt} failed (transient error), retrying in ${delay / 1000}s...`);
           if (lockAcquired) {
             await releaseLock(lockPath);
             lockAcquired = false;
           }
-          await new Promise(resolve => setTimeout(resolve, 3000));
+          await new Promise(resolve => setTimeout(resolve, delay));
+
+          // Re-check session before next attempt — daemon may have refreshed it
+          const refreshedSession = await this.storage.load();
+          if (refreshedSession?.authenticated && refreshedSession.tokens && !shouldRefreshToken(refreshedSession.tokens)) {
+            console.error('🔄 Session recovered by keepalive daemon during backoff wait.');
+            return;
+          }
         } else {
           console.error(`⚠️ Auto-recovery failed after ${maxRetries} attempts`);
           throw error;
@@ -456,5 +467,27 @@ export class OAuthManager {
    */
   stopProactiveRefresh(): void {
     this.tokenRefreshScheduler.stop();
+  }
+
+  /**
+   * Retrieve diagnostics information about the current session.
+   */
+  async getSessionDiagnostics() {
+    try {
+      const session = await this.storage.load();
+      return {
+        storagePath: this.storage.getStoragePath(),
+        accountId: session?.config?.accountId || null,
+        authenticated: !!session?.authenticated,
+        expiresAt: session?.tokens?.expires_at || null,
+      };
+    } catch {
+      return {
+        storagePath: this.storage.getStoragePath(),
+        accountId: null,
+        authenticated: false,
+        expiresAt: null,
+      };
+    }
   }
 }

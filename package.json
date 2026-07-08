@@ -13,6 +13,10 @@
     "build": "rimraf dist && tsc",
     "fetch-skills": "node scripts/fetch-skills.js",
     "sync-agents": "node scripts/sync-agents.js",
+    "daemon:install": "node scripts/daemon.js install",
+    "daemon:uninstall": "node scripts/daemon.js uninstall",
+    "daemon:status": "node scripts/daemon.js status",
+    "daemon:run": "node scripts/daemon.js run",
     "test": "NODE_ENV=test node --experimental-vm-modules node_modules/jest/bin/jest.js"
   },
   "keywords": [

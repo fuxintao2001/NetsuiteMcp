@@ -216,8 +216,16 @@ class NetSuiteMCPServer {
       throw err;
     }
 
-    // Check for existing authentication
+    // Check for existing authentication and log diagnostics
     this.isAuthenticated = await this.oauthManager.hasValidSession();
+    const sessionDiag = await this.oauthManager.getSessionDiagnostics();
+    if (sessionDiag) {
+      const expiresIn = sessionDiag.expiresAt
+        ? `${Math.round((sessionDiag.expiresAt - Date.now()) / 1000)}s`
+        : 'unknown';
+      console.error(`📋 [Startup] Session: ${sessionDiag.storagePath}`);
+      console.error(`📋 [Startup] Account: ${sessionDiag.accountId || 'none'} | Authenticated: ${sessionDiag.authenticated} | Token expires in: ${expiresIn}`);
+    }
 
     // Register handlers BEFORE connecting (prevents race condition)
     this.setupHandlers();
