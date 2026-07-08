@@ -7,7 +7,8 @@ import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { ConcurrencyLimiter, retryWithBackoff } from '../utils/resilience.js';
 import { httpClient } from '../utils/httpClient.js';
-import { formatNetSuiteAccountHost } from '../utils/environment.js';
+import { formatNetSuiteAccountHost, getSkillsDir } from '../utils/environment.js';
+
 
 /**
  * Extracts table names from a SQL query string (used for cache invalidation).
@@ -273,7 +274,9 @@ export class NetSuiteMCPTools {
       const __filename = fileURLToPath(import.meta.url);
       const __dirname = dirname(__filename);
       const projectRoot = join(__dirname, '..', '..');
-      const recordsJsonPath = join(projectRoot, 'skills', 'netsuite-suitescript-records-reference', 'references', 'records.json');
+      const skillsDir = getSkillsDir(projectRoot);
+      const recordsJsonPath = join(skillsDir, 'netsuite-suitescript-records-reference', 'references', 'records.json');
+
 
       try {
         await fs.access(recordsJsonPath);

@@ -10,14 +10,9 @@ This repository contains the source code for the **NetSuite MCP Server** (`@suit
 
 Detailed knowledge is organized into Antigravity Skills. Read the corresponding skill when working in that area.
 
-### Project Skills (`.agents/skills/`)
+### Oracle SuiteCloud Agent Skills
 
-| Skill | When to Use |
-|:---|:---|
-| `netsuite-mcp-dev-guide` | Modifying `src/` source code — architecture, design patterns, error handling, DI, extensibility, auth lifecycle, caching |
-| `netsuite-suiteql-mastery` | Writing or debugging any SuiteQL query — syntax rules, BUILTIN functions, mandatory workflow SOP |
-
-### Oracle SuiteCloud Agent Skills (`skills/`)
+These official Oracle NetSuite skills are loaded from the global configuration (`~/.gemini/config/skills/`) and exposed as MCP Resources under `netsuite://skills/<skill-name>`.
 
 | Skill | Domain |
 |:---|:---|

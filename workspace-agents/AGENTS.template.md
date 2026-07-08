@@ -10,14 +10,14 @@
 
 ## 1. Knowledge Red Lines
 
-- **Single Source of Truth:** All technical conclusions MUST be based on official NetSuite documentation (help.netsuite.com), cited as: `📖 出处：[Title] — help.netsuite.com/...`
-- **Zero Hallucination:** If documentation does not explicitly cover the answer, reply verbatim: "📭 官方文档未涉及此内容". NO speculation, NO assumptions.
+- **Single Source of Truth:** All technical conclusions MUST be based on official NetSuite documentation (`help.netsuite.com`), official SuiteCloud Agent Skills (`netsuite://skills/*`), or Context7 API documentation queries. Cite sources clearly: `📖 出处：[Title/Resource/Skill]`.
+- **Zero Hallucination:** If official documentation, skills, or API schemas do not explicitly cover the answer, reply verbatim: "📭 官方文档/技能库未涉及此内容". NO speculation, NO assumptions.
 - **Data Driven:** When dealing with actual business data, MUST invoke the corresponding environment's MCP tools. NEVER fabricate data.
 
 ## 2. Environment Isolation (MCP)
 
-1. **Configuration-Layer Isolation:** This workspace's `.gemini/settings.json` only activates `{{MCP_SERVER_NAME}}`. Cross-environment tool calls are structurally impossible.
-2. **Lock-in Statement:** Before calling any NetSuite MCP tool, output: `🎯 当前工作区环境已锁定为: {{ACCOUNT_ID}} ({{ENV_TYPE}})`
+1. **Configuration-Layer Isolation:** This workspace's `.gemini/settings.json` only activates the dedicated NetSuite MCP server (`{{MCP_SERVER_NAME}}`) and authorized utility servers (e.g., Context7). Cross-environment NetSuite tool calls are structurally impossible.
+2. **Lock-in Statement:** When initiating NetSuite data operations in a conversation or turn, output once: `🎯 当前工作区环境已锁定为: {{ACCOUNT_ID}} ({{ENV_TYPE}})` (仅在每次任务发起或首次调用工具时声明一次，连续调用时无需重复刷屏).
 3. **🚨 ABSOLUTE RED LINE:** Cross-environment database queries are STRICTLY PROHIBITED. Multi-environment tasks MUST be split into separate sub-tasks with explicit environment declarations.
 4. **Cross-Project File Reads (Allowed):** Reading code templates, configs from other projects under `/Users/fuxintao/WebstormProjects/` is authorized without user confirmation.
 
@@ -82,7 +82,7 @@ When fulfilling a user request, select tools in this priority order:
 | `ns_selector_app` | **🔄 Interactive:** Natural language entity search and selection | `recordType` (required) |
 
 > [!WARNING]
-> **Interactive App Tools** (marked with 🔄): `ns_prompt_library_app`, `ns_report_filters_app`, `ns_selector_app` present interactive UI to the user. After calling them, you **MUST WAIT** for the user's response before proceeding. Do NOT assume or fabricate a result.
+> **Interactive App Tools** (marked with 🔄): `ns_prompt_library_app`, `ns_report_filters_app`, `ns_selector_app` present interactive UI cards to the user. After calling them, you **MUST IMMEDIATELY STOP calling further tools in the current turn** to relinquish execution control. Prompt the user to interact with the UI card, and wait for their submitted response before continuing. Do NOT chain tool calls or fabricate results.
 
 ### System Tools
 
@@ -123,7 +123,7 @@ When fulfilling a user request, select tools in this priority order:
 |:---|:---|
 | **Before** | MUST call `ns_getRecordTypeMetadata` to verify JSON Schema constraints |
 | **Build Params** | Sublist arrays must conform to metadata; IDs, booleans must match internal types |
-| **After** | Use `netsuite_get_record_link` to generate UI link (auto-appended by `ns_getRecord`) |
+| **After** | Check output for UI confirmation link (auto-appended by `ns_getRecord`, `ns_createRecord`, and `ns_updateRecord`) |
 | **Custom Records** | Pass `customrecord_xxx` as `recordType` — no numeric `rectype` needed |
 | **Field Selection** | Use `fields` param on `ns_getRecord` to fetch only needed fields for performance |
 
@@ -141,7 +141,7 @@ When fulfilling a user request, select tools in this priority order:
 
 | Error | Symptom | Action |
 |:---|:---|:---|
-| **401 Unauthorized** | Auth token expired | MCP Server auto-retries once after force-refresh. If still fails → `netsuite_authenticate` |
+| **401 Unauthorized** | Auth token expired | MCP Server auto-retries once after force-refresh. If still fails → call `netsuite_authenticate` (visible in tool list when unauthenticated) |
 | **SuiteQL Timeout** | Query too broad / too many rows | Add `WHERE ROWNUM <= N`, narrow date range with `TO_DATE()`, reduce JOINs |
 | **Field Not Found** | Stale metadata or wrong field name | `netsuite_refresh_cache` (or pass `tableName` for single table), then re-verify with `ns_getSuiteQLMetadata` |
 | **Metadata Inconsistent** | Stale metadata (cache has no TTL) | `netsuite_refresh_cache` to clear Redis caches |
@@ -149,7 +149,7 @@ When fulfilling a user request, select tools in this priority order:
 
 ## 9. Authentication & System
 
-- **Authenticate:** `netsuite_authenticate` — provide `accountId` and `clientId` if env vars not set.
+- **Authenticate:** `netsuite_authenticate` — **Dynamic tool**: ONLY appears in tool list when unauthenticated or after a 401 error. If `netsuite_status` confirms valid login, this tool is hidden and should not be called.
 - **Status:** `netsuite_status` — check auth state, token expiry, cache stats, environment type. **Call this first when diagnosing any issue.**
 - **Logout:** `netsuite_logout` — clear session.
 - **Cache:** `netsuite_refresh_cache` — clear Redis caches (optional: `tableName` for single table). Cache is persistent (no TTL) until cleared manually.
@@ -181,9 +181,11 @@ This MCP server exposes official Oracle NetSuite SuiteCloud Agent Skills as MCP 
 - `netsuite://guides/suiteql` — Complete SuiteQL syntax, Oracle SQL subset rules, and query reference guide
 - `netsuite://skills/<skill-name>` — SuiteCloud Agent Skills (see §10 for full list)
 
-## 12. API Validation (Context7 MCP)
+## 12. API Validation (Context7 MCP & Skills)
 
-Before writing ANY SuiteScript, SuiteQL, or SuiteFlow code, MUST query via Context7 MCP to confirm API signatures, parameters, and enum values. NEVER call APIs from memory.
+Before writing ANY SuiteScript, SuiteQL, or SuiteFlow code, MUST confirm API signatures, parameters, and enum values. NEVER call APIs from memory.
+- **Context7 Workflow:** First call `resolve-library-id` to identify the exact library ID, then call `query-docs` with specific query parameters.
+- **Skills Reference:** Cross-reference record fields and best practices using official resources like `netsuite://skills/netsuite-suitescript-records-reference` and `netsuite://skills/netsuite-sdf-safe-guide`.
 
 ## 13. Engineering Standards
 

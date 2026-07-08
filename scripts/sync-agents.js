@@ -43,7 +43,7 @@ Write operations (\`ns_createRecord\` / \`ns_updateRecord\`) are fully enabled i
 2. For reference fields → use \`ns_selector_app\` or SuiteQL to look up valid IDs
 3. Build \`data\` as **stringified JSON** matching the schema exactly
 4. Call \`ns_createRecord\` or \`ns_updateRecord\`
-5. Verify result → \`netsuite_get_record_link\` for UI confirmation`;
+5. Verify result → Check output for auto-appended UI confirmation link`;
 
 const WRITE_OPS_SECTION_PRODUCTION = `### Write Operations (❌ Disabled)
 
@@ -115,27 +115,36 @@ try {
       const targetPath = path.join(projectPath, 'AGENTS.md');
       const sizeBytes = Buffer.byteLength(output, 'utf-8');
 
-      // Prepare .agents/skills.json payload linking to master project skills
-      const skillsJsonContent = JSON.stringify({
-        entries: [
-          { path: path.join(projectRoot, 'skills') },
-          { path: path.join(projectRoot, '.agents', 'skills') }
-        ]
-      }, null, 2) + '\n';
       const agentsDir = path.join(projectPath, '.agents');
+      const skillsDir = path.join(agentsDir, 'skills');
       const skillsJsonPath = path.join(agentsDir, 'skills.json');
+      const hasObsoleteSkillsJson = fs.existsSync(skillsJsonPath);
+      const hasObsoleteSkillsDir = fs.existsSync(skillsDir);
 
       if (dryRun) {
         console.log(`🔍 [DRY RUN] ${path.basename(projectPath)}/AGENTS.md`);
         console.log(`   Account: ${accountId} | Env: ${envType} | Write: ${writeOpsEnabled ? '✅' : '❌'} | Size: ${sizeBytes} bytes`);
-        console.log(`🔍 [DRY RUN] ${path.basename(projectPath)}/.agents/skills.json`);
+        if (hasObsoleteSkillsJson || hasObsoleteSkillsDir) {
+          console.log(`   🔍 [DRY RUN] Will remove obsolete .agents folder contents`);
+        }
       } else {
         fs.writeFileSync(targetPath, output, 'utf-8');
-        if (!fs.existsSync(agentsDir)) {
-          fs.mkdirSync(agentsDir, { recursive: true });
+        if (hasObsoleteSkillsJson) {
+          fs.rmSync(skillsJsonPath, { force: true });
+          console.log(`🧹 Cleaned: Removed obsolete ${path.basename(projectPath)}/.agents/skills.json`);
         }
-        fs.writeFileSync(skillsJsonPath, skillsJsonContent, 'utf-8');
-        console.log(`✅ Synced: ${path.basename(projectPath)}/AGENTS.md & .agents/skills.json — ${accountId} [${envType}]`);
+        if (hasObsoleteSkillsDir) {
+          fs.rmSync(skillsDir, { recursive: true, force: true });
+          console.log(`🧹 Cleaned: Removed obsolete ${path.basename(projectPath)}/.agents/skills/`);
+        }
+        if (fs.existsSync(agentsDir)) {
+          const files = fs.readdirSync(agentsDir);
+          if (files.length === 0) {
+            fs.rmdirSync(agentsDir);
+            console.log(`🧹 Cleaned: Removed empty ${path.basename(projectPath)}/.agents/ directory`);
+          }
+        }
+        console.log(`✅ Synced: ${path.basename(projectPath)}/AGENTS.md — ${accountId} [${envType}]`);
       }
 
       successCount++;

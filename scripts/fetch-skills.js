@@ -2,21 +2,19 @@ import { execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import os from 'os';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const projectRoot = path.dirname(__dirname);
 
 const tempDir = path.join(projectRoot, 'temp-sdk');
-const targetDir = path.join(projectRoot, 'skills');
+const targetDir = path.join(os.homedir(), '.gemini', 'config', 'skills');
 
 try {
-  console.log('🧹 Cleaning up old skills and temp directories...');
+  console.log('🧹 Cleaning up temp directory...');
   if (fs.existsSync(tempDir)) {
     fs.rmSync(tempDir, { recursive: true, force: true });
-  }
-  if (fs.existsSync(targetDir)) {
-    fs.rmSync(targetDir, { recursive: true, force: true });
   }
 
   console.log('📥 Cloning oracle/netsuite-suitecloud-sdk (depth 1)...');
@@ -28,6 +26,11 @@ try {
   const sourceSkillsDir = path.join(tempDir, 'packages', 'agent-skills');
   if (!fs.existsSync(sourceSkillsDir)) {
     throw new Error(`Could not find agent-skills directory at: ${sourceSkillsDir}`);
+  }
+
+  console.log('🧹 Cleaning up old skills directory...');
+  if (fs.existsSync(targetDir)) {
+    fs.rmSync(targetDir, { recursive: true, force: true });
   }
 
   console.log('🚚 Copying skills to target directory...');

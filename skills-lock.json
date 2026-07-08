@@ -1,0 +1,65 @@
+{
+  "version": 1,
+  "skills": {
+    "netsuite-ai-connector-instructions": {
+      "source": "oracle/netsuite-suitecloud-sdk",
+      "sourceType": "github",
+      "skillPath": "packages/agent-skills/netsuite-ai-connector-instructions/SKILL.md",
+      "computedHash": "30500de71e038f1eef2c19a658319ec5c316b8b51d2b780a313395cbb52ee274"
+    },
+    "netsuite-finance-analyst": {
+      "source": "oracle/netsuite-suitecloud-sdk",
+      "sourceType": "github",
+      "skillPath": "packages/agent-skills/netsuite-finance-analyst/SKILL.md",
+      "computedHash": "3466eb7030a66db91c5ee1d67c1af8d0b7a3ef4096ea43433914c96fe1073492"
+    },
+    "netsuite-owasp-secure-coding": {
+      "source": "oracle/netsuite-suitecloud-sdk",
+      "sourceType": "github",
+      "skillPath": "packages/agent-skills/netsuite-owasp-secure-coding/SKILL.md",
+      "computedHash": "236cde00d2a7a861996f751a63d84cb80b79344155db31db98c98bf63a750b0f"
+    },
+    "netsuite-sdf-project-documentation": {
+      "source": "oracle/netsuite-suitecloud-sdk",
+      "sourceType": "github",
+      "skillPath": "packages/agent-skills/netsuite-sdf-project-documentation/SKILL.md",
+      "computedHash": "4659408ad0b3c945a33a962b44c1b2590f61afcd35996b826eb5cd97fadd8878"
+    },
+    "netsuite-sdf-roles-and-permissions": {
+      "source": "oracle/netsuite-suitecloud-sdk",
+      "sourceType": "github",
+      "skillPath": "packages/agent-skills/netsuite-sdf-roles-and-permissions/SKILL.md",
+      "computedHash": "16a197f2579d917d50454b978b5e2f5ffc9d3374a4d409da74b6819a4cccd772"
+    },
+    "netsuite-sdf-safe-guide": {
+      "source": "oracle/netsuite-suitecloud-sdk",
+      "sourceType": "github",
+      "skillPath": "packages/agent-skills/netsuite-sdf-safe-guide/SKILL.md",
+      "computedHash": "c4a64d06d5a088b7c103a2a8d696dd06164f8738d21780e3ea5add0ba0b94b36"
+    },
+    "netsuite-suitescript-learning": {
+      "source": "oracle/netsuite-suitecloud-sdk",
+      "sourceType": "github",
+      "skillPath": "packages/agent-skills/netsuite-suitescript-learning/SKILL.md",
+      "computedHash": "db6d674b05a068a35b538c5a9664088cdea3aa62e43ba867db8ccf4458f85b53"
+    },
+    "netsuite-suitescript-records-reference": {
+      "source": "oracle/netsuite-suitecloud-sdk",
+      "sourceType": "github",
+      "skillPath": "packages/agent-skills/netsuite-suitescript-records-reference/SKILL.md",
+      "computedHash": "3ac5a14ece1242640c46f0b8e4487fae28321e09d0c0c3f2ee33d4819ae27327"
+    },
+    "netsuite-suitescript-upgrade": {
+      "source": "oracle/netsuite-suitecloud-sdk",
+      "sourceType": "github",
+      "skillPath": "packages/agent-skills/netsuite-suitescript-upgrade/SKILL.md",
+      "computedHash": "d81232e275571e33093209e637bae4e77dc384ed1b8d3a0345e2dd516d476b16"
+    },
+    "netsuite-uif-spa-reference": {
+      "source": "oracle/netsuite-suitecloud-sdk",
+      "sourceType": "github",
+      "skillPath": "packages/agent-skills/netsuite-uif-spa-reference/SKILL.md",
+      "computedHash": "5f438584eb36d76cc20c587e657cb8aaa6808a44215bebeb727bfb82f8fe4ac3"
+    }
+  }
+}

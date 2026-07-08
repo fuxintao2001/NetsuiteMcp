@@ -5,6 +5,8 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import fs from 'fs/promises';
 import { join, basename } from 'path';
+import { getSkillsDir } from '../utils/environment.js';
+
 
 // ---------------------------------------------------------------------------
 // Helper: Parse YAML frontmatter simply
@@ -81,7 +83,7 @@ export function registerResourceHandlers(server: Server, projectRoot: string): v
       },
     ];
 
-    const skillsDir = join(projectRoot, 'skills');
+    const skillsDir = getSkillsDir(projectRoot);
     try {
       const entries = await fs.readdir(skillsDir, { withFileTypes: true });
       for (const entry of entries) {
@@ -113,7 +115,8 @@ export function registerResourceHandlers(server: Server, projectRoot: string): v
     const { uri } = request.params;
 
     if (uri === 'netsuite://guides/suiteql') {
-      const filePath = join(projectRoot, 'skills', 'netsuite-ai-connector-instructions', 'references', 'SUITEQL_GUIDE.md');
+      const skillsDir = getSkillsDir(projectRoot);
+      const filePath = join(skillsDir, 'netsuite-ai-connector-instructions', 'references', 'SUITEQL_GUIDE.md');
       const content = await fs.readFile(filePath, 'utf-8');
       return {
         contents: [
@@ -131,7 +134,8 @@ export function registerResourceHandlers(server: Server, projectRoot: string): v
       // Sanitize the directory name to prevent path traversal
       const sanitizedName = basename(skillName);
       
-      const filePath = join(projectRoot, 'skills', sanitizedName, 'SKILL.md');
+      const skillsDir = getSkillsDir(projectRoot);
+      const filePath = join(skillsDir, sanitizedName, 'SKILL.md');
       try {
         const content = await fs.readFile(filePath, 'utf-8');
         return {
