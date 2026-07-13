@@ -62,7 +62,7 @@ function formatNetSuiteAccountHost(accountId: string): string {
 /**
  * File lock acquisition
  */
-async function acquireLock(lockPath: string, timeoutMs = 15000): Promise<boolean> {
+async function acquireLock(lockPath: string, timeoutMs = 25000): Promise<boolean> {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     try {

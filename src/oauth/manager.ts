@@ -15,7 +15,7 @@ import { formatNetSuiteAccountHost } from '../utils/environment.js';
  * Acquire a cross-process file-based lock by creating a directory.
  * Autorecovers from stale locks after 20 seconds.
  */
-async function acquireLock(lockPath: string, timeoutMs = 15000): Promise<boolean> {
+async function acquireLock(lockPath: string, timeoutMs = 25000): Promise<boolean> {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     try {
@@ -199,7 +199,7 @@ export class OAuthManager {
       try {
         lockAcquired = await acquireLock(lockPath);
         if (!lockAcquired) {
-          console.error('⚠️  Failed to acquire session lock for token refresh, proceeding without lock...');
+          throw new TokenRefreshError('Failed to acquire session lock for token refresh', true);
         }
 
         // Reload session from disk after lock is acquired to check for concurrent updates
@@ -390,7 +390,7 @@ export class OAuthManager {
         
         lockAcquired = await acquireLock(lockPath);
         if (!lockAcquired) {
-          console.error('⚠️  Failed to acquire session lock for auto-recovery, proceeding without lock...');
+          throw new TokenRefreshError('Failed to acquire session lock for auto-recovery', true);
         }
 
         // Reload session from disk after lock is acquired to check if another process recovered it
