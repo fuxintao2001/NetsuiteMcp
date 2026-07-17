@@ -86,11 +86,13 @@ When fulfilling a user request, select tools in this priority order:
 
 ### System Tools
 
-| Tool | Purpose |
-|:---|:---|
-| `netsuite_status` | Check auth state, token expiry, cache stats, environment type |
-| `netsuite_refresh_cache` | Clear Redis caches (optional: `tableName` for single table) |
-| `netsuite_logout` | Clear authentication session |
+| Tool | Purpose | Key Args |
+|:---|:---|:---|
+| `netsuite_batch_execute` | Execute multiple NetSuite MCP tools in parallel | `tasks` (array of tasks with `toolName` and `arguments`) |
+| `netsuite_status` | Check auth state, token expiry, cache stats, environment type | *(none)* |
+| `netsuite_refresh_cache` | Clear Redis caches (optional: `tableName` for single table) | `tableName` (optional) |
+| `netsuite_logout` | Clear authentication session | *(none)* |
+
 
 ## 5. SuiteQL Protocol
 

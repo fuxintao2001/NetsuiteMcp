@@ -259,6 +259,121 @@ async function handleGetParallelMetadata(
   }, null, 2));
 }
 
+interface BatchTask {
+  toolName: string;
+  arguments?: Record<string, unknown>;
+}
+
+async function handleBatchExecute(
+  args: Record<string, unknown>,
+  deps: ToolHandlerDeps
+): Promise<ToolResponse> {
+  const { mcpTools, oauthManager, resolveCustomRecordRectype } = deps;
+  const tasks = args.tasks as BatchTask[] | undefined;
+  if (!Array.isArray(tasks) || tasks.length === 0) {
+    return textResult('❌ Invalid arguments: tasks must be a non-empty array.', true);
+  }
+
+  if (tasks.length > 10) {
+    return textResult('❌ Invalid arguments: tasks array exceeds maximum limit of 10.', true);
+  }
+
+  const accountId = await oauthManager.getAccountId();
+  const isSandbox = accountId ? isSandboxAccount(accountId) : false;
+
+  const startTime = Date.now();
+  const results: Array<Record<string, unknown>> = new Array(tasks.length);
+
+  await Promise.all(
+    tasks.map(async (task, index) => {
+      if (!task || typeof task.toolName !== 'string') {
+        results[index] = {
+          index,
+          success: false,
+          error: 'Invalid task: missing or invalid toolName'
+        };
+        return;
+      }
+
+      const { toolName, arguments: toolArgs = {} } = task;
+      const safeArgs = (toolArgs || {}) as Record<string, unknown>;
+
+      // Normalize parameters
+      if (safeArgs.recordType && typeof safeArgs.recordType === 'string') {
+        safeArgs.recordType = safeArgs.recordType.toLowerCase().trim();
+      }
+      if (safeArgs.tableName && typeof safeArgs.tableName === 'string') {
+        safeArgs.tableName = safeArgs.tableName.toLowerCase().trim();
+      }
+
+      const queryStart = Date.now();
+
+      try {
+        // Enforce the same production write-protection guardrail
+        if ((toolName === 'ns_createRecord' || toolName === 'ns_updateRecord') && !isSandbox) {
+          results[index] = {
+            index,
+            toolName,
+            success: false,
+            durationMs: Date.now() - queryStart,
+            error: `Write operations are disabled in production environments: ${toolName}`
+          };
+          return;
+        }
+
+        let result = await mcpTools.executeTool(toolName, safeArgs);
+
+        // Run hydration if metadata tool
+        if (toolName === 'ns_getRecordTypeMetadata' || toolName === 'ns_getSuiteQLMetadata') {
+          const recordTypeRaw = safeArgs.recordType || safeArgs.tableName;
+          result = await hydrateMetadataIfNeeded(
+            toolName,
+            recordTypeRaw,
+            result || null,
+            mcpTools,
+            resolveCustomRecordRectype
+          );
+        }
+
+        const parsedResult = typeof result === 'string' ? await asyncJsonParse(result) : result;
+
+        // Clean/slim the results
+        let finalResult = parsedResult;
+        if (toolName === 'ns_getRecord') {
+          finalResult = cleanRecordPayload(parsedResult);
+        } else if (toolName === 'ns_getRecordTypeMetadata' || toolName === 'ns_getSuiteQLMetadata') {
+          finalResult = formatMetadataToCompactMarkdown(parsedResult);
+        }
+
+        results[index] = {
+          index,
+          toolName,
+          success: true,
+          durationMs: Date.now() - queryStart,
+          result: finalResult
+        };
+      } catch (err: unknown) {
+        results[index] = {
+          index,
+          toolName,
+          success: false,
+          durationMs: Date.now() - queryStart,
+          error: err instanceof Error ? err.message : String(err)
+        };
+      }
+    })
+  );
+
+  return textResult(JSON.stringify({
+    totalTasks: tasks.length,
+    successfulTasks: results.filter(r => r.success).length,
+    failedTasks: results.filter(r => !r.success).length,
+    totalDurationMs: Date.now() - startTime,
+    individualResults: results
+  }, null, 2));
+}
+
+
 /**
  * netsuite_status — Diagnostic tool
  */
@@ -451,6 +566,10 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
       if (name === 'netsuite_get_parallel_metadata') {
         return await handleGetParallelMetadata(safeArgs, mcpTools);
       }
+      if (name === 'netsuite_batch_execute') {
+        return await handleBatchExecute(safeArgs, deps);
+      }
+
 
       // --- Block write operations in production ---
       if (name === 'ns_createRecord' || name === 'ns_updateRecord') {

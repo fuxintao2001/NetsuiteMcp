@@ -70,13 +70,44 @@ export const STATUS_TOOL = {
   inputSchema: { type: 'object' as const, properties: {} }
 };
 
+export const BATCH_EXECUTE_TOOL = {
+  name: 'netsuite_batch_execute',
+  description: 'Execute multiple NetSuite MCP tools in parallel. Supports up to 10 sub-tasks. Useful for optimization by minimizing round-trip API delays.',
+  inputSchema: {
+    type: 'object' as const,
+    properties: {
+      tasks: {
+        type: 'array',
+        description: 'An array of tasks to execute in parallel. Maximum 10 tasks.',
+        items: {
+          type: 'object',
+          properties: {
+            toolName: {
+              type: 'string',
+              description: 'The name of the tool to execute (e.g. ns_getRecord, ns_runCustomSuiteQL).'
+            },
+            arguments: {
+              type: 'object',
+              description: 'Arguments to pass to the tool.'
+            }
+          },
+          required: ['toolName']
+        }
+      }
+    },
+    required: ['tasks']
+  }
+};
+
 /** All locally-handled tools (excluding AUTH_TOOL which has special routing). */
 export const LOCAL_TOOLS = [
   RECORD_LINK_TOOL,
   REFRESH_CACHE_TOOL,
   LOGOUT_TOOL,
-  STATUS_TOOL
+  STATUS_TOOL,
+  BATCH_EXECUTE_TOOL
 ];
+
 
 // ---------------------------------------------------------------------------
 // Tool description enhancement suffixes

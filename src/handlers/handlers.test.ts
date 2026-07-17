@@ -220,7 +220,104 @@ describe('MCP Handler Wires', () => {
       const parsed = JSON.parse(res.content[0].text.split('\n\n🔗')[0]);
       expect(parsed.recordType).toBe('customrecord_etissl_carrier');
     });
+
+    describe('netsuite_batch_execute tool', () => {
+      it('should execute multiple tools in parallel and return partial results', async () => {
+        mockOAuthManager.getAccountId.mockResolvedValue('123456_SB1');
+        const callFn = registeredHandlers.get(CallToolRequestSchema);
+
+        mockMCPTools.executeTool.mockImplementation(async (name: string, args: any) => {
+          if (name === 'ns_getRecord') {
+            return { id: args.recordId, recordType: args.recordType, entity: 'Acme', links: [] };
+          }
+          if (name === 'ns_runCustomSuiteQL') {
+            return { data: [{ internalid: '1' }] };
+          }
+          throw new Error('Unknown tool');
+        });
+
+        const res = await callFn!({
+          params: {
+            name: 'netsuite_batch_execute',
+            arguments: {
+              tasks: [
+                { toolName: 'ns_getRecord', arguments: { recordType: 'customer', recordId: '101' } },
+                { toolName: 'ns_runCustomSuiteQL', arguments: { sqlQuery: 'SELECT 1' } },
+                { toolName: 'invalid_tool', arguments: {} }
+              ]
+            }
+          }
+        });
+
+        const parsed = JSON.parse(res.content[0].text);
+        expect(parsed.totalTasks).toBe(3);
+        expect(parsed.successfulTasks).toBe(2);
+        expect(parsed.failedTasks).toBe(1);
+
+        const recordRes = parsed.individualResults[0];
+        expect(recordRes.success).toBe(true);
+        expect(recordRes.result.entity).toBe('Acme');
+        expect(recordRes.result.links).toBeUndefined(); // Should be cleaned
+
+        const sqlRes = parsed.individualResults[1];
+        expect(sqlRes.success).toBe(true);
+        expect(sqlRes.result.data[0].internalid).toBe('1');
+
+        const failedRes = parsed.individualResults[2];
+        expect(failedRes.success).toBe(false);
+        expect(failedRes.error).toContain('Unknown tool');
+      });
+
+      it('should fail only write tasks in production', async () => {
+        mockOAuthManager.getAccountId.mockResolvedValue('123456'); // Production
+        const callFn = registeredHandlers.get(CallToolRequestSchema);
+
+        mockMCPTools.executeTool.mockImplementation(async (name: string, args: any) => {
+          if (name === 'ns_getRecord') {
+            return { id: args.recordId };
+          }
+          return { success: true };
+        });
+
+        const res = await callFn!({
+          params: {
+            name: 'netsuite_batch_execute',
+            arguments: {
+              tasks: [
+                { toolName: 'ns_getRecord', arguments: { recordType: 'customer', recordId: '101' } },
+                { toolName: 'ns_createRecord', arguments: { recordType: 'customer', record: {} } }
+              ]
+            }
+          }
+        });
+
+        const parsed = JSON.parse(res.content[0].text);
+        expect(parsed.totalTasks).toBe(2);
+        expect(parsed.successfulTasks).toBe(1);
+        expect(parsed.failedTasks).toBe(1);
+
+        expect(parsed.individualResults[0].success).toBe(true);
+        expect(parsed.individualResults[1].success).toBe(false);
+        expect(parsed.individualResults[1].error).toContain('Write operations are disabled in production');
+      });
+
+      it('should reject if tasks exceeds 10', async () => {
+        const callFn = registeredHandlers.get(CallToolRequestSchema);
+        const tasks = Array.from({ length: 11 }, () => ({ toolName: 'ns_getRecord', arguments: {} }));
+
+        const res = await callFn!({
+          params: {
+            name: 'netsuite_batch_execute',
+            arguments: { tasks }
+          }
+        });
+
+        expect(res.isError).toBe(true);
+        expect(res.content[0].text).toContain('tasks array exceeds maximum limit of 10');
+      });
+    });
   });
+
 
   describe('Resources Handler Wiring', () => {
     beforeEach(() => {
