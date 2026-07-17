@@ -179,10 +179,39 @@ class NetSuiteMCPServer {
     }
   }
 
-  private resolveCustomRecordRectype(recordType: string): number | null {
+  private async resolveCustomRecordRectype(recordType: string): Promise<number | null> {
     if (!recordType) return null;
     const upperType = recordType.toUpperCase().trim();
-    return this.mcpTools.customRecordMappings.get(upperType) ?? null;
+    const cached = this.mcpTools.customRecordMappings.get(upperType);
+    if (cached !== undefined) return cached;
+
+    // Dynamically query mapping via SuiteQL
+    try {
+      console.error(`🔍 Resolving custom record type mapping dynamically for ${upperType}...`);
+      const result = await this.mcpTools.executeTool('ns_runCustomSuiteQL', {
+        sqlQuery: `SELECT internalId FROM customrecordtype WHERE UPPER(scriptId) = '${upperType}'`
+      });
+      const records = (this.mcpTools as any).extractDataArray(result);
+      if (records && records.length > 0) {
+        const internalId = parseInt(String(records[0].internalid || records[0].internalId), 10);
+        if (!isNaN(internalId)) {
+          this.mcpTools.customRecordMappings.set(upperType, internalId);
+          // Also save to persistent cache if accountId exists
+          const accountId = await this.oauthManager.getAccountId();
+          if (accountId) {
+            const mappingsObj = await cacheService.get<Record<string, number>>(accountId, 'customrecord_mappings') || {};
+            mappingsObj[upperType] = internalId;
+            await cacheService.set(accountId, 'customrecord_mappings', mappingsObj);
+          }
+          return internalId;
+        }
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`⚠️ Failed to dynamically resolve custom record rectype for ${upperType}: ${msg}`);
+    }
+
+    return null;
   }
 
   // -------------------------------------------------------------------------

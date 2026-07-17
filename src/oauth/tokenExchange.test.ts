@@ -14,24 +14,24 @@ describe('TokenExchange', () => {
   });
 
   describe('shouldRefreshToken', () => {
-    it('should return true if token expires in less than 5 minutes', () => {
+    it('should return true if token expires in less than 75% of lifetime (e.g. 40 mins remaining on 60m token)', () => {
       const tokens = {
         access_token: 'acc',
         refresh_token: 'ref',
         expires_in: 3600,
-        expires_at: Date.now() + 4 * 60 * 1000, // 4 mins from now
+        expires_at: Date.now() + 40 * 60 * 1000, // 40 mins remaining (< 45 mins)
         accountId: '123',
         clientId: '456'
       };
       expect(shouldRefreshToken(tokens)).toBe(true);
     });
 
-    it('should return false if token expires in more than 5 minutes', () => {
+    it('should return false if token expires in more than 75% of lifetime (e.g. 50 mins remaining on 60m token)', () => {
       const tokens = {
         access_token: 'acc',
         refresh_token: 'ref',
         expires_in: 3600,
-        expires_at: Date.now() + 6 * 60 * 1000, // 6 mins from now
+        expires_at: Date.now() + 50 * 60 * 1000, // 50 mins remaining (> 45 mins)
         accountId: '123',
         clientId: '456'
       };

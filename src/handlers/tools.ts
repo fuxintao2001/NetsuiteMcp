@@ -41,7 +41,7 @@ export interface ToolHandlerDeps {
   handleAuthentication: (args: Record<string, unknown>) => Promise<ToolResponse>;
   handleLogout: () => Promise<ToolResponse>;
   handleCacheRefresh: (args: Record<string, unknown>) => Promise<ToolResponse>;
-  resolveCustomRecordRectype: (type: string) => number | null;
+  resolveCustomRecordRectype: (type: string) => number | null | Promise<number | null>;
 }
 
 // ---------------------------------------------------------------------------
@@ -51,7 +51,7 @@ export interface ToolHandlerDeps {
 async function handleGetRecordLink(
   args: Record<string, unknown>,
   oauthManager: OAuthManager,
-  resolveRectype: (type: string) => number | null
+  resolveRectype: (type: string) => number | null | Promise<number | null>
 ): Promise<ToolResponse> {
   const currentAccountId = await oauthManager.getAccountId();
   const targetAccountId = (args.accountId as string) || currentAccountId;
@@ -63,7 +63,7 @@ async function handleGetRecordLink(
   let rectype = args.rectype as number | string | undefined;
   const recordType = args.recordType as string | undefined;
   if (!rectype && recordType && recordType.toLowerCase().startsWith('customrecord')) {
-    rectype = resolveRectype(recordType) ?? undefined;
+    rectype = (await resolveRectype(recordType)) ?? undefined;
   }
 
   const url = generateNetSuiteUrl(targetAccountId, recordType, args.recordId as string, rectype);
@@ -292,7 +292,7 @@ async function appendRecordLink(
   args: Record<string, unknown>,
   result: unknown,
   oauthManager: OAuthManager,
-  resolveRectype: (type: string) => number | null
+  resolveRectype: (type: string) => number | null | Promise<number | null>
 ): Promise<string> {
   const resultObj = (result && typeof result === 'object') ? result as Record<string, unknown> : {};
   const recordId = (args.id || args.recordId || resultObj.id || resultObj.internalId) as string | undefined;
@@ -305,7 +305,7 @@ async function appendRecordLink(
 
   let rectype = args.rectype as number | string | undefined;
   if (!rectype && recordType && recordType.toLowerCase().startsWith('customrecord')) {
-    rectype = resolveRectype(recordType) ?? undefined;
+    rectype = (await resolveRectype(recordType)) ?? undefined;
   }
 
   const url = generateNetSuiteUrl(currentAccountId, recordType, recordId, rectype);
@@ -442,11 +442,74 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
       }
 
       // --- Proxy to NetSuite MCP API ---
-      let result = await mcpTools.executeTool(name, safeArgs);
+      let result: any;
+      let executeError: any = null;
+
+      try {
+        result = await mcpTools.executeTool(name, safeArgs);
+      } catch (err: unknown) {
+        if (name === 'ns_getRecordTypeMetadata' || name === 'ns_getSuiteQLMetadata') {
+          executeError = err;
+        } else {
+          throw err;
+        }
+      }
 
       if (name === 'ns_getRecordTypeMetadata' || name === 'ns_getSuiteQLMetadata') {
+        const recordTypeRaw = safeArgs.recordType || safeArgs.tableName;
+        const hydratedResult = await hydrateMetadataIfNeeded(
+          name,
+          recordTypeRaw,
+          result || null,
+          mcpTools,
+          resolveCustomRecordRectype
+        );
+
+        if (hydratedResult) {
+          let parsed: any = null;
+          if (Array.isArray(hydratedResult.content)) {
+            const first = hydratedResult.content[0];
+            if (first && first.text && typeof first.text === 'string') {
+              try {
+                parsed = JSON.parse(first.text);
+              } catch { /* ignore */ }
+            }
+          } else if (typeof hydratedResult === 'object') {
+            parsed = hydratedResult;
+          }
+
+          if (parsed && parsed.success === false) {
+            const errorMsg = parsed.error || parsed.message || JSON.stringify(parsed);
+            return textResult(`❌ NetSuite Error: ${errorMsg}`, true);
+          }
+
+          const compactMarkdown = formatMetadataToCompactMarkdown(hydratedResult);
+          return textResult(compactMarkdown);
+        }
+
+        if (executeError) {
+          throw executeError;
+        }
+
         const compactMarkdown = formatMetadataToCompactMarkdown(result);
         return textResult(compactMarkdown);
+      }
+
+      // Check if the record tool call returned a NetSuite-level error
+      let parsedRecordResult: any = null;
+      if (result) {
+        if (typeof result === 'string') {
+          try {
+            parsedRecordResult = JSON.parse(result);
+          } catch { /* ignore */ }
+        } else if (typeof result === 'object') {
+          parsedRecordResult = result;
+        }
+      }
+
+      if (parsedRecordResult && parsedRecordResult.success === false) {
+        const errorMsg = parsedRecordResult.error || parsedRecordResult.message || JSON.stringify(parsedRecordResult);
+        return textResult(`❌ NetSuite Error: ${errorMsg}`, true);
       }
 
       if (name === 'ns_getRecord' || name === 'ns_createRecord' || name === 'ns_updateRecord') {
@@ -472,3 +535,129 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
     }
   });
 }
+
+/** Hydrates NetSuite custom record metadata with custom fields from SuiteQL if needed. */
+async function hydrateMetadataIfNeeded(
+  toolName: string,
+  recordTypeRaw: unknown,
+  originalResult: any,
+  mcpTools: NetSuiteMCPTools,
+  resolveRectype: (type: string) => number | null | Promise<number | null>
+): Promise<any> {
+  const recordType = typeof recordTypeRaw === 'string' ? recordTypeRaw.trim() : '';
+  if (!recordType || !recordType.toLowerCase().startsWith('customrecord')) {
+    return originalResult;
+  }
+
+  try {
+    const rectype = await resolveRectype(recordType);
+    if (!rectype) {
+      return originalResult;
+    }
+
+    console.error(`🔍 Hydrating custom record metadata for ${recordType} (rectype: ${rectype})...`);
+    const qFields = await mcpTools.executeTool('ns_runCustomSuiteQL', {
+      sqlQuery: `SELECT Name, ScriptID, FieldType, IsMandatory FROM CustomField WHERE RecordType = ${rectype}`
+    });
+    const fields = (mcpTools as any).extractDataArray(qFields);
+
+    if (!fields || fields.length === 0) {
+      return originalResult;
+    }
+
+    const mapFieldType = (fieldType: string | undefined): Record<string, any> => {
+      const type = (fieldType || 'TEXT').toUpperCase();
+      if (type === 'CHECKBOX' || type === 'BOOLEAN') return { type: 'boolean' };
+      if (type === 'INTEGER') return { type: 'integer' };
+      if (type === 'FLOAT' || type === 'DOUBLE' || type === 'CURRENCY' || type === 'PERCENT') {
+        return { type: 'number', format: 'double' };
+      }
+      if (type === 'DATE') return { type: 'string', format: 'date' };
+      if (type === 'DATETIME') return { type: 'string', format: 'date-time' };
+      if (type === 'SELECT' || type === 'MULTISELECT' || type === 'RECORD') {
+        return {
+          type: 'object',
+          properties: {
+            id: { title: 'Internal identifier', type: 'string' },
+            refName: { title: 'Reference Name', type: 'string' }
+          }
+        };
+      }
+      return { type: 'string' };
+    };
+
+    const properties: Record<string, any> = {
+      id: { title: 'Internal ID', type: 'string', nullable: true },
+      name: { title: 'Name', type: 'string', nullable: true },
+      externalId: { title: 'External ID', type: 'string', nullable: true },
+      isinactive: { title: 'Is Inactive', type: 'boolean', nullable: true },
+      owner: {
+        title: 'Owner',
+        type: 'object',
+        properties: {
+          id: { title: 'Internal identifier', type: 'string' },
+          refName: { title: 'Reference Name', type: 'string' }
+        },
+        nullable: true
+      }
+    };
+
+    for (const field of fields) {
+      const scriptId = String(field.scriptid || field.scriptId || '').toLowerCase().trim();
+      if (scriptId) {
+        properties[scriptId] = {
+          title: field.name || field.name,
+          nullable: field.ismandatory !== 'T',
+          ...mapFieldType(field.fieldtype)
+        };
+      }
+    }
+
+    let originalProperties: Record<string, any> = {};
+    let parsedOriginal: any = null;
+
+    if (originalResult) {
+      if (Array.isArray(originalResult.content)) {
+        const first = originalResult.content[0];
+        if (first && first.text && typeof first.text === 'string') {
+          try {
+            parsedOriginal = JSON.parse(first.text);
+          } catch { /* ignore */ }
+        }
+      } else if (typeof originalResult === 'object') {
+        parsedOriginal = originalResult;
+      }
+    }
+
+    if (parsedOriginal) {
+      const meta = parsedOriginal.metadata || parsedOriginal;
+      if (meta && typeof meta.properties === 'object') {
+        originalProperties = meta.properties;
+      }
+    }
+
+    const finalProperties = { ...properties, ...originalProperties };
+
+    const hydratedResponse = {
+      success: true,
+      metadata: {
+        type: 'object',
+        properties: finalProperties
+      }
+    };
+
+    return {
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify(hydratedResponse)
+        }
+      ]
+    };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`⚠️ Failed to hydrate custom record metadata: ${msg}`);
+    return originalResult;
+  }
+}
+

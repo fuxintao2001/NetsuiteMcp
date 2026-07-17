@@ -39,7 +39,7 @@ function generatePlist(nodePath: string, scriptPath: string, logPath: string): s
     <string>${scriptPath}</string>
   </array>
   <key>StartInterval</key>
-  <integer>1500</integer>
+  <integer>600</integer>
   <key>RunAtLoad</key>
   <true/>
   <key>StandardOutPath</key>
@@ -93,7 +93,7 @@ export async function install(): Promise<void> {
     execSync(`launchctl load -w "${paths.plistPath}"`);
     
     console.error(`\n✅ LaunchAgent daemon installed and loaded successfully!`);
-    console.error(`   The daemon will run every 25 minutes.`);
+    console.error(`   The daemon will run every 10 minutes.`);
     console.error(`   You can view logs at: tail -f "${paths.logPath}"`);
   } catch (err: any) {
     console.error(`❌ Failed to install LaunchAgent: ${err.message}`);

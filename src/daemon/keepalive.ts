@@ -2,6 +2,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
 import https from 'https';
+import dns from 'dns/promises';
 import { fileURLToPath } from 'url';
 
 export interface TokenData {
@@ -57,6 +58,22 @@ function logError(msg: string) {
  */
 function formatNetSuiteAccountHost(accountId: string): string {
   return accountId.toLowerCase().replace(/_/g, '-');
+}
+
+/**
+ * Checks if basic network connectivity is up by resolving a well-known NetSuite API hostname.
+ * Prevents firing token requests right as macOS wakes up from sleep when Wi-Fi/TLS socket is not yet ready.
+ */
+async function checkNetworkReadiness(timeoutMs = 5000): Promise<boolean> {
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    await dns.lookup('suitetalk.api.netsuite.com');
+    clearTimeout(timer);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -159,9 +176,11 @@ async function refreshTokens(
     client_id: clientId,
   }).toString();
 
-  // Retry up to 3 times with exponential backoff on transient errors
+  // Retry up to 4 times with exponential backoff on transient errors
   let attempt = 0;
-  const maxAttempts = 3;
+  const maxAttempts = 4;
+  let lastTransientError: string | null = null;
+
   while (true) {
     attempt++;
     try {
@@ -177,12 +196,16 @@ async function refreshTokens(
       
       const errorMsg = `HTTP ${res.status}: ${res.data}`;
       if (res.status === 400 || res.status === 401) {
-        // Unrecoverable
+        // If we just suffered a network/TLS socket disconnect on attempt 1, and on attempt 2 we get HTTP 400,
+        // it means NetSuite likely processed the rotation during the dropped socket.
+        if (lastTransientError) {
+          throw new Error(`Unrecoverable (post-network-drop rotation mismatch): ${errorMsg} (Prior network error: ${lastTransientError})`);
+        }
         throw new Error(`Unrecoverable error refreshing tokens: ${errorMsg}`);
       }
 
       if (attempt < maxAttempts) {
-        const delay = 2000 * Math.pow(2, attempt - 1);
+        const delay = Math.min(3000 * Math.pow(2, attempt - 1), 20000);
         logWarn(`Transient refresh error (${errorMsg}). Retrying in ${delay / 1000}s...`);
         await new Promise((resolve) => setTimeout(resolve, delay));
         continue;
@@ -190,7 +213,8 @@ async function refreshTokens(
       throw new Error(`Failed after ${maxAttempts} attempts: ${errorMsg}`);
     } catch (err: any) {
       if (attempt < maxAttempts && !err.message.includes('Unrecoverable')) {
-        const delay = 2000 * Math.pow(2, attempt - 1);
+        lastTransientError = err.message;
+        const delay = Math.min(3000 * Math.pow(2, attempt - 1), 20000);
         logWarn(`Transient refresh exception (${err.message}). Retrying in ${delay / 1000}s...`);
         await new Promise((resolve) => setTimeout(resolve, delay));
         continue;
@@ -205,6 +229,20 @@ async function refreshTokens(
  */
 export async function runKeepAlive(): Promise<void> {
   logInfo('Starting token keepalive execution scan...');
+
+  // Wait for network readiness (especially critical immediately after wake from sleep)
+  // Skip during unit tests to avoid DNS lookup timeout when testing local file processing
+  if (!process.env.DAEMON_SESSION_ROOTS && !process.env.JEST_WORKER_ID && process.env.NODE_ENV !== 'test') {
+    if (!(await checkNetworkReadiness())) {
+      logWarn('Network not ready right after wake/startup. Waiting 10s for Wi-Fi/TLS stabilization...');
+      await new Promise((resolve) => setTimeout(resolve, 10000));
+      if (!(await checkNetworkReadiness())) {
+        logWarn('Network still unreachable after wait. Proceeding with scan with resilient backoff...');
+      } else {
+        logSuccess('Network stabilized!');
+      }
+    }
+  }
 
   let sessionRoots: string[] = [];
   if (process.env.DAEMON_SESSION_ROOTS) {
@@ -250,11 +288,11 @@ export async function runKeepAlive(): Promise<void> {
             continue;
           }
 
-          // Check if token has passed 50% of its lifetime, or if authenticated is false but we have a refresh token
+          // Check if token has passed 25% of its lifetime (i.e., less than 75% remaining), or if authenticated is false
           const tokens = session.tokens;
           const timeUntilExpiry = tokens.expires_at - Date.now();
-          const halfLife = (tokens.expires_in * 1000) / 2;
-          const needsRefresh = timeUntilExpiry < halfLife || !session.authenticated;
+          const refreshThreshold = (tokens.expires_in * 1000) * 0.75;
+          const needsRefresh = timeUntilExpiry < refreshThreshold || !session.authenticated;
 
           if (!needsRefresh) {
             const timeStr = Math.round(timeUntilExpiry / 1000);
@@ -283,7 +321,7 @@ export async function runKeepAlive(): Promise<void> {
 
           const currentTokens = lockedSession.tokens;
           const currentExpiry = currentTokens.expires_at - Date.now();
-          if (currentExpiry >= halfLife && lockedSession.authenticated) {
+          if (currentExpiry >= refreshThreshold && lockedSession.authenticated) {
             logInfo(`[${accountId}] Session refreshed by another process concurrently`);
             skippedAccounts++;
             continue;
@@ -321,13 +359,18 @@ export async function runKeepAlive(): Promise<void> {
         } catch (err: any) {
           logError(`[${accountId}] Failed during refresh operation: ${err.message}`);
           failedAccounts++;
-          // If refresh token is expired, mark session as unauthenticated
+          // If refresh token is truly expired and not caused by a post-network-drop rotation mismatch, mark session unauthenticated
           try {
-            if (err.message.includes('Unrecoverable')) {
+            if (err.message.includes('Unrecoverable') && !err.message.includes('post-network-drop rotation mismatch')) {
               const fileContent = await fs.readFile(sessionFile, 'utf-8');
               const session = JSON.parse(fileContent) as SessionData;
-              session.authenticated = false;
-              await fs.writeFile(sessionFile, JSON.stringify(session, null, 2), { mode: 0o600 });
+              if (session.authenticated !== false) {
+                session.authenticated = false;
+                await fs.writeFile(sessionFile, JSON.stringify(session, null, 2), { mode: 0o600 });
+                logWarn(`[${accountId}] Session marked unauthenticated due to unrecoverable token expiration.`);
+              }
+            } else if (err.message.includes('post-network-drop rotation mismatch')) {
+              logWarn(`[${accountId}] Preserving session configuration despite network drop rotation mismatch. Will attempt auto-recovery next round.`);
             }
           } catch {
             // Ignore sub-errors

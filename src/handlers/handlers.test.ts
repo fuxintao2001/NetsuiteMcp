@@ -43,7 +43,11 @@ describe('MCP Handler Wires', () => {
         { name: 'ns_runCustomSuiteQL', description: 'Run SuiteQL queries' }
       ]),
       executeTool: jest.fn().mockResolvedValue({ id: '101', type: 'customer', name: 'Acme Corp' }),
-      customRecordMappings: new Map()
+      customRecordMappings: new Map(),
+      extractDataArray: (result: any) => {
+        if (result && Array.isArray(result.data)) return result.data;
+        return [];
+      }
     };
   });
 
@@ -69,7 +73,10 @@ describe('MCP Handler Wires', () => {
         handleAuthentication: authCb,
         handleLogout: logoutCb,
         handleCacheRefresh: refreshCb,
-        resolveCustomRecordRectype: () => null
+        resolveCustomRecordRectype: async (type: string) => {
+          if (type.toLowerCase() === 'customrecord_etissl_carrier') return 54;
+          return null;
+        }
       });
     });
 
@@ -143,6 +150,52 @@ describe('MCP Handler Wires', () => {
         }
       });
       expect(authCb).toHaveBeenCalled();
+    });
+
+    it('should hydrate custom record type metadata using CustomField SuiteQL fallback', async () => {
+      mockOAuthManager.getAccountId.mockResolvedValue('123456');
+      const callFn = registeredHandlers.get(CallToolRequestSchema);
+
+      mockMCPTools.executeTool.mockImplementation(async (name: string, args: any) => {
+        if (name === 'ns_getRecordTypeMetadata') {
+          return {
+            content: [{
+              type: 'text',
+              text: JSON.stringify({
+                success: true,
+                metadata: {
+                  type: 'object',
+                  properties: {
+                    refName: { title: 'Reference Name', type: 'string' }
+                  }
+                }
+              })
+            }]
+          };
+        }
+        if (name === 'ns_runCustomSuiteQL' && args.sqlQuery?.includes('CustomField')) {
+          return {
+            data: [{
+              name: 'Carrier Description',
+              scriptid: 'CUSTRECORD_ETISSL_CARRIER_DESCRIPTION',
+              fieldtype: 'RECORD',
+              ismandatory: 'F'
+            }]
+          };
+        }
+        return {};
+      });
+
+      const res = await callFn!({
+        params: {
+          name: 'ns_getRecordTypeMetadata',
+          arguments: { recordType: 'customrecord_etissl_carrier' }
+        }
+      });
+
+      expect(res.content[0].text).toContain('custrecord_etissl_carrier_description');
+      expect(res.content[0].text).toContain('Carrier Description');
+      expect(res.content[0].text).toContain('isinactive');
     });
   });
 

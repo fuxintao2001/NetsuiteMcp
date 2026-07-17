@@ -224,10 +224,13 @@ export class OAuthManager {
       } catch (error: unknown) {
         if (error instanceof TokenRefreshError && !error.recoverable) {
           console.error('🔒 Refresh token expired — session requires re-authentication');
-          // Mark session as unauthenticated while preserving config for potential re-auth
-          const current = await this.storage.load();
-          if (current) {
-            await this.storage.save({ ...current, authenticated: false });
+          const errMsg = error.message || '';
+          if (!errMsg.includes('post-network-drop rotation mismatch')) {
+            // Mark session as unauthenticated while preserving config for potential re-auth
+            const current = await this.storage.load();
+            if (current && current.authenticated !== false) {
+              await this.storage.save({ ...current, authenticated: false });
+            }
           }
         }
         throw error;
@@ -275,15 +278,14 @@ export class OAuthManager {
 
   /**
    * Check if we should proactively refresh to keep the refresh token alive.
-   * Returns true when the access token is past halfway through its lifetime.
-   * This ensures refresh tokens get renewed frequently (~every 30 min for a
-   * 60-min access token) and never expire from disuse.
+   * Returns true when the access token is past 25% of its lifetime (i.e. < 75% remaining).
+   * This ensures refresh tokens get renewed frequently and never expire from disuse or race conditions.
    */
   private shouldProactivelyRenew(tokens: TokenData): boolean {
     const issuedAt = tokens.expires_at - tokens.expires_in * 1000;
     const elapsed = Date.now() - issuedAt;
-    const halfLife = (tokens.expires_in * 1000) / 2;
-    return elapsed > halfLife;
+    const threshold = (tokens.expires_in * 1000) * 0.25;
+    return elapsed > threshold;
   }
 
   /**
@@ -419,9 +421,12 @@ export class OAuthManager {
         // Unrecoverable: refresh token itself is expired/invalid — don't retry
         if (error instanceof TokenRefreshError && !error.recoverable) {
           console.error('🔒 Refresh token expired — re-authentication required');
-          const current = await this.storage.load();
-          if (current) {
-            await this.storage.save({ ...current, authenticated: false });
+          const errMsg = error.message || '';
+          if (!errMsg.includes('post-network-drop rotation mismatch')) {
+            const current = await this.storage.load();
+            if (current && current.authenticated !== false) {
+              await this.storage.save({ ...current, authenticated: false });
+            }
           }
           throw error;
         }
