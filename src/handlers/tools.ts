@@ -62,12 +62,20 @@ async function handleGetRecordLink(
 
   let rectype = args.rectype as number | string | undefined;
   const recordType = args.recordType as string | undefined;
+  let hasMappingWarning = false;
   if (!rectype && recordType && recordType.toLowerCase().startsWith('customrecord')) {
     rectype = (await resolveRectype(recordType)) ?? undefined;
+    if (!rectype) {
+      hasMappingWarning = true;
+    }
   }
 
   const url = generateNetSuiteUrl(targetAccountId, recordType, args.recordId as string, rectype);
-  return textResult(`🔗 **NetSuite UI Link (${targetAccountId.toUpperCase()}):**\n${url}`);
+  let responseText = `🔗 **NetSuite UI Link (${targetAccountId.toUpperCase()}):**\n${url}`;
+  if (hasMappingWarning) {
+    responseText += `\n\n⚠️ **Note:** Could not auto-resolve numeric record type ID for custom record '${recordType}'. The generated link uses the string ID, which might not load correctly unless you explicitly provide the numeric 'rectype' parameter or grant your NetSuite integration role the "Custom Record Types" setup permission.`;
+  }
+  return textResult(responseText);
 }
 
 async function handleRunParallelQueries(
@@ -290,13 +298,12 @@ async function handleStatus(
 async function appendRecordLink(
   responseText: string,
   args: Record<string, unknown>,
-  result: unknown,
+  result: any,
   oauthManager: OAuthManager,
   resolveRectype: (type: string) => number | null | Promise<number | null>
 ): Promise<string> {
-  const resultObj = (result && typeof result === 'object') ? result as Record<string, unknown> : {};
-  const recordId = (args.id || args.recordId || resultObj.id || resultObj.internalId) as string | undefined;
-  const recordType = (args.recordType || args.type || resultObj.type || resultObj.recordType) as string | undefined;
+  const recordId = args.recordId || (result && (result.id || result.internalid));
+  const recordType = args.recordType || (result && result.recordType);
 
   if (!recordId) return responseText;
 
@@ -304,13 +311,20 @@ async function appendRecordLink(
   if (!currentAccountId) return responseText;
 
   let rectype = args.rectype as number | string | undefined;
+  let hasMappingWarning = false;
   if (!rectype && recordType && recordType.toLowerCase().startsWith('customrecord')) {
     rectype = (await resolveRectype(recordType)) ?? undefined;
+    if (!rectype) {
+      hasMappingWarning = true;
+    }
   }
 
   const url = generateNetSuiteUrl(currentAccountId, recordType, recordId, rectype);
   if (url) {
     responseText += `\n\n🔗 **NetSuite UI Link (Current Environment):**\n${url}`;
+    if (hasMappingWarning) {
+      responseText += `\n\n⚠️ **Note:** Could not auto-resolve numeric record type ID for custom record '${recordType}'. The generated link uses the string ID, which might not load correctly unless you explicitly provide the numeric 'rectype' parameter or grant your NetSuite integration role the "Custom Record Types" setup permission.`;
+    }
   }
   return responseText;
 }
@@ -394,6 +408,14 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
     const safeArgs = (args || {}) as Record<string, unknown>;
+
+    // Normalize recordType/tableName parameters to lowercase for case-sensitive NetSuite REST API
+    if (safeArgs.recordType && typeof safeArgs.recordType === 'string') {
+      safeArgs.recordType = safeArgs.recordType.toLowerCase().trim();
+    }
+    if (safeArgs.tableName && typeof safeArgs.tableName === 'string') {
+      safeArgs.tableName = safeArgs.tableName.toLowerCase().trim();
+    }
 
     try {
       // --- Tools that do NOT require authentication ---

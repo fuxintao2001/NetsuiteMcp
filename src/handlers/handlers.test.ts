@@ -197,6 +197,29 @@ describe('MCP Handler Wires', () => {
       expect(res.content[0].text).toContain('Carrier Description');
       expect(res.content[0].text).toContain('isinactive');
     });
+
+    it('should normalize recordType and tableName to lowercase', async () => {
+      mockOAuthManager.hasValidSession.mockResolvedValue(true);
+      const callFn = registeredHandlers.get(CallToolRequestSchema);
+
+      mockMCPTools.executeTool.mockImplementation(async (name: string, args: any) => {
+        return {
+          success: true,
+          recordType: args.recordType,
+          tableName: args.tableName
+        };
+      });
+
+      const res = await callFn!({
+        params: {
+          name: 'ns_getRecord',
+          arguments: { recordType: 'customRecord_ETISSL_Carrier', tableName: 'SalesOrder' }
+        }
+      });
+
+      const parsed = JSON.parse(res.content[0].text.split('\n\n🔗')[0]);
+      expect(parsed.recordType).toBe('customrecord_etissl_carrier');
+    });
   });
 
   describe('Resources Handler Wiring', () => {
