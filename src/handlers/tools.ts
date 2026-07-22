@@ -17,6 +17,7 @@ import {
   AUTH_TOOL, LOGOUT_TOOL, LOCAL_TOOLS, STATUS_TOOL,
   SUITEQL_RULES_SUFFIX, METADATA_RULES_SUFFIX
 } from './toolSchemas.js';
+import pLimit from 'p-limit';
 
 // ---------------------------------------------------------------------------
 // Shared helper
@@ -88,37 +89,34 @@ async function handleRunParallelQueries(
   }
 
   const startTime = Date.now();
-  const concurrencyLimit = 5;
-  const results: Array<Record<string, unknown>> = new Array(queries.length);
-  let nextIndex = 0;
+  const limit = pLimit(5);
 
-  const worker = async (): Promise<void> => {
-    while (nextIndex < queries.length) {
-      const index = nextIndex++;
-      const sqlQuery = queries[index] as string;
-      const queryStart = Date.now();
-      try {
-        const result = await mcpTools.executeTool('ns_runCustomSuiteQL', { sqlQuery });
-        results[index] = {
-          index, success: true, durationMs: Date.now() - queryStart,
-          query: sqlQuery,
-          result: typeof result === 'string' ? await asyncJsonParse(result) : result
-        };
-      } catch (err: unknown) {
-        results[index] = {
-          index, success: false, durationMs: Date.now() - queryStart,
-          query: sqlQuery,
-          error: err instanceof Error ? err.message : String(err)
-        };
-      }
-    }
-  };
-
-  const workers: Promise<void>[] = [];
-  for (let i = 0; i < Math.min(concurrencyLimit, queries.length); i++) {
-    workers.push(worker());
-  }
-  await Promise.all(workers);
+  const results = await Promise.all(
+    queries.map((query, index) =>
+      limit(async () => {
+        const sqlQuery = query as string;
+        const queryStart = Date.now();
+        try {
+          const result = await mcpTools.executeTool('ns_runCustomSuiteQL', { sqlQuery });
+          return {
+            index,
+            success: true,
+            durationMs: Date.now() - queryStart,
+            query: sqlQuery,
+            result: typeof result === 'string' ? await asyncJsonParse(result) : result
+          };
+        } catch (err: unknown) {
+          return {
+            index,
+            success: false,
+            durationMs: Date.now() - queryStart,
+            query: sqlQuery,
+            error: err instanceof Error ? err.message : String(err)
+          };
+        }
+      })
+    )
+  );
 
   return textResult(JSON.stringify({
     totalQueries: queries.length,
@@ -145,49 +143,43 @@ async function handleGetParallelRecords(
   }
 
   const startTime = Date.now();
-  const concurrencyLimit = 5;
-  const results: Array<Record<string, unknown>> = new Array(records.length);
-  let nextIndex = 0;
+  const limit = pLimit(5);
 
-  const worker = async (): Promise<void> => {
-    while (nextIndex < records.length) {
-      const index = nextIndex++;
-      const item = records[index];
-      if (!item) continue;
-      const queryStart = Date.now();
-      try {
-        const result = await mcpTools.executeTool('ns_getRecord', {
-          recordType: item.recordType,
-          recordId: item.recordId,
-          fields: item.fields
-        });
-        const parsedResult = typeof result === 'string' ? await asyncJsonParse(result) : result;
-        results[index] = {
-          index,
-          success: true,
-          durationMs: Date.now() - queryStart,
-          recordType: item.recordType,
-          recordId: item.recordId,
-          result: cleanRecordPayload(parsedResult)
-        };
-      } catch (err: unknown) {
-        results[index] = {
-          index,
-          success: false,
-          durationMs: Date.now() - queryStart,
-          recordType: item.recordType,
-          recordId: item.recordId,
-          error: err instanceof Error ? err.message : String(err)
-        };
-      }
-    }
-  };
-
-  const workers: Promise<void>[] = [];
-  for (let i = 0; i < Math.min(concurrencyLimit, records.length); i++) {
-    workers.push(worker());
-  }
-  await Promise.all(workers);
+  const results = await Promise.all(
+    records.map((item, index) =>
+      limit(async () => {
+        if (!item) {
+          return { index, success: false, durationMs: 0, recordType: '', recordId: '', error: 'Invalid record item' };
+        }
+        const queryStart = Date.now();
+        try {
+          const result = await mcpTools.executeTool('ns_getRecord', {
+            recordType: item.recordType,
+            recordId: item.recordId,
+            fields: item.fields
+          });
+          const parsedResult = typeof result === 'string' ? await asyncJsonParse(result) : result;
+          return {
+            index,
+            success: true,
+            durationMs: Date.now() - queryStart,
+            recordType: item.recordType,
+            recordId: item.recordId,
+            result: cleanRecordPayload(parsedResult)
+          };
+        } catch (err: unknown) {
+          return {
+            index,
+            success: false,
+            durationMs: Date.now() - queryStart,
+            recordType: item.recordType,
+            recordId: item.recordId,
+            error: err instanceof Error ? err.message : String(err)
+          };
+        }
+      })
+    )
+  );
 
   return textResult(JSON.stringify({
     totalRecords: records.length,
@@ -211,43 +203,37 @@ async function handleGetParallelMetadata(
 
   const toolName = metaType === 'suiteql' ? 'ns_getSuiteQLMetadata' : 'ns_getRecordTypeMetadata';
   const startTime = Date.now();
-  const concurrencyLimit = 5;
-  const results: Array<Record<string, unknown>> = new Array(recordTypes.length);
-  let nextIndex = 0;
+  const limit = pLimit(5);
 
-  const worker = async (): Promise<void> => {
-    while (nextIndex < recordTypes.length) {
-      const index = nextIndex++;
-      const recordType = recordTypes[index];
-      if (!recordType) continue;
-      const queryStart = Date.now();
-      try {
-        const result = await mcpTools.executeTool(toolName, { recordType });
-        const parsedResult = typeof result === 'string' ? await asyncJsonParse(result) : result;
-        results[index] = {
-          index,
-          success: true,
-          durationMs: Date.now() - queryStart,
-          recordType,
-          result: formatMetadataToCompactMarkdown(parsedResult)
-        };
-      } catch (err: unknown) {
-        results[index] = {
-          index,
-          success: false,
-          durationMs: Date.now() - queryStart,
-          recordType,
-          error: err instanceof Error ? err.message : String(err)
-        };
-      }
-    }
-  };
-
-  const workers: Promise<void>[] = [];
-  for (let i = 0; i < Math.min(concurrencyLimit, recordTypes.length); i++) {
-    workers.push(worker());
-  }
-  await Promise.all(workers);
+  const results = await Promise.all(
+    recordTypes.map((recordType, index) =>
+      limit(async () => {
+        if (!recordType) {
+          return { index, success: false, durationMs: 0, recordType: '', error: 'Invalid record type' };
+        }
+        const queryStart = Date.now();
+        try {
+          const result = await mcpTools.executeTool(toolName, { recordType });
+          const parsedResult = typeof result === 'string' ? await asyncJsonParse(result) : result;
+          return {
+            index,
+            success: true,
+            durationMs: Date.now() - queryStart,
+            recordType,
+            result: formatMetadataToCompactMarkdown(parsedResult)
+          };
+        } catch (err: unknown) {
+          return {
+            index,
+            success: false,
+            durationMs: Date.now() - queryStart,
+            recordType,
+            error: err instanceof Error ? err.message : String(err)
+          };
+        }
+      })
+    )
+  );
 
   return textResult(JSON.stringify({
     totalMetadataRequests: recordTypes.length,
@@ -700,7 +686,7 @@ async function hydrateMetadataIfNeeded(
     const qFields = await mcpTools.executeTool('ns_runCustomSuiteQL', {
       sqlQuery: `SELECT Name, ScriptID, FieldType, IsMandatory FROM CustomField WHERE RecordType = ${rectype}`
     });
-    const fields = (mcpTools as any).extractDataArray(qFields);
+    const fields = mcpTools.extractDataArray(qFields);
 
     if (!fields || fields.length === 0) {
       return originalResult;
@@ -747,9 +733,9 @@ async function hydrateMetadataIfNeeded(
       const scriptId = String(field.scriptid || field.scriptId || '').toLowerCase().trim();
       if (scriptId) {
         properties[scriptId] = {
-          title: field.name || field.name,
+          title: String(field.name || field.label || scriptId),
           nullable: field.ismandatory !== 'T',
-          ...mapFieldType(field.fieldtype)
+          ...mapFieldType(field.fieldtype as string | undefined)
         };
       }
     }

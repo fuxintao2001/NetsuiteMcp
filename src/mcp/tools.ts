@@ -8,6 +8,7 @@ import { dirname, join } from 'path';
 import { ConcurrencyLimiter, retryWithBackoff } from '../utils/resilience.js';
 import { httpClient } from '../utils/httpClient.js';
 import { formatNetSuiteAccountHost, getSkillsDir } from '../utils/environment.js';
+import { randomUUID } from 'crypto';
 
 
 /**
@@ -483,7 +484,7 @@ export class NetSuiteMCPTools {
 
     const body: Record<string, unknown> = {
       jsonrpc: '2.0',
-      id: `mcp-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
+      id: `mcp-${randomUUID()}`,
       method
     };
     if (params) body.params = params;
@@ -604,7 +605,7 @@ export class NetSuiteMCPTools {
   /**
    * Extract a data array from various NetSuite response shapes.
    */
-  private extractDataArray(result: unknown): Array<Record<string, unknown>> {
+  public extractDataArray(result: unknown): Array<Record<string, unknown>> {
     if (!result || typeof result !== 'object') return [];
 
     let data = result as Record<string, unknown>;

@@ -13,4 +13,8 @@ export default {
     ],
   },
   extensionsToTreatAsEsm: ['.ts'],
+  collectCoverageFrom: [
+    'src/**/*.ts',
+    '!src/**/*.test.ts'
+  ],
 };

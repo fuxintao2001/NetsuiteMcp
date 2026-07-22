@@ -87,7 +87,16 @@ export class RedisCacheProvider implements CacheProvider {
       cursor = reply[0];
       const keys = reply[1];
       if (keys && keys.length > 0) {
-        await client.del(...keys);
+        // Chunk keys to prevent stack overflow from function argument spreading
+        const batchSize = 500;
+        for (let i = 0; i < keys.length; i += batchSize) {
+          const chunk = keys.slice(i, i + batchSize);
+          if (typeof (client as any).unlink === 'function') {
+            await (client as any).unlink(...chunk);
+          } else {
+            await client.del(...chunk);
+          }
+        }
         keysDeleted += keys.length;
       }
     } while (cursor !== '0');

@@ -191,9 +191,10 @@ class NetSuiteMCPServer {
       const result = await this.mcpTools.executeTool('ns_runCustomSuiteQL', {
         sqlQuery: `SELECT internalId FROM customrecordtype WHERE UPPER(scriptId) = '${upperType}'`
       });
-      const records = (this.mcpTools as any).extractDataArray(result);
-      if (records && records.length > 0) {
-        const internalId = parseInt(String(records[0].internalid || records[0].internalId), 10);
+      const records = this.mcpTools.extractDataArray(result);
+      const firstRecord = records[0];
+      if (firstRecord) {
+        const internalId = parseInt(String(firstRecord.internalid || firstRecord.internalId), 10);
         if (!isNaN(internalId)) {
           this.mcpTools.customRecordMappings.set(upperType, internalId);
           // Also save to persistent cache if accountId exists

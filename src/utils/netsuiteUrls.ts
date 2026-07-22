@@ -55,7 +55,15 @@ const RECORD_URL_MAP: Record<string, string> = {
   'exprept': '/app/accounting/transactions/exprept.nl',
   'cashrefund': '/app/accounting/transactions/cashrfnd.nl',
   'cashrfnd': '/app/accounting/transactions/cashrfnd.nl',
-  
+  'workorder': '/app/accounting/transactions/workord.nl',
+  'workord': '/app/accounting/transactions/workord.nl',
+
+  // Master Data & Organization
+  'subsidiary': '/app/common/other/subsidiary.nl',
+  'department': '/app/common/other/department.nl',
+  'location': '/app/common/other/location.nl',
+  'account': '/app/accounting/general/account.nl',
+
   // Items
   'item': '/app/common/item/item.nl',
   'inventoryitem': '/app/common/item/item.nl',

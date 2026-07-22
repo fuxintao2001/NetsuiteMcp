@@ -3,6 +3,13 @@ import type { TokenData } from './sessionStorage.js';
 import { parseNetSuiteError } from '../utils/errors.js';
 import { formatNetSuiteAccountHost } from '../utils/environment.js';
 import { retryWithBackoff } from '../utils/resilience.js';
+import { z } from 'zod';
+
+const TokenApiResponseSchema = z.object({
+  access_token: z.string().min(1, 'access_token is empty or missing'),
+  refresh_token: z.string().optional(),
+  expires_in: z.union([z.number(), z.string().transform((v) => parseInt(v, 10))]),
+});
 
 /**
  * NetSuite OAuth token exchange utilities
@@ -90,12 +97,13 @@ export async function exchangeCodeForTokens(
 
   try {
     const response = await postTokenRequest(tokenUrl, params);
+    const parsedData = TokenApiResponseSchema.parse(response.data);
 
     const tokens: TokenData = {
-      access_token: String(response.data.access_token),
-      refresh_token: String(response.data.refresh_token),
-      expires_in: Number(response.data.expires_in),
-      expires_at: Date.now() + (Number(response.data.expires_in) * 1000),
+      access_token: parsedData.access_token,
+      refresh_token: parsedData.refresh_token || '',
+      expires_in: parsedData.expires_in,
+      expires_at: Date.now() + (parsedData.expires_in * 1000),
       accountId: config.accountId,
       clientId: config.clientId
     };
@@ -129,13 +137,14 @@ export async function refreshAccessToken(tokens: TokenData): Promise<TokenData> 
 
   try {
     const response = await postTokenRequest(tokenUrl, params);
+    const parsedData = TokenApiResponseSchema.parse(response.data);
 
     const newTokens: TokenData = {
       ...tokens,
-      access_token: String(response.data.access_token),
-      refresh_token: response.data.refresh_token ? String(response.data.refresh_token) : refresh_token,
-      expires_in: Number(response.data.expires_in),
-      expires_at: Date.now() + (Number(response.data.expires_in) * 1000)
+      access_token: parsedData.access_token,
+      refresh_token: parsedData.refresh_token ? parsedData.refresh_token : refresh_token,
+      expires_in: parsedData.expires_in,
+      expires_at: Date.now() + (parsedData.expires_in * 1000)
     };
 
     console.error('✅ Token refreshed successfully');

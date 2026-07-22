@@ -5,13 +5,17 @@
 /**
  * Clean helper function to recursively remove nulls, undefineds, and 'links' keys.
  */
-function cleanRecordPayloadHelper(val: any): any {
-  if (val === null || val === undefined) {
+function cleanRecordPayloadHelper(val: any, depth = 0, seen = new WeakSet()): any {
+  if (val === null || val === undefined || depth > 20) {
     return undefined;
+  }
+  if (typeof val === 'object') {
+    if (seen.has(val)) return undefined;
+    seen.add(val);
   }
   if (Array.isArray(val)) {
     const cleanedArr = val
-      .map(item => cleanRecordPayloadHelper(item))
+      .map(item => cleanRecordPayloadHelper(item, depth + 1, seen))
       .filter(item => item !== undefined);
     return cleanedArr.length > 0 ? cleanedArr : undefined;
   }
@@ -20,7 +24,7 @@ function cleanRecordPayloadHelper(val: any): any {
     let hasKeys = false;
     for (const key of Object.keys(val)) {
       if (key === 'links') continue;
-      const cleanedVal = cleanRecordPayloadHelper(val[key]);
+      const cleanedVal = cleanRecordPayloadHelper(val[key], depth + 1, seen);
       if (cleanedVal !== undefined && cleanedVal !== null && cleanedVal !== '') {
         cleaned[key] = cleanedVal;
         hasKeys = true;
@@ -86,9 +90,9 @@ export function formatMetadataToCompactMarkdown(schema: any): string {
     const typeStr = valObj.type === 'object' && valObj.properties
       ? `object (${Object.keys(valObj.properties).join(', ')})`
       : (valObj.type || 'string');
-    const desc = (valObj.description || valObj.title || '').trim();
+    const desc = (valObj.description || valObj.title || '').trim().replace(/\|/g, '\\|').replace(/\n/g, ' ');
     const nullable = valObj.nullable !== false ? 'Yes' : 'No';
-    output += `| ${key} | ${typeStr} | ${desc.replace(/\n/g, ' ')} | ${nullable} |\n`;
+    output += `| ${key} | ${typeStr} | ${desc} | ${nullable} |\n`;
   }
   return output;
 }

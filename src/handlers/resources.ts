@@ -12,9 +12,9 @@ import { getSkillsDir } from '../utils/environment.js';
 // Helper: Parse YAML frontmatter simply
 // ---------------------------------------------------------------------------
 function parseFrontmatter(content: string): { name?: string; description?: string } {
-  const parts = content.split('---');
-  if (parts.length < 3) return {};
-  const frontmatterText = parts[1] ?? '';
+  const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+  if (!match || !match[1]) return {};
+  const frontmatterText = match[1];
   const lines = frontmatterText.split('\n');
   const result: { name?: string; description?: string } = {};
 
@@ -23,7 +23,6 @@ function parseFrontmatter(content: string): { name?: string; description?: strin
     const trimmed = line.trim();
     if (!trimmed) continue;
 
-    // Check if line starts with key:
     const nameMatch = line.match(/^name:\s*(.*)/);
     const descMatch = line.match(/^description:\s*(.*)/);
 
@@ -42,14 +41,12 @@ function parseFrontmatter(content: string): { name?: string; description?: strin
     } else if (line.match(/^[a-zA-Z0-9_-]+:/)) {
       currentKey = null;
     } else if (currentKey && line.startsWith(' ')) {
-      // Continuation of multiline string
       if (currentKey === 'description' && result.description) {
         result.description += ' ' + trimmed;
       }
     }
   }
 
-  // Clean quotes
   if (result.name) result.name = result.name.replace(/^['"]|['"]$/g, '');
   if (result.description) result.description = result.description.replace(/^['"]|['"]$/g, '');
 
@@ -117,16 +114,29 @@ export function registerResourceHandlers(server: Server, projectRoot: string): v
     if (uri === 'netsuite://guides/suiteql') {
       const skillsDir = getSkillsDir(projectRoot);
       const filePath = join(skillsDir, 'netsuite-ai-connector-instructions', 'references', 'SUITEQL_GUIDE.md');
-      const content = await fs.readFile(filePath, 'utf-8');
-      return {
-        contents: [
-          {
-            uri,
-            mimeType: 'text/markdown',
-            text: content,
-          },
-        ],
-      };
+      try {
+        const content = await fs.readFile(filePath, 'utf-8');
+        return {
+          contents: [
+            {
+              uri,
+              mimeType: 'text/markdown',
+              text: content,
+            },
+          ],
+        };
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return {
+          contents: [
+            {
+              uri,
+              mimeType: 'text/plain',
+              text: `⚠️ Guide file not found: ${msg}`,
+            },
+          ],
+        };
+      }
     }
 
     if (uri.startsWith('netsuite://skills/')) {

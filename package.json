@@ -17,6 +17,7 @@
     "daemon:uninstall": "node scripts/daemon.js uninstall",
     "daemon:status": "node scripts/daemon.js status",
     "daemon:run": "node scripts/daemon.js run",
+    "lint": "biome check src",
     "test": "NODE_ENV=test node --experimental-vm-modules node_modules/jest/bin/jest.js"
   },
   "keywords": [
@@ -53,9 +54,11 @@
     "node": ">=18.0.0"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.5.5",
     "@types/jest": "^30.0.0",
     "@types/node": "^25.9.1",
     "jest": "^30.4.2",
+    "p-limit": "^7.3.1",
     "rimraf": "^6.1.3",
     "ts-jest": "^29.4.11",
     "tsx": "^4.22.4",
