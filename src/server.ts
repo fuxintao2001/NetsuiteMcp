@@ -208,7 +208,6 @@ class NetSuiteHTTPServer {
       });
     });
 
-    // Streamable HTTP MCP Handler endpoint per account
     const handleMcpRoute = async (req: Request, res: Response) => {
       const rawAccountId = req.params.accountId;
       const accountKey = Array.isArray(rawAccountId) ? rawAccountId[0] : rawAccountId;
@@ -242,21 +241,24 @@ class NetSuiteHTTPServer {
       await sendWebResponse(webRes, res);
     };
 
-    this.app.post('/mcp/:accountId', handleMcpRoute);
+    // Explicitly route paths for MCP Express handler
     this.app.get('/mcp/:accountId', handleMcpRoute);
+    this.app.post('/mcp/:accountId', handleMcpRoute);
+    this.app.get('/mcp/:accountId/sse', handleMcpRoute);
+    this.app.post('/mcp/:accountId/messages', handleMcpRoute);
 
     this.app.listen(port, () => {
       console.error(`🚀 NetSuite MCP Streamable HTTP Server running on http://localhost:${port}`);
       console.error(`📡 Active endpoints:`);
       for (const key of Object.keys(ACCOUNT_CONFIGS)) {
-        console.error(`   - http://localhost:${port}/mcp/${key}`);
+        console.error(`   - http://localhost:${port}/mcp/${key}/sse`);
       }
     });
   }
 }
 
 // Start HTTP server if executed directly
-if (process.argv[1] && process.argv[1].endsWith('server.js')) {
+if (process.argv[1] && (process.argv[1].endsWith('server.js') || process.argv[1].endsWith('server.ts'))) {
   const port = parseInt(process.env.PORT || '3000', 10);
   const server = new NetSuiteHTTPServer();
   server.start(port).catch((err) => {
