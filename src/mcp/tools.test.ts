@@ -12,9 +12,9 @@ describe('NetSuiteMCPTools', () => {
     jest.clearAllMocks();
 
     mockOAuthManager = {
-      getAccountId: jest.fn().mockResolvedValue('test-acc'),
-      ensureValidToken: jest.fn().mockResolvedValue('token-111'),
-      forceRefreshToken: jest.fn().mockResolvedValue('token-222')
+      getAccountId: (jest.fn() as any).mockResolvedValue('test-acc'),
+      ensureValidToken: (jest.fn() as any).mockResolvedValue('token-111'),
+      forceRefreshToken: (jest.fn() as any).mockResolvedValue('token-222')
     };
 
     httpPostSpy = jest.spyOn(httpClient, 'post').mockResolvedValue({

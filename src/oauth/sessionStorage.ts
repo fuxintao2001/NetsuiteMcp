@@ -44,6 +44,17 @@ export class SessionStorage {
   }
 
   /**
+   * Clear session file
+   */
+  async clear(): Promise<void> {
+    try {
+      await fs.unlink(this.sessionFile);
+    } catch {
+      // Ignored
+    }
+  }
+
+  /**
    * Save session data to file
    */
   async save(data: SessionData): Promise<void> {
@@ -96,18 +107,6 @@ export class SessionStorage {
         return null; // Session file doesn't exist
       }
       throw error;
-    }
-  }
-
-  /**
-   * Clear session file (logout)
-   */
-  async clear(): Promise<void> {
-    try {
-      await fs.unlink(this.sessionFile);
-      console.error('✅ Session cleared');
-    } catch {
-      // Session file doesn't exist, ignore
     }
   }
 

@@ -1,11 +1,5 @@
-import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import {
-  ListToolsRequestSchema,
-  CallToolRequestSchema,
-  McpError,
-  ErrorCode,
-  type CallToolResult
-} from '@modelcontextprotocol/sdk/types.js';
+import { Server, ProtocolError, ProtocolErrorCode } from "@modelcontextprotocol/server";
+import type { CallToolResult } from "@modelcontextprotocol/server";
 import { NetSuiteMCPTools } from '../mcp/tools.js';
 import { OAuthManager } from '../oauth/manager.js';
 import { generateNetSuiteUrl } from '../utils/netsuiteUrls.js';
@@ -471,7 +465,7 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
   } = deps;
 
   // --- List Tools ---
-  server.setRequestHandler(ListToolsRequestSchema, async () => {
+  server.setRequestHandler('tools/list', async () => {
     try {
       const accountId = (await oauthManager.getAccountId()) || process.env.NETSUITE_ACCOUNT_ID;
       const envSuffix = buildEnvSuffix(accountId ?? null);
@@ -479,7 +473,7 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
       const isAuthenticated = await oauthManager.hasValidSession();
       if (!isAuthenticated) {
         const unauthTools = [AUTH_TOOL, LOGOUT_TOOL, STATUS_TOOL].map(t => enhanceDescription(t, envSuffix));
-        return { tools: unauthTools };
+        return { tools: unauthTools as any };
       }
 
       const tools = await mcpTools.fetchTools() as Array<Record<string, unknown>>;
@@ -496,17 +490,17 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
       // Combine with local tools and append env suffix
       const finalTools = [...enhancedTools, ...LOCAL_TOOLS].map(t => enhanceDescription(t, envSuffix));
 
-      return { tools: finalTools };
+      return { tools: finalTools as any };
     } catch {
       const accountId = (await oauthManager.getAccountId()) || process.env.NETSUITE_ACCOUNT_ID;
       const envSuffix = buildEnvSuffix(accountId ?? null);
       const fallbackTools = [AUTH_TOOL, LOGOUT_TOOL, STATUS_TOOL].map(t => enhanceDescription(t, envSuffix));
-      return { tools: fallbackTools };
+      return { tools: fallbackTools as any };
     }
   });
 
   // --- Call Tool ---
-  server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  server.setRequestHandler('tools/call', async (request) => {
     const { name, arguments: args } = request.params;
     const safeArgs = (args || {}) as Record<string, unknown>;
 
@@ -561,8 +555,8 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
       if (name === 'ns_createRecord' || name === 'ns_updateRecord') {
         const accountId = await oauthManager.getAccountId();
         if (accountId && !isSandboxAccount(accountId)) {
-          throw new McpError(
-            ErrorCode.InvalidRequest,
+          throw new ProtocolError(
+            ProtocolErrorCode.InvalidRequest,
             `Write operations are disabled in production environments: ${name}`
           );
         }
@@ -653,7 +647,7 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
       return textResult(responseText);
     } catch (error: unknown) {
       // Let McpError propagate directly to the MCP SDK
-      if (error instanceof McpError) {
+      if (error instanceof ProtocolError) {
         throw error;
       }
       // All other errors: return as tool-level error response

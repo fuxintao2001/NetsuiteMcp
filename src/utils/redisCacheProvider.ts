@@ -1,5 +1,6 @@
 import { Redis } from 'ioredis';
 import { CacheProvider, CacheStats } from './cacheProvider.js';
+import { RedisLockProvider } from './redisLock.js';
 
 export class RedisCacheProvider implements CacheProvider {
   private redis: Redis | null = null;
@@ -125,5 +126,14 @@ export class RedisCacheProvider implements CacheProvider {
       connected,
       keyCount
     };
+  }
+
+  /**
+   * Create a RedisLockProvider using this provider's Redis connection.
+   * Returns null if Redis is not connected.
+   */
+  createLockProvider(): RedisLockProvider | null {
+    if (!this.redis) return null;
+    return new RedisLockProvider(this.redis);
   }
 }

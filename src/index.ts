@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
-import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { StdioServerTransport } from "@modelcontextprotocol/server/stdio";
+import { Server } from "@modelcontextprotocol/server";
 import { OAuthManager } from './oauth/manager.js';
 import { NetSuiteMCPTools } from './mcp/tools.js';
 import { cacheService } from './utils/cache.js';
@@ -241,6 +241,12 @@ class NetSuiteMCPServer {
     // Connect to Redis
     try {
       await this.cacheProvider.connect();
+      // Initialize Redis lock provider now that Redis is connected
+      const lockProvider = this.cacheProvider.createLockProvider();
+      if (lockProvider) {
+        this.oauthManager.setLockProvider(lockProvider);
+        console.error('🔒 Redis distributed lock provider initialized');
+      }
     } catch (err) {
       console.error('❌ Failed to connect to Redis on startup:', err);
       throw err;
@@ -317,6 +323,15 @@ async function main(): Promise<void> {
 
     process.on('SIGINT', shutdown);
     process.on('SIGTERM', shutdown);
+
+    // Prevent zombie processes when parent client closes stdio connection
+    process.stdin.on('close', () => { void shutdown(); });
+    process.stdin.on('end', () => { void shutdown(); });
+    process.stdout.on('error', (err: any) => {
+      if (err.code === 'EPIPE') {
+        void shutdown();
+      }
+    });
 
     await server.start();
   } catch (error) {

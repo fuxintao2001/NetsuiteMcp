@@ -9,7 +9,9 @@
   },
   "scripts": {
     "start": "node dist/index.js",
+    "start:http": "node dist/server.js",
     "dev": "tsx src/index.ts",
+    "dev:http": "tsx src/server.ts",
     "build": "rimraf dist && tsc",
     "fetch-skills": "node scripts/fetch-skills.js",
     "sync-agents": "node scripts/sync-agents.js",
@@ -45,9 +47,14 @@
   "homepage": "https://github.com/dsvantien/netsuite-mcp-server#readme",
   "license": "MIT",
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@modelcontextprotocol/client": "^2.0.0-beta.5",
+    "@modelcontextprotocol/core": "^2.0.0-beta.5",
+    "@modelcontextprotocol/express": "^2.0.0-beta.5",
+    "@modelcontextprotocol/server": "^2.0.0-beta.5",
     "axios": "^1.6.0",
+    "express": "^5.2.1",
     "ioredis": "^5.11.1",
+    "redlock": "^5.0.0-beta.2",
     "zod": "^4.4.3"
   },
   "engines": {
@@ -55,6 +62,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.5",
+    "@types/express": "^5.0.6",
     "@types/jest": "^30.0.0",
     "@types/node": "^25.9.1",
     "jest": "^30.4.2",

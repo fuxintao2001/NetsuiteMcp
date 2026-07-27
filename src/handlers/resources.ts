@@ -1,8 +1,4 @@
-import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import {
-  ListResourcesRequestSchema,
-  ReadResourceRequestSchema,
-} from '@modelcontextprotocol/sdk/types.js';
+import { Server } from "@modelcontextprotocol/server";
 import fs from 'fs/promises';
 import { join, basename } from 'path';
 import { getSkillsDir } from '../utils/environment.js';
@@ -67,7 +63,7 @@ function parseFrontmatter(content: string): { name?: string; description?: strin
 export function registerResourceHandlers(server: Server, projectRoot: string): void {
 
   // --- List Resources ---
-  server.setRequestHandler(ListResourcesRequestSchema, async () => {
+  server.setRequestHandler('resources/list', async () => {
     const resources = [
       {
         uri: 'netsuite://guides/suiteql',
@@ -108,7 +104,7 @@ export function registerResourceHandlers(server: Server, projectRoot: string): v
   });
 
   // --- Read Resource ---
-  server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+  server.setRequestHandler('resources/read', async (request) => {
     const { uri } = request.params;
 
     if (uri === 'netsuite://guides/suiteql') {

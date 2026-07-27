@@ -2,7 +2,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
 import { runKeepAlive } from './keepalive.js';
-import { jest } from '@jest/globals';
+import { describe, it, expect, beforeEach, afterEach, jest } from '@jest/globals';
 
 // Simple unit tests for keepalive daemon logic using temporary session files
 describe('Token Keepalive Daemon', () => {

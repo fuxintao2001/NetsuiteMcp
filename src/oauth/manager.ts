@@ -10,6 +10,7 @@ import { exchangeCodeForTokens, refreshAccessToken, shouldRefreshToken, TokenRef
 import { TokenRefreshScheduler } from '../utils/resilience.js';
 import { openBrowser } from '../utils/browserLauncher.js';
 import { formatNetSuiteAccountHost } from '../utils/environment.js';
+import { RedisLockProvider } from '../utils/redisLock.js';
 
 /**
  * Acquire a cross-process file-based lock by creating a directory.
@@ -58,6 +59,7 @@ async function releaseLock(lockPath: string): Promise<void> {
 interface OAuthManagerConfig {
   storagePath?: string;
   callbackPort?: number;
+  lockProvider?: RedisLockProvider | null;
 }
 
 interface AuthFlowConfig {
@@ -75,12 +77,21 @@ export class OAuthManager {
   private callbackServer: CallbackServer;
   private tokenRefreshScheduler: TokenRefreshScheduler;
   private refreshPromise: Promise<string> | null = null;
+  private lockProvider: RedisLockProvider | null;
 
   constructor(config: OAuthManagerConfig = {}) {
     this.callbackPort = config.callbackPort || 8080;
     this.storage = new SessionStorage(config.storagePath || './sessions');
     this.callbackServer = new CallbackServer(this.callbackPort);
     this.tokenRefreshScheduler = new TokenRefreshScheduler(this);
+    this.lockProvider = config.lockProvider || null;
+  }
+
+  /**
+   * Set or update the Redis lock provider (e.g., after Redis connects)
+   */
+  setLockProvider(provider: RedisLockProvider): void {
+    this.lockProvider = provider;
   }
 
   /**
@@ -194,12 +205,24 @@ export class OAuthManager {
 
   private async executeTokenRefresh(session: any, tokenToRefresh: string): Promise<string> {
     this.refreshPromise = (async () => {
+      const accountId = session?.config?.accountId || session?.tokens?.accountId || 'unknown';
+      const lockResource = `token_refresh:${accountId}`;
+      let lockId: any = null;
       const lockPath = path.join(this.storage.getStoragePath(), 'session.lock');
-      let lockAcquired = false;
+      let fileLockAcquired = false;
+
       try {
-        lockAcquired = await acquireLock(lockPath);
-        if (!lockAcquired) {
-          throw new TokenRefreshError('Failed to acquire session lock for token refresh', true);
+        // Acquire Redis distributed lock (preferred) or fall back to file lock
+        if (this.lockProvider) {
+          lockId = await this.lockProvider.acquire(lockResource);
+          if (!lockId) {
+            throw new TokenRefreshError('Failed to acquire Redis lock for token refresh', true);
+          }
+        } else {
+          fileLockAcquired = await acquireLock(lockPath);
+          if (!fileLockAcquired) {
+            throw new TokenRefreshError('Failed to acquire session lock for token refresh', true);
+          }
         }
 
         // Reload session from disk after lock is acquired to check for concurrent updates
@@ -211,11 +234,29 @@ export class OAuthManager {
             console.error('🔄 Token was refreshed by another process concurrently.');
             return currentToken;
           }
+          // Also check if refresh_token changed (rotation by another process)
+          if (session.tokens?.refresh_token && currentSession.tokens.refresh_token !== session.tokens.refresh_token) {
+            console.error('🔄 Refresh token was rotated by another process. Using their result.');
+            return currentSession.tokens.access_token;
+          }
           // Update the session in our scope
           session = currentSession;
         }
 
+        const oldRT = session.tokens?.refresh_token?.slice(-8) || 'unknown';
         const newTokens = await refreshAccessToken(session.tokens);
+        const newRT = newTokens.refresh_token?.slice(-8) || 'unchanged';
+        console.error(`🔄 Token rotation: old_rt=...${oldRT} → new_rt=...${newRT}`);
+
+        // Token Rotation safety: verify refresh_token hasn't been rotated during our HTTP request
+        const preWriteSession = await this.storage.load();
+        if (preWriteSession?.tokens?.refresh_token && 
+            session.tokens?.refresh_token &&
+            preWriteSession.tokens.refresh_token !== session.tokens.refresh_token) {
+          console.error('⚠️ Refresh token was rotated by another process during our refresh. Using their result.');
+          return preWriteSession.tokens.access_token;
+        }
+
         await this.storage.save({
           ...session,
           tokens: newTokens
@@ -235,7 +276,9 @@ export class OAuthManager {
         }
         throw error;
       } finally {
-        if (lockAcquired) {
+        if (lockId && this.lockProvider) {
+          await this.lockProvider.release(lockResource, lockId);
+        } else if (fileLockAcquired) {
           await releaseLock(lockPath);
         }
         this.refreshPromise = null;
@@ -385,14 +428,23 @@ export class OAuthManager {
 
     const lockPath = path.join(this.storage.getStoragePath(), 'session.lock');
     let lockAcquired = false;
+    let lockId: any = null;
+    const lockResource = `token_refresh:${session?.config?.accountId || session?.tokens?.accountId || 'unknown'}`;
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
         console.error(`🔄 Auto-recovery attempt ${attempt}/${maxRetries}...`);
         
-        lockAcquired = await acquireLock(lockPath);
-        if (!lockAcquired) {
-          throw new TokenRefreshError('Failed to acquire session lock for auto-recovery', true);
+        if (this.lockProvider) {
+          lockId = await this.lockProvider.acquire(lockResource);
+          if (!lockId) {
+            throw new TokenRefreshError('Failed to acquire Redis lock for auto-recovery', true);
+          }
+        } else {
+          lockAcquired = await acquireLock(lockPath);
+          if (!lockAcquired) {
+            throw new TokenRefreshError('Failed to acquire session lock for auto-recovery', true);
+          }
         }
 
         // Reload session from disk after lock is acquired to check if another process recovered it
@@ -409,7 +461,20 @@ export class OAuthManager {
         const tokensToRefresh = currentSession?.tokens || session.tokens;
         if (!tokensToRefresh) return;
 
+        const oldRT = tokensToRefresh.refresh_token?.slice(-8) || 'unknown';
         const newTokens = await refreshAccessToken(tokensToRefresh);
+        const newRT = newTokens.refresh_token?.slice(-8) || 'unchanged';
+        console.error(`🔄 Auto-recovery token rotation: old_rt=...${oldRT} → new_rt=...${newRT}`);
+
+        // Token Rotation safety: verify refresh_token hasn't been rotated during our HTTP request
+        const preWriteSession = await this.storage.load();
+        if (preWriteSession?.tokens?.refresh_token && 
+            tokensToRefresh.refresh_token &&
+            preWriteSession.tokens.refresh_token !== tokensToRefresh.refresh_token) {
+          console.error('⚠️ Refresh token was rotated by another process during our auto-recovery. Using their result.');
+          return;
+        }
+
         await this.storage.save({
           ...(currentSession || session),
           tokens: newTokens,
@@ -435,7 +500,10 @@ export class OAuthManager {
           // Exponential backoff: 3s, 6s, 12s, capped at 15s
           const delay = Math.min(3000 * Math.pow(2, attempt - 1), 15000);
           console.error(`⚠️ Auto-recovery attempt ${attempt} failed (transient error), retrying in ${delay / 1000}s...`);
-          if (lockAcquired) {
+          if (lockId && this.lockProvider) {
+            await this.lockProvider.release(lockResource, lockId);
+            lockId = null;
+          } else if (lockAcquired) {
             await releaseLock(lockPath);
             lockAcquired = false;
           }
@@ -452,7 +520,10 @@ export class OAuthManager {
           throw error;
         }
       } finally {
-        if (lockAcquired) {
+        if (lockId && this.lockProvider) {
+          await this.lockProvider.release(lockResource, lockId);
+          lockId = null;
+        } else if (lockAcquired) {
           await releaseLock(lockPath);
           lockAcquired = false;
         }
@@ -494,5 +565,12 @@ export class OAuthManager {
         expiresAt: null,
       };
     }
+  }
+
+  /**
+   * Clear session data for logout
+   */
+  async logout(): Promise<void> {
+    await this.storage.clear();
   }
 }

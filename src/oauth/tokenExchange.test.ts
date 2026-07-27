@@ -109,7 +109,7 @@ describe('TokenExchange', () => {
 
       try {
         await refreshAccessToken(oldTokens);
-        fail('Should have thrown an error');
+        expect(true).toBe(false); // Should have thrown an error
       } catch (err: any) {
         expect(err).toBeInstanceOf(TokenRefreshError);
         expect(err.recoverable).toBe(false);

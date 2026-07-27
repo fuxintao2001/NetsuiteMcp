@@ -2,8 +2,10 @@ import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
 import https from 'https';
-import dns from 'dns/promises';
+import { lookup } from 'dns/promises';
 import { fileURLToPath } from 'url';
+import { Redis } from 'ioredis';
+import { RedisLockProvider } from '../utils/redisLock.js';
 
 export interface TokenData {
   access_token: string;
@@ -68,7 +70,7 @@ async function checkNetworkReadiness(timeoutMs = 5000): Promise<boolean> {
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
-    await dns.lookup('suitetalk.api.netsuite.com');
+    await lookup('suitetalk.api.netsuite.com');
     clearTimeout(timer);
     return true;
   } catch {
@@ -244,6 +246,18 @@ export async function runKeepAlive(): Promise<void> {
     }
   }
 
+  // Connect to Redis for distributed locking
+  const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
+  const redis = new Redis(redisUrl, { lazyConnect: true, maxRetriesPerRequest: 1 });
+  let lockProvider: RedisLockProvider | null = null;
+  try {
+    await redis.connect();
+    lockProvider = new RedisLockProvider(redis);
+    logInfo('Redis connected for distributed locking');
+  } catch (err: any) {
+    logWarn(`Redis connection failed: ${err.message}. Using file locks as fallback.`);
+  }
+
   let sessionRoots: string[] = [];
   if (process.env.DAEMON_SESSION_ROOTS) {
     sessionRoots = process.env.DAEMON_SESSION_ROOTS.split(',').map(p => p.trim());
@@ -275,6 +289,7 @@ export async function runKeepAlive(): Promise<void> {
 
         totalAccounts++;
         let lockAcquired = false;
+        let lockId: string | null = null;
         const lockPath = path.join(sessionDir, 'session.lock');
 
         try {
@@ -303,11 +318,22 @@ export async function runKeepAlive(): Promise<void> {
 
           logInfo(`[${accountId}] Needs refresh (expiry in ${Math.round(timeUntilExpiry / 1000)}s, authenticated: ${session.authenticated}). Acquiring lock...`);
 
-          lockAcquired = await acquireLock(lockPath);
-          if (!lockAcquired) {
-            logWarn(`[${accountId}] Could not acquire session lock, skipping this round...`);
-            failedAccounts++;
-            continue;
+          const lockResource = `token_refresh:${accountId}`;
+          if (lockProvider) {
+            lockId = await lockProvider.acquire(lockResource);
+            if (!lockId) {
+              logWarn(`[${accountId}] Could not acquire Redis lock, skipping this round...`);
+              failedAccounts++;
+              continue;
+            }
+          } else {
+            // Fallback to file lock
+            lockAcquired = await acquireLock(lockPath);
+            if (!lockAcquired) {
+              logWarn(`[${accountId}] Could not acquire session lock, skipping this round...`);
+              failedAccounts++;
+              continue;
+            }
           }
 
           // Re-load under lock
@@ -342,6 +368,15 @@ export async function runKeepAlive(): Promise<void> {
             expires_at: Date.now() + newTokens.expires_in! * 1000,
           };
 
+          // Token Rotation safety: verify refresh_token hasn't been rotated by another process
+          const preWriteContent = await fs.readFile(sessionFile, 'utf-8');
+          const preWriteSession = JSON.parse(preWriteContent) as SessionData;
+          if (preWriteSession.tokens?.refresh_token !== currentTokens.refresh_token) {
+            logWarn(`[${accountId}] Refresh token was rotated by another process during our refresh. Discarding our result to prevent rotation conflict.`);
+            skippedAccounts++;
+            continue;
+          }
+
           const updatedSession: SessionData = {
             ...lockedSession,
             tokens: updatedTokens,
@@ -354,6 +389,9 @@ export async function runKeepAlive(): Promise<void> {
           await fs.chmod(tempFile, 0o600);
           await fs.rename(tempFile, sessionFile);
 
+          const oldRTFingerprint = currentTokens.refresh_token.slice(-8);
+          const newRTFingerprint = newTokens.refresh_token ? String(newTokens.refresh_token).slice(-8) : 'unchanged';
+          logInfo(`[${accountId}] Token rotation: old_rt=...${oldRTFingerprint} → new_rt=...${newRTFingerprint}`);
           logSuccess(`[${accountId}] Token refreshed successfully!`);
           refreshedAccounts++;
         } catch (err: any) {
@@ -376,8 +414,10 @@ export async function runKeepAlive(): Promise<void> {
             // Ignore sub-errors
           }
         } finally {
-          if (lockAcquired) {
-            await releaseLock(lockPath);
+          if (lockId && lockProvider) {
+            await lockProvider.release(`token_refresh:${accountId}`, lockId);
+          } else if (lockAcquired) {
+            await releaseLock(path.join(sessionDir, 'session.lock'));
           }
         }
       }
@@ -387,6 +427,15 @@ export async function runKeepAlive(): Promise<void> {
   }
 
   logInfo(`Keepalive scan finished. Accounts: ${totalAccounts} total | ${refreshedAccounts} refreshed | ${skippedAccounts} skipped | ${failedAccounts} failed.`);
+
+  // Cleanup Redis connection
+  if (redis.status === 'ready') {
+    try {
+      await redis.quit();
+    } catch {
+      // Ignore cleanup errors
+    }
+  }
 }
 
 // Execute if run directly
