@@ -32,6 +32,23 @@ async function main() {
     } else {
       console.log('netsuite_status tool not found in tool list.');
     }
+
+    console.log('\n--- Testing NetSuite API call (ns_getRecordTypeMetadata) ---');
+    const metadataTool = tools.tools.find(t => t.name === 'ns_getRecordTypeMetadata');
+    if (metadataTool) {
+      console.log('Calling ns_getRecordTypeMetadata for "customer"...');
+      const metadataResult = await client.callTool({
+        name: 'ns_getRecordTypeMetadata',
+        arguments: {
+          type: 'customer'
+        }
+      });
+      console.log(`✅ ns_getRecordTypeMetadata returned ${metadataResult.content?.[0]?.text?.length || 0} characters of metadata.`);
+      console.log('Sample content:', metadataResult.content?.[0]?.text?.substring(0, 200) + '...');
+    } else {
+      console.log('ns_getRecordTypeMetadata tool not found.');
+    }
+
   } catch (error) {
     console.error('❌ Test failed:', error);
   } finally {

@@ -1,9 +1,8 @@
 import express, { Request, Response } from 'express';
 import path from 'path';
 import fs from 'fs/promises';
-import { Readable } from 'stream';
 import { Server, createMcpHandler } from '@modelcontextprotocol/server';
-import { createMcpExpressApp } from '@modelcontextprotocol/express';
+import { localhostHostValidation, localhostOriginValidation } from '@modelcontextprotocol/express';
 import { NetSuiteMCPTools } from './mcp/tools.js';
 import { OAuthManager } from './oauth/manager.js';
 import { RedisCacheProvider } from './utils/redisCacheProvider.js';
@@ -50,7 +49,15 @@ const ACCOUNT_CONFIGS: Record<string, AccountConfig> = {
   }
 };
 
-/** Convert Express req to Web Standard Request */
+/**
+ * Convert Express req to a bodiless Web Standard Request.
+ *
+ * The request body is NOT included here — it is passed separately via
+ * handler.fetch()'s `parsedBody` option. This avoids the Undici
+ * "Response body object should not be disturbed or locked" TypeError
+ * that occurs when express.json() or any other body-reading middleware
+ * has already consumed the IncomingMessage stream.
+ */
 function createWebRequest(req: Request): globalThis.Request {
   const protocol = req.protocol || 'http';
   const host = req.get('host') || 'localhost:3000';
@@ -67,18 +74,11 @@ function createWebRequest(req: Request): globalThis.Request {
     }
   }
 
-  const hasBody = ['POST', 'PUT', 'PATCH'].includes(req.method.toUpperCase());
-  const reqInit: RequestInit = {
+  // Never pass a body — handler.fetch() receives it via parsedBody instead
+  return new globalThis.Request(fullUrl, {
     method: req.method,
     headers,
-    duplex: 'half'
-  } as RequestInit;
-
-  if (hasBody) {
-    reqInit.body = Readable.toWeb(req) as ReadableStream<Uint8Array>;
-  }
-
-  return new globalThis.Request(fullUrl, reqInit);
+  });
 }
 
 /** Pipe Web Standard Response to Express res */
@@ -110,12 +110,21 @@ async function sendWebResponse(webRes: globalThis.Response, expressRes: Response
 }
 
 class NetSuiteHTTPServer {
-  private app = createMcpExpressApp();
+  private app: ReturnType<typeof express>;
   private cacheProvider: RedisCacheProvider;
   private handlers: Map<string, ReturnType<typeof createMcpHandler>> = new Map();
 
   constructor() {
     this.cacheProvider = new RedisCacheProvider();
+
+    // Use a plain Express app instead of createMcpExpressApp() to avoid the
+    // built-in express.json() body parser consuming the request stream before
+    // we can pass the body to handler.fetch(). We add express.json() ourselves
+    // so that req.body is available, then pass it as parsedBody to handler.fetch().
+    this.app = express();
+    this.app.use(express.json({ limit: '10mb' }));
+    this.app.use(localhostHostValidation());
+    this.app.use(localhostOriginValidation());
   }
 
   private createServerInstance(accountKey: string, cfg: AccountConfig, lockProvider: any): Server {
@@ -237,7 +246,14 @@ class NetSuiteHTTPServer {
       }
 
       const webReq = createWebRequest(req);
-      const webRes = await handler.fetch(webReq);
+      // Pass Express's already-parsed body as parsedBody to handler.fetch().
+      // This avoids handler.fetch() trying to read the body from the Request
+      // object (whose underlying stream was already consumed by express.json()).
+      const fetchOptions: Record<string, unknown> = {};
+      if (req.body && typeof req.body === 'object' && Object.keys(req.body as object).length > 0) {
+        fetchOptions.parsedBody = req.body;
+      }
+      const webRes = await handler.fetch(webReq, fetchOptions);
       await sendWebResponse(webRes, res);
     };
 
