@@ -11,103 +11,126 @@
  */
 
 export const AUTH_TOOL = {
-  name: 'netsuite_authenticate',
-  description: 'Authenticate with NetSuite using OAuth 2.0 PKCE. Required before using any NetSuite tools. If NETSUITE_ACCOUNT_ID and NETSUITE_CLIENT_ID environment variables are set, they will be used automatically.',
-  inputSchema: {
-    type: 'object' as const,
-    properties: {
-      accountId: {
-        type: 'string',
-        description: 'NetSuite Account ID (e.g. 1234567 or 1234567_SB1). Falls back to NETSUITE_ACCOUNT_ID env var.'
-      },
-      clientId: {
-        type: 'string',
-        description: 'OAuth 2.0 Client ID from NetSuite integration record. Falls back to NETSUITE_CLIENT_ID env var.'
-      }
-    },
-    required: []
-  }
+	name: "netsuite_authenticate",
+	description:
+		"Authenticate with NetSuite using OAuth 2.0 PKCE. Required before using any NetSuite tools. If NETSUITE_ACCOUNT_ID and NETSUITE_CLIENT_ID environment variables are set, they will be used automatically.",
+	inputSchema: {
+		type: "object" as const,
+		properties: {
+			accountId: {
+				type: "string",
+				description:
+					"NetSuite Account ID (e.g. 1234567 or 1234567_SB1). Falls back to NETSUITE_ACCOUNT_ID env var.",
+			},
+			clientId: {
+				type: "string",
+				description:
+					"OAuth 2.0 Client ID from NetSuite integration record. Falls back to NETSUITE_CLIENT_ID env var.",
+			},
+		},
+		required: [],
+	},
 };
 
 export const LOGOUT_TOOL = {
-  name: 'netsuite_logout',
-  description: 'Clear NetSuite authentication session and logout.',
-  inputSchema: { type: 'object' as const, properties: {} }
+	name: "netsuite_logout",
+	description: "Clear NetSuite authentication session and logout.",
+	inputSchema: { type: "object" as const, properties: {} },
 };
 
 export const RECORD_LINK_TOOL = {
-  name: 'netsuite_get_record_link',
-  description: 'Generate a direct NetSuite UI browser link to view a specific record.',
-  inputSchema: {
-    type: 'object' as const,
-    properties: {
-      recordId: { type: 'string', description: 'Internal ID of the NetSuite record.' },
-      recordType: { type: 'string', description: 'Record type (e.g. salesorder, customer, customrecord_xxx).' },
-      accountId: { type: 'string', description: 'Override account ID (defaults to current authenticated account).' },
-      rectype: { type: 'integer', description: 'Numeric custom record type ID. Auto-resolved if omitted.' }
-    },
-    required: ['recordId']
-  }
+	name: "netsuite_get_record_link",
+	description:
+		"Generate a direct NetSuite UI browser link to view a specific record.",
+	inputSchema: {
+		type: "object" as const,
+		properties: {
+			recordId: {
+				type: "string",
+				description: "Internal ID of the NetSuite record.",
+			},
+			recordType: {
+				type: "string",
+				description:
+					"Record type (e.g. salesorder, customer, customrecord_xxx).",
+			},
+			accountId: {
+				type: "string",
+				description:
+					"Override account ID (defaults to current authenticated account).",
+			},
+			rectype: {
+				type: "integer",
+				description: "Numeric custom record type ID. Auto-resolved if omitted.",
+			},
+		},
+		required: ["recordId"],
+	},
 };
 
 export const REFRESH_CACHE_TOOL = {
-  name: 'netsuite_refresh_cache',
-  description: 'Force clear local cache and refresh NetSuite internal REST session cache. Can optionally clear cache for a single table/recordType.',
-  inputSchema: {
-    type: 'object' as const,
-    properties: {
-      tableName: {
-        type: 'string',
-        description: 'Optional: Specific NetSuite table or record type to clear from cache (e.g. customer, salesorder, customrecord_xxx).'
-      }
-    }
-  }
+	name: "netsuite_refresh_cache",
+	description:
+		"Force clear local cache and refresh NetSuite internal REST session cache. Can optionally clear cache for a single table/recordType.",
+	inputSchema: {
+		type: "object" as const,
+		properties: {
+			tableName: {
+				type: "string",
+				description:
+					"Optional: Specific NetSuite table or record type to clear from cache (e.g. customer, salesorder, customrecord_xxx).",
+			},
+		},
+	},
 };
 
 export const STATUS_TOOL = {
-  name: 'netsuite_status',
-  description: 'Show diagnostic information: authentication state, token expiry, account details, cache statistics, and environment type.',
-  inputSchema: { type: 'object' as const, properties: {} }
+	name: "netsuite_status",
+	description:
+		"Show diagnostic information: authentication state, token expiry, account details, cache statistics, and environment type.",
+	inputSchema: { type: "object" as const, properties: {} },
 };
 
 export const BATCH_EXECUTE_TOOL = {
-  name: 'netsuite_batch_execute',
-  description: 'Execute multiple NetSuite MCP tools in parallel. Supports up to 10 sub-tasks. Useful for optimization by minimizing round-trip API delays.',
-  inputSchema: {
-    type: 'object' as const,
-    properties: {
-      tasks: {
-        type: 'array',
-        description: 'An array of tasks to execute in parallel. Maximum 10 tasks.',
-        items: {
-          type: 'object',
-          properties: {
-            toolName: {
-              type: 'string',
-              description: 'The name of the tool to execute (e.g. ns_getRecord, ns_runCustomSuiteQL).'
-            },
-            arguments: {
-              type: 'object',
-              description: 'Arguments to pass to the tool.'
-            }
-          },
-          required: ['toolName']
-        }
-      }
-    },
-    required: ['tasks']
-  }
+	name: "netsuite_batch_execute",
+	description:
+		"Execute multiple NetSuite MCP tools in parallel. Supports up to 10 sub-tasks. Useful for optimization by minimizing round-trip API delays.",
+	inputSchema: {
+		type: "object" as const,
+		properties: {
+			tasks: {
+				type: "array",
+				description:
+					"An array of tasks to execute in parallel. Maximum 10 tasks.",
+				items: {
+					type: "object",
+					properties: {
+						toolName: {
+							type: "string",
+							description:
+								"The name of the tool to execute (e.g. ns_getRecord, ns_runCustomSuiteQL).",
+						},
+						arguments: {
+							type: "object",
+							description: "Arguments to pass to the tool.",
+						},
+					},
+					required: ["toolName"],
+				},
+			},
+		},
+		required: ["tasks"],
+	},
 };
 
 /** All locally-handled tools (excluding AUTH_TOOL which has special routing). */
 export const LOCAL_TOOLS = [
-  RECORD_LINK_TOOL,
-  REFRESH_CACHE_TOOL,
-  LOGOUT_TOOL,
-  STATUS_TOOL,
-  BATCH_EXECUTE_TOOL
+	RECORD_LINK_TOOL,
+	REFRESH_CACHE_TOOL,
+	LOGOUT_TOOL,
+	STATUS_TOOL,
+	BATCH_EXECUTE_TOOL,
 ];
-
 
 // ---------------------------------------------------------------------------
 // Tool description enhancement suffixes

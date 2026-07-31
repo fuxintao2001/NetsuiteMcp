@@ -5,11 +5,11 @@
 
 /** Minimal interface for the OAuthManager used by the scheduler */
 interface TokenRefreshTarget {
-  hasValidSession(): Promise<boolean>;
-  ensureValidToken(): Promise<string>;
-  forceRefreshToken(failedToken?: string): Promise<string>;
-  tryAutoRecover(maxRetries?: number): Promise<void>;
-  touchHeartbeat?(): Promise<void>;
+	hasValidSession(): Promise<boolean>;
+	ensureValidToken(): Promise<string>;
+	forceRefreshToken(failedToken?: string): Promise<string>;
+	tryAutoRecover(maxRetries?: number): Promise<void>;
+	touchHeartbeat?(): Promise<void>;
 }
 
 /**
@@ -25,202 +25,208 @@ interface TokenRefreshTarget {
  * - When no valid session is found, attempts auto-recovery via refresh token.
  */
 export class TokenRefreshScheduler {
-  private intervalId: ReturnType<typeof setInterval> | null = null;
-  private readonly target: TokenRefreshTarget;
-  private readonly intervalMs: number;
-  private lastTickTime: number = Date.now();
+	private intervalId: ReturnType<typeof setInterval> | null = null;
+	private readonly target: TokenRefreshTarget;
+	private readonly intervalMs: number;
+	private lastTickTime: number = Date.now();
 
-  constructor(
-    target: TokenRefreshTarget,
-    intervalMs: number = parseInt(process.env.MCP_TOKEN_CHECK_INTERVAL_MS || '60000', 10)
-  ) {
-    this.target = target;
-    this.intervalMs = intervalMs;
-  }
+	constructor(
+		target: TokenRefreshTarget,
+		intervalMs: number = parseInt(
+			process.env.MCP_TOKEN_CHECK_INTERVAL_MS || "60000",
+			10,
+		),
+	) {
+		this.target = target;
+		this.intervalMs = intervalMs;
+	}
 
-  /** Start the periodic refresh check. Idempotent. */
-  start(): void {
-    if (this.intervalId) return;
+	/** Start the periodic refresh check. Idempotent. */
+	start(): void {
+		if (this.intervalId) return;
 
-    this.lastTickTime = Date.now();
-    console.error(`🔄 [TokenRefreshScheduler] Started — checking every ${this.intervalMs / 1000}s`);
+		this.lastTickTime = Date.now();
+		console.error(
+			`🔄 [TokenRefreshScheduler] Started — checking every ${this.intervalMs / 1000}s`,
+		);
 
-    // Run first tick immediately to handle startup/wake state
-    void this.tick();
+		// Run first tick immediately to handle startup/wake state
+		void this.tick();
 
-    this.intervalId = setInterval(() => {
-      void this.tick();
-    }, this.intervalMs);
+		this.intervalId = setInterval(() => {
+			void this.tick();
+		}, this.intervalMs);
 
-    // Ensure the timer never prevents Node.js from exiting
-    if (this.intervalId && typeof this.intervalId === 'object' && 'unref' in this.intervalId) {
-      this.intervalId.unref();
-    }
-  }
+		// Ensure the timer never prevents Node.js from exiting
+		if (
+			this.intervalId &&
+			typeof this.intervalId === "object" &&
+			"unref" in this.intervalId
+		) {
+			this.intervalId.unref();
+		}
+	}
 
-  /** Stop the periodic refresh check. */
-  stop(): void {
-    if (this.intervalId) {
-      clearInterval(this.intervalId);
-      this.intervalId = null;
-      console.error('🔄 [TokenRefreshScheduler] Stopped');
-    }
-  }
+	/** Stop the periodic refresh check. */
+	stop(): void {
+		if (this.intervalId) {
+			clearInterval(this.intervalId);
+			this.intervalId = null;
+			console.error("🔄 [TokenRefreshScheduler] Stopped");
+		}
+	}
 
-  /** Check if the scheduler is currently running. */
-  isRunning(): boolean {
-    return this.intervalId !== null;
-  }
+	/** Check if the scheduler is currently running. */
+	isRunning(): boolean {
+		return this.intervalId !== null;
+	}
 
-  /**
-   * Single tick: check session validity and refresh token if needed.
-   * If no valid session exists, attempts auto-recovery via refresh token.
-   * ALL exceptions are caught here — nothing escapes to global scope.
-   */
-  private async tick(): Promise<void> {
-    try {
-      // Touch heartbeat to signal that this session is actively managed by a running MCP server
-      await this.target.touchHeartbeat?.().catch(() => {});
+	/**
+	 * Single tick: check session validity and refresh token if needed.
+	 * If no valid session exists, attempts auto-recovery via refresh token.
+	 * ALL exceptions are caught here — nothing escapes to global scope.
+	 */
+	private async tick(): Promise<void> {
+		try {
+			// Touch heartbeat to signal that this session is actively managed by a running MCP server
+			await this.target.touchHeartbeat?.().catch(() => {});
 
-      // Detect sleep/wake: if elapsed time >> intervalMs, system likely just woke up
-      const now = Date.now();
-      const elapsed = now - this.lastTickTime;
-      const wasSleeping = elapsed > this.intervalMs * 3;
-      this.lastTickTime = now;
+			// Detect sleep/wake: if elapsed time >> intervalMs, system likely just woke up
+			const now = Date.now();
+			const elapsed = now - this.lastTickTime;
+			const wasSleeping = elapsed > this.intervalMs * 3;
+			this.lastTickTime = now;
 
-      const hasSession = await this.target.hasValidSession();
+			const hasSession = await this.target.hasValidSession();
 
-      if (!hasSession) {
-        // No valid session — attempt auto-recovery using stored refresh token
-        console.error('🔄 [TokenRefreshScheduler] No valid session. Attempting auto-recovery...');
-        await this.target.tryAutoRecover(1);
-        await this.target.touchHeartbeat?.().catch(() => {});
-        return;
-      }
+			if (!hasSession) {
+				// No valid session — attempt auto-recovery using stored refresh token
+				console.error(
+					"🔄 [TokenRefreshScheduler] No valid session. Attempting auto-recovery...",
+				);
+				await this.target.tryAutoRecover(1);
+				await this.target.touchHeartbeat?.().catch(() => {});
+				return;
+			}
 
-      if (wasSleeping) {
-        // Force refresh after sleep — token is very likely expired
-        // Wait 10s before refreshing to allow macOS network/Wi-Fi adapter to fully reconnect after waking up
-        console.error(`🔄 [TokenRefreshScheduler] System wake detected (${Math.round(elapsed / 1000)}s since last tick). Waiting 10s for network to stabilize...`);
-        await new Promise(resolve => setTimeout(resolve, 10000));
-        try {
-          await this.target.forceRefreshToken();
-        } catch (firstError: unknown) {
-          // First attempt failed — network may not be fully ready yet. Retry once after 5s.
-          const msg = firstError instanceof Error ? firstError.message : String(firstError);
-          console.error(`⚠️ [TokenRefreshScheduler] Wake refresh attempt 1 failed: ${msg}. Retrying in 5s...`);
-          await new Promise(resolve => setTimeout(resolve, 5000));
-          await this.target.forceRefreshToken();
-        }
-      } else {
-        // Normal path: ensureValidToken() auto-refreshes if within the 5-minute window
-        await this.target.ensureValidToken();
-      }
+			if (wasSleeping) {
+				// Force refresh after sleep — token is very likely expired
+				// Wait 10s before refreshing to allow macOS network/Wi-Fi adapter to fully reconnect after waking up
+				console.error(
+					`🔄 [TokenRefreshScheduler] System wake detected (${Math.round(elapsed / 1000)}s since last tick). Waiting 10s for network to stabilize...`,
+				);
+				await new Promise((resolve) => setTimeout(resolve, 10000));
+				try {
+					await this.target.forceRefreshToken();
+				} catch (firstError: unknown) {
+					// First attempt failed — network may not be fully ready yet. Retry once after 5s.
+					const msg =
+						firstError instanceof Error
+							? firstError.message
+							: String(firstError);
+					console.error(
+						`⚠️ [TokenRefreshScheduler] Wake refresh attempt 1 failed: ${msg}. Retrying in 5s...`,
+					);
+					await new Promise((resolve) => setTimeout(resolve, 5000));
+					await this.target.forceRefreshToken();
+				}
+			} else {
+				// Normal path: ensureValidToken() auto-refreshes if within the 5-minute window
+				await this.target.ensureValidToken();
+			}
 
-      await this.target.touchHeartbeat?.().catch(() => {});
-    } catch (error: unknown) {
-      // Intentionally swallowed. This is a background maintenance task.
-      // Logging is the only action — we never rethrow from a setInterval callback.
-      const message = error instanceof Error ? error.message : String(error);
-      console.error(`⚠️ [TokenRefreshScheduler] Proactive refresh failed: ${message}`);
-    }
-  }
+			await this.target.touchHeartbeat?.().catch(() => {});
+		} catch (error: unknown) {
+			// Intentionally swallowed. This is a background maintenance task.
+			// Logging is the only action — we never rethrow from a setInterval callback.
+			const message = error instanceof Error ? error.message : String(error);
+			console.error(
+				`⚠️ [TokenRefreshScheduler] Proactive refresh failed: ${message}`,
+			);
+		}
+	}
 }
 
 export interface RetryOptions {
-  retries?: number;
-  minTimeoutMs?: number;
-  maxTimeoutMs?: number;
-  factor?: number;
-  jitter?: boolean;
+	retries?: number;
+	minTimeoutMs?: number;
+	maxTimeoutMs?: number;
+	factor?: number;
+	jitter?: boolean;
 }
 
 export async function retryWithBackoff<T>(
-  fn: () => Promise<T>,
-  isRetryable: (error: unknown) => boolean,
-  options: RetryOptions = {},
-  onRetry?: (error: unknown, attempt: number, delayMs: number) => void
+	fn: () => Promise<T>,
+	isRetryable: (error: unknown) => boolean,
+	options: RetryOptions = {},
+	onRetry?: (error: unknown, attempt: number, delayMs: number) => void,
 ): Promise<T> {
-  const retries = options.retries ?? 3;
-  const minTimeout = options.minTimeoutMs ?? 1000;
-  const maxTimeout = options.maxTimeoutMs ?? 15000;
-  const factor = options.factor ?? 2;
-  const jitter = options.jitter ?? true;
+	const retries = options.retries ?? 3;
+	const minTimeout = options.minTimeoutMs ?? 1000;
+	const maxTimeout = options.maxTimeoutMs ?? 15000;
+	const factor = options.factor ?? 2;
+	const jitter = options.jitter ?? true;
 
-  let attempt = 0;
-  while (true) {
-    try {
-      return await fn();
-    } catch (error) {
-      attempt++;
-      if (attempt > retries || !isRetryable(error)) {
-        throw error;
-      }
+	let attempt = 0;
+	while (true) {
+		try {
+			return await fn();
+		} catch (error) {
+			attempt++;
+			if (attempt > retries || !isRetryable(error)) {
+				throw error;
+			}
 
-      // 优先解析并遵从 NetSuite 返回的 Retry-After 头部时间
-      let delay = getRetryAfterMs(error) ?? (minTimeout * Math.pow(factor, attempt - 1));
-      delay = Math.min(delay, maxTimeout);
-      
-      if (jitter && !getRetryAfterMs(error)) {
-        // 应用随机抖动，防止波峰重合（惊群效应）
-        delay = (Math.random() * 0.5 + 0.5) * delay;
-      }
+			// 优先解析并遵从 NetSuite 返回的 Retry-After 头部时间
+			let delay =
+				getRetryAfterMs(error) ?? minTimeout * factor ** (attempt - 1);
+			delay = Math.min(delay, maxTimeout);
 
-      if (onRetry) {
-        onRetry(error, attempt, delay);
-      }
+			if (jitter && !getRetryAfterMs(error)) {
+				// 应用随机抖动，防止波峰重合（惊群效应）
+				delay = (Math.random() * 0.5 + 0.5) * delay;
+			}
 
-      await new Promise((resolve) => setTimeout(resolve, delay));
-    }
-  }
+			if (onRetry) {
+				onRetry(error, attempt, delay);
+			}
+
+			await new Promise((resolve) => setTimeout(resolve, delay));
+		}
+	}
 }
 
-export function getRetryAfterMs(error: any): number | null {
-  const headers = error.response?.headers;
-  if (!headers) return null;
-  const retryAfter = headers['retry-after'] || headers['Retry-After'];
-  if (!retryAfter) return null;
+import pLimit, { type LimitFunction } from "p-limit";
 
-  const seconds = parseInt(retryAfter, 10);
-  if (!isNaN(seconds)) return seconds * 1000;
+export function getRetryAfterMs(error: unknown): number | null {
+	const err = error as {
+		response?: { headers?: Record<string, string | undefined> };
+	};
+	const headers = err.response?.headers;
+	if (!headers) return null;
+	const retryAfter = headers["retry-after"] || headers["Retry-After"];
+	if (!retryAfter) return null;
 
-  const dateMs = Date.parse(retryAfter);
-  if (!isNaN(dateMs)) return Math.max(0, dateMs - Date.now());
+	const seconds = parseInt(retryAfter, 10);
+	if (!isNaN(seconds)) return seconds * 1000;
 
-  return null;
+	const dateMs = Date.parse(retryAfter);
+	if (!isNaN(dateMs)) return Math.max(0, dateMs - Date.now());
+
+	return null;
 }
 
 /**
- * 全局信号量控制，严格防止并发请求数超出 NetSuite 的账户承载上限。
- * 采用直接 Slot 转移逻辑，避免 activeCount 增减与微任务调度的竞态条件。
+ * 全局并发控制，使用 p-limit 限制并行请求数，防止并发超出 NetSuite 账户上限。
  */
 export class ConcurrencyLimiter {
-  private activeCount = 0;
-  private queue: (() => void)[] = [];
-  private readonly maxConcurrency: number;
+	private readonly limiter: LimitFunction;
 
-  constructor(maxConcurrency: number) {
-    this.maxConcurrency = maxConcurrency;
-  }
+	constructor(maxConcurrency: number) {
+		this.limiter = pLimit(maxConcurrency);
+	}
 
-  async run<T>(fn: () => Promise<T>): Promise<T> {
-    if (this.activeCount >= this.maxConcurrency) {
-      await new Promise<void>((resolve) => this.queue.push(resolve));
-    } else {
-      this.activeCount++;
-    }
-    try {
-      return await fn();
-    } finally {
-      const next = this.queue.shift();
-      if (next) {
-        // 关键点：直接将 Slot 传递给队列中的下一项，保持 activeCount 不变
-        // 消除 activeCount-- 后再异步 resolve() 导致短暂 activeCount 降低引发的穿透
-        next();
-      } else {
-        this.activeCount--;
-      }
-    }
-  }
+	async run<T>(fn: () => Promise<T>): Promise<T> {
+		return this.limiter(fn);
+	}
 }
-

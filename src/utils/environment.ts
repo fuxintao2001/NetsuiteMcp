@@ -1,6 +1,6 @@
-import os from 'os';
-import fs from 'fs';
-import path from 'path';
+import fs from "fs";
+import os from "os";
+import path from "path";
 
 // ---------------------------------------------------------------------------
 // Environment detection utilities
@@ -13,8 +13,10 @@ import path from 'path';
  * Test-drive accounts start with `TSTDRV`.
  */
 export function isSandboxAccount(accountId: string): boolean {
-  const upper = accountId.toUpperCase();
-  return upper.includes('_SB') || upper.includes('-SB') || upper.startsWith('TSTDRV');
+	const upper = accountId.toUpperCase();
+	return (
+		upper.includes("_SB") || upper.includes("-SB") || upper.startsWith("TSTDRV")
+	);
 }
 
 /**
@@ -24,7 +26,7 @@ export function isSandboxAccount(accountId: string): boolean {
  * require the sandbox separator as a hyphen and should be lowercase.
  */
 export function formatNetSuiteAccountHost(accountId: string): string {
-  return accountId.trim().replace(/_/g, '-').toLowerCase();
+	return accountId.trim().replace(/_/g, "-").toLowerCase();
 }
 
 /**
@@ -34,9 +36,9 @@ export function formatNetSuiteAccountHost(accountId: string): string {
  * Example output: ` [Account: 5848789_SB1, Env: Sandbox]`
  */
 export function buildEnvSuffix(accountId: string | null): string {
-  if (!accountId) return '';
-  const isSandbox = isSandboxAccount(accountId);
-  return ` [Account: ${accountId}, Env: ${isSandbox ? 'Sandbox' : 'Production'}]`;
+	if (!accountId) return "";
+	const isSandbox = isSandboxAccount(accountId);
+	return ` [Account: ${accountId}, Env: ${isSandbox ? "Sandbox" : "Production"}]`;
 }
 
 /**
@@ -49,16 +51,15 @@ export function buildEnvSuffix(accountId: string | null): string {
  * 4. Fallback to local `projectRoot/skills`.
  */
 export function getSkillsDir(projectRoot: string): string {
-  if (process.env.NETSUITE_SKILLS_PATH) {
-    return process.env.NETSUITE_SKILLS_PATH;
-  }
-  if (process.env.NODE_ENV === 'test') {
-    return path.join(projectRoot, 'skills');
-  }
-  const globalPath = path.join(os.homedir(), '.gemini', 'config', 'skills');
-  if (fs.existsSync(globalPath)) {
-    return globalPath;
-  }
-  return path.join(projectRoot, 'skills');
+	if (process.env.NETSUITE_SKILLS_PATH) {
+		return process.env.NETSUITE_SKILLS_PATH;
+	}
+	if (process.env.NODE_ENV === "test") {
+		return path.join(projectRoot, "skills");
+	}
+	const globalPath = path.join(os.homedir(), ".gemini", "config", "skills");
+	if (fs.existsSync(globalPath)) {
+		return globalPath;
+	}
+	return path.join(projectRoot, "skills");
 }
-

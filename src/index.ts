@@ -1,24 +1,23 @@
 #!/usr/bin/env node
 
-import { StdioServerTransport } from "@modelcontextprotocol/server/stdio";
 import { Server } from "@modelcontextprotocol/server";
-import { OAuthManager } from './oauth/manager.js';
-import { NetSuiteMCPTools } from './mcp/tools.js';
-import { cacheService } from './utils/cache.js';
-import { RedisCacheProvider } from './utils/redisCacheProvider.js';
-import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
-import { readFileSync } from 'fs';
-import http from 'http';
-import https from 'https';
-import axios from 'axios';
-import { installGlobalErrorHandlers } from './utils/globalErrorHandlers.js';
-
+import { StdioServerTransport } from "@modelcontextprotocol/server/stdio";
+import axios from "axios";
+import { readFileSync } from "fs";
+import http from "http";
+import https from "https";
+import { dirname, join } from "path";
+import { fileURLToPath } from "url";
+import { registerResourceHandlers } from "./handlers/resources.js";
+import type { ToolHandlerDeps } from "./handlers/tools.js";
 // Import handlers
-import { registerToolHandlers, textResult } from './handlers/tools.js';
-import { registerResourceHandlers } from './handlers/resources.js';
-import type { ToolHandlerDeps } from './handlers/tools.js';
-import { validateEnv } from './utils/envValidator.js';
+import { registerToolHandlers, textResult } from "./handlers/tools.js";
+import { NetSuiteMCPTools } from "./mcp/tools.js";
+import { OAuthManager } from "./oauth/manager.js";
+import { cacheService } from "./utils/cache.js";
+import { validateEnv } from "./utils/envValidator.js";
+import { installGlobalErrorHandlers } from "./utils/globalErrorHandlers.js";
+import { RedisCacheProvider } from "./utils/redisCacheProvider.js";
 
 // ---------------------------------------------------------------------------
 // Global error handlers
@@ -39,288 +38,334 @@ const __dirname = dirname(__filename);
 const projectRoot = dirname(__dirname);
 
 // Read version from package.json at startup
-const packageJson = JSON.parse(readFileSync(join(projectRoot, 'package.json'), 'utf-8')) as { version: string };
+const packageJson = JSON.parse(
+	readFileSync(join(projectRoot, "package.json"), "utf-8"),
+) as { version: string };
 const SERVER_VERSION = packageJson.version;
 
 // ---------------------------------------------------------------------------
 // Server class
 // ---------------------------------------------------------------------------
 class NetSuiteMCPServer {
-  private readonly oauthManager: OAuthManager;
-  private readonly mcpTools: NetSuiteMCPTools;
-  private readonly cacheProvider: RedisCacheProvider;
-  private readonly server: Server;
-  private isAuthenticated = false;
+	private readonly oauthManager: OAuthManager;
+	private readonly mcpTools: NetSuiteMCPTools;
+	private readonly cacheProvider: RedisCacheProvider;
+	private readonly server: Server;
+	private isAuthenticated = false;
 
-  constructor() {
-    // Validate environment variables at startup
-    const envConfig = validateEnv();
-    const callbackPort = envConfig.OAUTH_CALLBACK_PORT;
+	constructor() {
+		// Validate environment variables at startup
+		const envConfig = validateEnv();
+		const callbackPort = envConfig.OAUTH_CALLBACK_PORT;
 
-    if (!envConfig.NETSUITE_ACCOUNT_ID) {
-      console.error('⚠️  NETSUITE_ACCOUNT_ID not set. User must provide accountId during authentication.');
-    }
-    if (!envConfig.NETSUITE_CLIENT_ID) {
-      console.error('⚠️  NETSUITE_CLIENT_ID not set. User must provide clientId during authentication.');
-    }
+		if (!envConfig.NETSUITE_ACCOUNT_ID) {
+			console.error(
+				"⚠️  NETSUITE_ACCOUNT_ID not set. User must provide accountId during authentication.",
+			);
+		}
+		if (!envConfig.NETSUITE_CLIENT_ID) {
+			console.error(
+				"⚠️  NETSUITE_CLIENT_ID not set. User must provide clientId during authentication.",
+			);
+		}
 
-    // Configure cache provider with Redis URL
-    const redisUrl = envConfig.REDIS_URL;
-    this.cacheProvider = new RedisCacheProvider(redisUrl);
-    cacheService.configure(this.cacheProvider);
+		// Configure cache provider with Redis URL
+		const redisUrl = envConfig.REDIS_URL;
+		this.cacheProvider = new RedisCacheProvider(redisUrl);
+		cacheService.configure(this.cacheProvider);
 
-    const sessionsPath = envConfig.NETSUITE_SESSION_PATH
-      || (envConfig.NETSUITE_ACCOUNT_ID
-        ? join(projectRoot, 'sessions', envConfig.NETSUITE_ACCOUNT_ID.toLowerCase())
-        : join(projectRoot, 'sessions'));
+		const sessionsPath =
+			envConfig.NETSUITE_SESSION_PATH ||
+			(envConfig.NETSUITE_ACCOUNT_ID
+				? join(
+						projectRoot,
+						"sessions",
+						envConfig.NETSUITE_ACCOUNT_ID.toLowerCase(),
+					)
+				: join(projectRoot, "sessions"));
 
-    this.oauthManager = new OAuthManager({ storagePath: sessionsPath, callbackPort });
-    this.mcpTools = new NetSuiteMCPTools(this.oauthManager);
+		this.oauthManager = new OAuthManager({
+			storagePath: sessionsPath,
+			callbackPort,
+		});
+		this.mcpTools = new NetSuiteMCPTools(this.oauthManager);
 
-    this.server = new Server(
-      { name: 'netsuite-mcp', version: SERVER_VERSION },
-      { capabilities: { tools: {}, resources: {} } }
-    );
-  }
+		this.server = new Server(
+			{ name: "netsuite-mcp", version: SERVER_VERSION },
+			{ capabilities: { tools: {}, resources: {} } },
+		);
+	}
 
-  /**
-   * Register all MCP protocol handlers.
-   */
-  private setupHandlers(): void {
-    const deps: ToolHandlerDeps = {
-      server: this.server,
-      oauthManager: this.oauthManager,
-      mcpTools: this.mcpTools,
-      projectRoot,
-      handleAuthentication: this.handleAuthentication.bind(this),
-      handleLogout: this.handleLogout.bind(this),
-      handleCacheRefresh: this.handleCacheRefresh.bind(this),
-      resolveCustomRecordRectype: this.resolveCustomRecordRectype.bind(this)
-    };
+	/**
+	 * Register all MCP protocol handlers.
+	 */
+	private setupHandlers(): void {
+		const deps: ToolHandlerDeps = {
+			server: this.server,
+			oauthManager: this.oauthManager,
+			mcpTools: this.mcpTools,
+			projectRoot,
+			handleAuthentication: this.handleAuthentication.bind(this),
+			handleLogout: this.handleLogout.bind(this),
+			handleCacheRefresh: this.handleCacheRefresh.bind(this),
+			resolveCustomRecordRectype: this.resolveCustomRecordRectype.bind(this),
+		};
 
-    registerToolHandlers(deps);
-    registerResourceHandlers(this.server, projectRoot);
-  }
+		registerToolHandlers(deps);
+		registerResourceHandlers(this.server, projectRoot);
+	}
 
-  // -------------------------------------------------------------------------
-  // Authentication lifecycle
-  // -------------------------------------------------------------------------
+	// -------------------------------------------------------------------------
+	// Authentication lifecycle
+	// -------------------------------------------------------------------------
 
-  private async handleAuthentication(args: Record<string, unknown>) {
-    const accountId = (args.accountId as string) || process.env.NETSUITE_ACCOUNT_ID;
-    const clientId = (args.clientId as string) || process.env.NETSUITE_CLIENT_ID;
+	private async handleAuthentication(args: Record<string, unknown>) {
+		const accountId =
+			(args.accountId as string) || process.env.NETSUITE_ACCOUNT_ID;
+		const clientId =
+			(args.clientId as string) || process.env.NETSUITE_CLIENT_ID;
 
-    if (!accountId || !clientId) {
-      return textResult(
-        '❌ Missing required credentials. Provide accountId and clientId, or set NETSUITE_ACCOUNT_ID and NETSUITE_CLIENT_ID environment variables.',
-        true
-      );
-    }
+		if (!accountId || !clientId) {
+			return textResult(
+				"❌ Missing required credentials. Provide accountId and clientId, or set NETSUITE_ACCOUNT_ID and NETSUITE_CLIENT_ID environment variables.",
+				true,
+			);
+		}
 
-    try {
-      console.error('\n🔐 Starting NetSuite authentication...');
-      await this.oauthManager.startAuthFlow({ accountId, clientId });
-      this.isAuthenticated = true;
-      await this.mcpTools.clearCache();
+		try {
+			console.error("\n🔐 Starting NetSuite authentication...");
+			await this.oauthManager.startAuthFlow({ accountId, clientId });
+			this.isAuthenticated = true;
+			await this.mcpTools.clearCache();
 
-      // Start proactive token refresh
-      this.oauthManager.startProactiveRefresh();
+			// Start proactive token refresh
+			this.oauthManager.startProactiveRefresh();
 
-      // Background: fetch custom record mappings then prefetch common metadata
-      this.backgroundPrefetch();
+			// Background: fetch custom record mappings then prefetch common metadata
+			this.backgroundPrefetch();
 
-      return textResult('✅ Successfully authenticated with NetSuite!');
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error);
-      return textResult(`❌ Authentication failed: ${message}`, true);
-    }
-  }
+			return textResult("✅ Successfully authenticated with NetSuite!");
+		} catch (error: unknown) {
+			const message = error instanceof Error ? error.message : String(error);
+			return textResult(`❌ Authentication failed: ${message}`, true);
+		}
+	}
 
-  private async handleLogout() {
-    try {
-      await this.oauthManager.clearSession();
-      await this.mcpTools.clearCache();
-      this.isAuthenticated = false;
-      return textResult('✅ Successfully logged out from NetSuite!');
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error);
-      return textResult(`❌ Logout failed: ${message}`, true);
-    }
-  }
+	private async handleLogout() {
+		try {
+			await this.oauthManager.clearSession();
+			await this.mcpTools.clearCache();
+			this.isAuthenticated = false;
+			return textResult("✅ Successfully logged out from NetSuite!");
+		} catch (error: unknown) {
+			const message = error instanceof Error ? error.message : String(error);
+			return textResult(`❌ Logout failed: ${message}`, true);
+		}
+	}
 
-  private async handleCacheRefresh(args: Record<string, unknown>) {
-    try {
-      const tableName = (args.tableName || args.table || args.recordType || '') as string;
-      if (tableName) {
-        await this.mcpTools.clearTableMetadataCache(tableName);
-        return textResult(`✅ Successfully cleared cache for table/recordType: ${tableName}`);
-      }
+	private async handleCacheRefresh(args: Record<string, unknown>) {
+		try {
+			const tableName = (args.tableName ||
+				args.table ||
+				args.recordType ||
+				"") as string;
+			if (tableName) {
+				await this.mcpTools.clearTableMetadataCache(tableName);
+				return textResult(
+					`✅ Successfully cleared cache for table/recordType: ${tableName}`,
+				);
+			}
 
-      // Clear local cache first so it's guaranteed to run
-      await this.mcpTools.clearMetadataCache();
+			// Clear local cache first so it's guaranteed to run
+			await this.mcpTools.clearMetadataCache();
 
-      let restRefreshed = false;
-      let restError = '';
-      try {
-        await this.mcpTools.refreshSessionCache();
-        restRefreshed = true;
-      } catch (err: unknown) {
-        restError = err instanceof Error ? err.message : String(err);
-      }
+			let restRefreshed = false;
+			let restError = "";
+			try {
+				await this.mcpTools.refreshSessionCache();
+				restRefreshed = true;
+			} catch (err: unknown) {
+				restError = err instanceof Error ? err.message : String(err);
+			}
 
-      if (restRefreshed) {
-        return textResult('✅ Successfully cleared and refreshed all cache!');
-      } else {
-        return textResult(`⚠️ Local cache cleared successfully, but NetSuite session cache refresh failed/skipped: ${restError}`);
-      }
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error);
-      return textResult(`❌ Failed to refresh cache: ${message}`, true);
-    }
-  }
+			if (restRefreshed) {
+				return textResult("✅ Successfully cleared and refreshed all cache!");
+			} else {
+				return textResult(
+					`⚠️ Local cache cleared successfully, but NetSuite session cache refresh failed/skipped: ${restError}`,
+				);
+			}
+		} catch (error: unknown) {
+			const message = error instanceof Error ? error.message : String(error);
+			return textResult(`❌ Failed to refresh cache: ${message}`, true);
+		}
+	}
 
-  private async resolveCustomRecordRectype(recordType: string): Promise<number | null> {
-    if (!recordType) return null;
-    const upperType = recordType.toUpperCase().trim();
-    const cached = this.mcpTools.customRecordMappings.get(upperType);
-    if (cached !== undefined) return cached;
+	private async resolveCustomRecordRectype(
+		recordType: string,
+	): Promise<number | null> {
+		if (!recordType) return null;
+		const upperType = recordType.toUpperCase().trim();
+		const cached = this.mcpTools.customRecordMappings.get(upperType);
+		if (cached !== undefined) return cached;
 
-    // Dynamically query mapping via SuiteQL
-    try {
-      console.error(`🔍 Resolving custom record type mapping dynamically for ${upperType}...`);
-      const result = await this.mcpTools.executeTool('ns_runCustomSuiteQL', {
-        sqlQuery: `SELECT internalId FROM customrecordtype WHERE UPPER(scriptId) = '${upperType}'`
-      });
-      const records = this.mcpTools.extractDataArray(result);
-      const firstRecord = records[0];
-      if (firstRecord) {
-        const internalId = parseInt(String(firstRecord.internalid || firstRecord.internalId), 10);
-        if (!isNaN(internalId)) {
-          this.mcpTools.customRecordMappings.set(upperType, internalId);
-          // Also save to persistent cache if accountId exists
-          const accountId = await this.oauthManager.getAccountId();
-          if (accountId) {
-            const mappingsObj = await cacheService.get<Record<string, number>>(accountId, 'customrecord_mappings') || {};
-            mappingsObj[upperType] = internalId;
-            await cacheService.set(accountId, 'customrecord_mappings', mappingsObj);
-          }
-          return internalId;
-        }
-      }
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error(`⚠️ Failed to dynamically resolve custom record rectype for ${upperType}: ${msg}`);
-    }
+		// Dynamically query mapping via SuiteQL
+		try {
+			console.error(
+				`🔍 Resolving custom record type mapping dynamically for ${upperType}...`,
+			);
+			const result = await this.mcpTools.executeTool("ns_runCustomSuiteQL", {
+				sqlQuery: `SELECT internalId FROM customrecordtype WHERE UPPER(scriptId) = '${upperType}'`,
+			});
+			const records = this.mcpTools.extractDataArray(result);
+			const firstRecord = records[0];
+			if (firstRecord) {
+				const internalId = parseInt(
+					String(firstRecord.internalid || firstRecord.internalId),
+					10,
+				);
+				if (!isNaN(internalId)) {
+					this.mcpTools.customRecordMappings.set(upperType, internalId);
+					// Also save to persistent cache if accountId exists
+					const accountId = await this.oauthManager.getAccountId();
+					if (accountId) {
+						const mappingsObj =
+							(await cacheService.get<Record<string, number>>(
+								accountId,
+								"customrecord_mappings",
+							)) || {};
+						mappingsObj[upperType] = internalId;
+						await cacheService.set(
+							accountId,
+							"customrecord_mappings",
+							mappingsObj,
+						);
+					}
+					return internalId;
+				}
+			}
+		} catch (err: unknown) {
+			const msg = err instanceof Error ? err.message : String(err);
+			console.error(
+				`⚠️ Failed to dynamically resolve custom record rectype for ${upperType}: ${msg}`,
+			);
+		}
 
-    return null;
-  }
+		return null;
+	}
 
-  // -------------------------------------------------------------------------
-  // Background prefetch (fully guarded — no exceptions escape)
-  // -------------------------------------------------------------------------
+	// -------------------------------------------------------------------------
+	// Background prefetch (fully guarded — no exceptions escape)
+	// -------------------------------------------------------------------------
 
-  private backgroundPrefetch(): void {
-    (async () => {
-      try {
-        await this.mcpTools.fetchCustomRecordMappings();
-        await this.mcpTools.prefetchCommonMetadata();
-      } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        console.error(`⚠️ Background prefetch failed: ${message}`);
-      }
-    })();
-  }
+	private backgroundPrefetch(): void {
+		(async () => {
+			try {
+				await this.mcpTools.fetchCustomRecordMappings();
+				await this.mcpTools.prefetchCommonMetadata();
+			} catch (err: unknown) {
+				const message = err instanceof Error ? err.message : String(err);
+				console.error(`⚠️ Background prefetch failed: ${message}`);
+			}
+		})();
+	}
 
-  // -------------------------------------------------------------------------
-  // Server startup
-  // -------------------------------------------------------------------------
+	// -------------------------------------------------------------------------
+	// Server startup
+	// -------------------------------------------------------------------------
 
-  async start(): Promise<void> {
-    console.error('🚀 NetSuite MCP Server starting...');
+	async start(): Promise<void> {
+		console.error("🚀 NetSuite MCP Server starting...");
 
-    // Connect to Redis
-    try {
-      await this.cacheProvider.connect();
-      // Initialize Redis lock provider now that Redis is connected
-      const lockProvider = this.cacheProvider.createLockProvider();
-      if (lockProvider) {
-        this.oauthManager.setLockProvider(lockProvider);
-        console.error('🔒 Redis distributed lock provider initialized');
-      }
-    } catch (err) {
-      console.error('❌ Failed to connect to Redis on startup:', err);
-      throw err;
-    }
+		// Connect to Redis
+		try {
+			await this.cacheProvider.connect();
+			// Initialize Redis lock provider now that Redis is connected
+			const lockProvider = this.cacheProvider.createLockProvider();
+			if (lockProvider) {
+				this.oauthManager.setLockProvider(lockProvider);
+				console.error("🔒 Redis distributed lock provider initialized");
+			}
+		} catch (err) {
+			console.error("❌ Failed to connect to Redis on startup:", err);
+			throw err;
+		}
 
-    // Check for existing authentication and log diagnostics
-    this.isAuthenticated = await this.oauthManager.hasValidSession();
-    const sessionDiag = await this.oauthManager.getSessionDiagnostics();
-    if (sessionDiag) {
-      const expiresIn = sessionDiag.expiresAt
-        ? `${Math.round((sessionDiag.expiresAt - Date.now()) / 1000)}s`
-        : 'unknown';
-      console.error(`📋 [Startup] Session: ${sessionDiag.storagePath}`);
-      console.error(`📋 [Startup] Account: ${sessionDiag.accountId || 'none'} | Authenticated: ${sessionDiag.authenticated} | Token expires in: ${expiresIn}`);
-    }
+		// Check for existing authentication and log diagnostics
+		this.isAuthenticated = await this.oauthManager.hasValidSession();
+		const sessionDiag = await this.oauthManager.getSessionDiagnostics();
+		if (sessionDiag) {
+			const expiresIn = sessionDiag.expiresAt
+				? `${Math.round((sessionDiag.expiresAt - Date.now()) / 1000)}s`
+				: "unknown";
+			console.error(`📋 [Startup] Session: ${sessionDiag.storagePath}`);
+			console.error(
+				`📋 [Startup] Account: ${sessionDiag.accountId || "none"} | Authenticated: ${sessionDiag.authenticated} | Token expires in: ${expiresIn}`,
+			);
+		}
 
-    // Register handlers BEFORE connecting (prevents race condition)
-    this.setupHandlers();
+		// Register handlers BEFORE connecting (prevents race condition)
+		this.setupHandlers();
 
-    // Connect stdio transport
-    const transport = new StdioServerTransport();
-    await this.server.connect(transport);
+		// Connect stdio transport
+		const transport = new StdioServerTransport();
+		await this.server.connect(transport);
 
-    // ALWAYS start proactive refresh scheduler — it will self-heal even if
-    // the current session is invalid by attempting auto-recovery on tick
-    this.oauthManager.startProactiveRefresh();
+		// ALWAYS start proactive refresh scheduler — it will self-heal even if
+		// the current session is invalid by attempting auto-recovery on tick
+		this.oauthManager.startProactiveRefresh();
 
-    // If already authenticated, start background prefetch
-    if (this.isAuthenticated) {
-      this.backgroundPrefetch();
-    }
+		// If already authenticated, start background prefetch
+		if (this.isAuthenticated) {
+			this.backgroundPrefetch();
+		}
 
-    console.error('✅ NetSuite MCP Server ready!\n');
-  }
+		console.error("✅ NetSuite MCP Server ready!\n");
+	}
 
-  async shutdown(): Promise<void> {
-    console.error('🔌 Shutting down NetSuite MCP Server...');
-    this.oauthManager.stopProactiveRefresh();
-    await this.cacheProvider.disconnect();
-  }
+	async shutdown(): Promise<void> {
+		console.error("🔌 Shutting down NetSuite MCP Server...");
+		this.oauthManager.stopProactiveRefresh();
+		await this.cacheProvider.disconnect();
+	}
 }
 
 // ---------------------------------------------------------------------------
 // Main
 async function main(): Promise<void> {
-  try {
-    const server = new NetSuiteMCPServer();
+	try {
+		const server = new NetSuiteMCPServer();
 
-    const shutdown = async () => {
-      try {
-        await server.shutdown();
-      } catch (err) {
-        console.error('Error during shutdown:', err);
-      }
-      process.exit(0);
-    };
+		const shutdown = async () => {
+			try {
+				await server.shutdown();
+			} catch (err) {
+				console.error("Error during shutdown:", err);
+			}
+			process.exit(0);
+		};
 
-    process.on('SIGINT', shutdown);
-    process.on('SIGTERM', shutdown);
+		process.on("SIGINT", shutdown);
+		process.on("SIGTERM", shutdown);
 
-    // Prevent zombie processes when parent client closes stdio connection
-    process.stdin.on('close', () => { void shutdown(); });
-    process.stdin.on('end', () => { void shutdown(); });
-    process.stdout.on('error', (err: any) => {
-      if (err.code === 'EPIPE') {
-        void shutdown();
-      }
-    });
+		// Prevent zombie processes when parent client closes stdio connection
+		process.stdin.on("close", () => {
+			void shutdown();
+		});
+		process.stdin.on("end", () => {
+			void shutdown();
+		});
+		process.stdout.on("error", (err: any) => {
+			if (err.code === "EPIPE") {
+				void shutdown();
+			}
+		});
 
-    await server.start();
-  } catch (error) {
-    console.error('❌ Fatal error starting MCP server:', error);
-    process.exit(1);
-  }
+		await server.start();
+	} catch (error) {
+		console.error("❌ Fatal error starting MCP server:", error);
+		process.exit(1);
+	}
 }
 
 main();
