@@ -9,6 +9,7 @@ interface TokenRefreshTarget {
   ensureValidToken(): Promise<string>;
   forceRefreshToken(failedToken?: string): Promise<string>;
   tryAutoRecover(maxRetries?: number): Promise<void>;
+  touchHeartbeat?(): Promise<void>;
 }
 
 /**
@@ -78,6 +79,9 @@ export class TokenRefreshScheduler {
    */
   private async tick(): Promise<void> {
     try {
+      // Touch heartbeat to signal that this session is actively managed by a running MCP server
+      await this.target.touchHeartbeat?.().catch(() => {});
+
       // Detect sleep/wake: if elapsed time >> intervalMs, system likely just woke up
       const now = Date.now();
       const elapsed = now - this.lastTickTime;
@@ -90,6 +94,7 @@ export class TokenRefreshScheduler {
         // No valid session — attempt auto-recovery using stored refresh token
         console.error('🔄 [TokenRefreshScheduler] No valid session. Attempting auto-recovery...');
         await this.target.tryAutoRecover(1);
+        await this.target.touchHeartbeat?.().catch(() => {});
         return;
       }
 
@@ -111,6 +116,8 @@ export class TokenRefreshScheduler {
         // Normal path: ensureValidToken() auto-refreshes if within the 5-minute window
         await this.target.ensureValidToken();
       }
+
+      await this.target.touchHeartbeat?.().catch(() => {});
     } catch (error: unknown) {
       // Intentionally swallowed. This is a background maintenance task.
       // Logging is the only action — we never rethrow from a setInterval callback.

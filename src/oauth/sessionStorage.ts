@@ -121,4 +121,33 @@ export class SessionStorage {
       return false;
     }
   }
+
+  /**
+   * Touch heartbeat file to signal that an active MCP server instance is actively maintaining this session.
+   */
+  async touchHeartbeat(): Promise<void> {
+    try {
+      await fs.mkdir(this.storagePath, { recursive: true });
+      const heartbeatFile = path.join(this.storagePath, 'session.heartbeat');
+      await fs.writeFile(heartbeatFile, String(Date.now()), { mode: 0o600 });
+    } catch {
+      // Ignored
+    }
+  }
+
+  /**
+   * Check if the session heartbeat is fresh (e.g. updated within maxAgeMs).
+   */
+  async isHeartbeatFresh(maxAgeMs = 120000): Promise<boolean> {
+    try {
+      const heartbeatFile = path.join(this.storagePath, 'session.heartbeat');
+      const content = await fs.readFile(heartbeatFile, 'utf-8');
+      const lastBeat = parseInt(content.trim(), 10);
+      if (isNaN(lastBeat)) return false;
+      return Date.now() - lastBeat < maxAgeMs;
+    } catch {
+      return false;
+    }
+  }
 }
+

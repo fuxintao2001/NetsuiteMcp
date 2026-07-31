@@ -6,6 +6,7 @@ import { lookup } from 'dns/promises';
 import { fileURLToPath } from 'url';
 import { Redis } from 'ioredis';
 import { RedisLockProvider } from '../utils/redisLock.js';
+import { shouldRefreshToken } from '../oauth/tokenExchange.js';
 
 export interface TokenData {
   access_token: string;
@@ -68,11 +69,23 @@ function formatNetSuiteAccountHost(accountId: string): string {
  */
 async function checkNetworkReadiness(timeoutMs = 5000): Promise<boolean> {
   try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
     await lookup('suitetalk.api.netsuite.com');
-    clearTimeout(timer);
-    return true;
+    return await new Promise<boolean>((resolve) => {
+      const req = https.request({
+        hostname: 'suitetalk.api.netsuite.com',
+        port: 443,
+        method: 'HEAD',
+        timeout: timeoutMs,
+      }, () => {
+        resolve(true);
+      });
+      req.on('error', () => resolve(false));
+      req.on('timeout', () => {
+        req.destroy();
+        resolve(false);
+      });
+      req.end();
+    });
   } catch {
     return false;
   }
@@ -288,6 +301,21 @@ export async function runKeepAlive(): Promise<void> {
         }
 
         totalAccounts++;
+
+        // Check if an active MCP Server process is running and actively maintaining this session via heartbeat
+        const heartbeatFile = path.join(sessionDir, 'session.heartbeat');
+        try {
+          const hbContent = await fs.readFile(heartbeatFile, 'utf-8');
+          const lastBeat = parseInt(hbContent.trim(), 10);
+          if (!isNaN(lastBeat) && Date.now() - lastBeat < 180000) {
+            logInfo(`[${accountId}] Skipped (actively managed by running MCP server via heartbeat)`);
+            skippedAccounts++;
+            continue;
+          }
+        } catch {
+          // No heartbeat file or error reading, proceed with keepalive scan
+        }
+
         let lockAcquired = false;
         let lockId: string | null = null;
         const lockPath = path.join(sessionDir, 'session.lock');
@@ -303,11 +331,10 @@ export async function runKeepAlive(): Promise<void> {
             continue;
           }
 
-          // Check if token has passed 25% of its lifetime (i.e., less than 75% remaining), or if authenticated is false
+          // Check if token needs refresh (< 75% lifetime remaining), or if authenticated is false
           const tokens = session.tokens;
           const timeUntilExpiry = tokens.expires_at - Date.now();
-          const refreshThreshold = (tokens.expires_in * 1000) * 0.75;
-          const needsRefresh = timeUntilExpiry < refreshThreshold || !session.authenticated;
+          const needsRefresh = shouldRefreshToken(tokens) || !session.authenticated;
 
           if (!needsRefresh) {
             const timeStr = Math.round(timeUntilExpiry / 1000);
@@ -346,8 +373,7 @@ export async function runKeepAlive(): Promise<void> {
           }
 
           const currentTokens = lockedSession.tokens;
-          const currentExpiry = currentTokens.expires_at - Date.now();
-          if (currentExpiry >= refreshThreshold && lockedSession.authenticated) {
+          if (!shouldRefreshToken(currentTokens) && lockedSession.authenticated) {
             logInfo(`[${accountId}] Session refreshed by another process concurrently`);
             skippedAccounts++;
             continue;

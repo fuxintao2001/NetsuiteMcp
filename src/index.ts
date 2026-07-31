@@ -270,28 +270,11 @@ class NetSuiteMCPServer {
     const transport = new StdioServerTransport();
     await this.server.connect(transport);
 
-    // If session exists but token expired, try auto-recovery via refresh token in background
-    if (!this.isAuthenticated) {
-      (async () => {
-        try {
-          await this.oauthManager.tryAutoRecover();
-          this.isAuthenticated = await this.oauthManager.hasValidSession();
-          if (this.isAuthenticated) {
-            console.error('🔄 Session auto-recovered from expired token');
-            this.backgroundPrefetch();
-          }
-        } catch {
-          // Auto-recovery failed (e.g. refresh token also expired) — user must manually authenticate
-          console.error('⚠️ Auto-recovery failed on startup. Will keep retrying via scheduler.');
-        }
-      })();
-    }
-
     // ALWAYS start proactive refresh scheduler — it will self-heal even if
-    // the current session is invalid by attempting auto-recovery each tick
+    // the current session is invalid by attempting auto-recovery on tick
     this.oauthManager.startProactiveRefresh();
 
-    // If already authenticated, also start background prefetch
+    // If already authenticated, start background prefetch
     if (this.isAuthenticated) {
       this.backgroundPrefetch();
     }

@@ -1,4 +1,4 @@
-import { describe, it, expect, jest, beforeEach } from '@jest/globals';
+import { describe, it, expect, jest, beforeEach, afterEach } from '@jest/globals';
 import { TokenRefreshScheduler, retryWithBackoff, getRetryAfterMs, ConcurrencyLimiter } from './resilience.js';
 
 describe('Resilience Utilities', () => {
@@ -12,7 +12,7 @@ describe('Resilience Utilities', () => {
 
     it('should retry up to limit and throw on final failure', async () => {
       const fn = jest.fn<() => Promise<string>>().mockRejectedValue(new Error('failure'));
-      const isRetryable = jest.fn().mockReturnValue(true);
+      const isRetryable = jest.fn<(error: unknown) => boolean>().mockReturnValue(true);
 
       await expect(
         retryWithBackoff(fn, isRetryable, { retries: 2, minTimeoutMs: 1, maxTimeoutMs: 5, jitter: false })
@@ -50,7 +50,7 @@ describe('Resilience Utilities', () => {
       const limiter = new ConcurrencyLimiter(2);
       const activeJobs: number[] = [];
       const order: number[] = [];
-      const resolves: (() => void)[] = [];
+      const resolves: Array<() => void> = [];
 
       const job = async (id: number) => {
         await limiter.run(async () => {
@@ -70,15 +70,15 @@ describe('Resilience Utilities', () => {
       await new Promise(resolve => setTimeout(resolve, 5));
 
       // Resolve job 2 first (resolves[1])
-      resolves[1]();
+      if (resolves[1]) resolves[1]();
       await new Promise(resolve => setTimeout(resolve, 5));
 
       // Resolve job 3 (resolves[2]) which was queued and starts after job 2 finished
-      resolves[2]();
+      if (resolves[2]) resolves[2]();
       await new Promise(resolve => setTimeout(resolve, 5));
 
       // Resolve job 1 (resolves[0])
-      resolves[0]();
+      if (resolves[0]) resolves[0]();
 
       await promise;
       expect(order).toEqual([2, 3, 1]);
@@ -86,15 +86,22 @@ describe('Resilience Utilities', () => {
   });
 
   describe('TokenRefreshScheduler', () => {
-    let mockTarget: any;
+    let mockTarget: {
+      hasValidSession: jest.Mock<() => Promise<boolean>>;
+      ensureValidToken: jest.Mock<() => Promise<string>>;
+      forceRefreshToken: jest.Mock<() => Promise<string>>;
+      tryAutoRecover: jest.Mock<() => Promise<void>>;
+      touchHeartbeat: jest.Mock<() => Promise<void>>;
+    };
     let scheduler: TokenRefreshScheduler;
 
     beforeEach(() => {
       mockTarget = {
-        hasValidSession: jest.fn().mockResolvedValue(true),
-        ensureValidToken: jest.fn().mockResolvedValue('token'),
-        forceRefreshToken: jest.fn().mockResolvedValue('new-token'),
-        tryAutoRecover: jest.fn().mockResolvedValue(undefined)
+        hasValidSession: jest.fn<() => Promise<boolean>>().mockResolvedValue(true),
+        ensureValidToken: jest.fn<() => Promise<string>>().mockResolvedValue('token'),
+        forceRefreshToken: jest.fn<() => Promise<string>>().mockResolvedValue('new-token'),
+        tryAutoRecover: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
+        touchHeartbeat: jest.fn<() => Promise<void>>().mockResolvedValue(undefined)
       };
       scheduler = new TokenRefreshScheduler(mockTarget, 100);
     });
@@ -105,9 +112,8 @@ describe('Resilience Utilities', () => {
 
     it('should run tick immediately on start and check validity', async () => {
       scheduler.start();
-      expect(mockTarget.hasValidSession).toHaveBeenCalled();
-      // Tick was async, wait a moment
       await new Promise(resolve => setTimeout(resolve, 20));
+      expect(mockTarget.hasValidSession).toHaveBeenCalled();
       expect(mockTarget.ensureValidToken).toHaveBeenCalled();
     });
 

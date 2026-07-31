@@ -305,8 +305,8 @@ export class OAuthManager {
           throw new Error('Not authenticated. Please run authentication first.');
         }
 
-        if (shouldRefreshToken(session.tokens) || this.shouldProactivelyRenew(session.tokens)) {
-          console.error('⚠️ Token expiring soon or proactive renewal triggered, refreshing...');
+        if (shouldRefreshToken(session.tokens)) {
+          console.error('⚠️ Token expiring soon, refreshing...');
           return await this.executeTokenRefresh(session, session.tokens.access_token);
         }
 
@@ -317,18 +317,6 @@ export class OAuthManager {
     })();
 
     return this.refreshPromise;
-  }
-
-  /**
-   * Check if we should proactively refresh to keep the refresh token alive.
-   * Returns true when the access token is past 25% of its lifetime (i.e. < 75% remaining).
-   * This ensures refresh tokens get renewed frequently and never expire from disuse or race conditions.
-   */
-  private shouldProactivelyRenew(tokens: TokenData): boolean {
-    const issuedAt = tokens.expires_at - tokens.expires_in * 1000;
-    const elapsed = Date.now() - issuedAt;
-    const threshold = (tokens.expires_in * 1000) * 0.25;
-    return elapsed > threshold;
   }
 
   /**
@@ -536,6 +524,13 @@ export class OAuthManager {
    */
   startProactiveRefresh(): void {
     this.tokenRefreshScheduler.start();
+  }
+
+  /**
+   * Touch heartbeat file for session coordination
+   */
+  async touchHeartbeat(): Promise<void> {
+    await this.storage.touchHeartbeat();
   }
 
   /**

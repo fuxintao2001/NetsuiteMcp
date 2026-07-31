@@ -113,6 +113,7 @@ class NetSuiteHTTPServer {
   private app: ReturnType<typeof express>;
   private cacheProvider: RedisCacheProvider;
   private handlers: Map<string, ReturnType<typeof createMcpHandler>> = new Map();
+  private oauthManagers: Map<string, OAuthManager> = new Map();
 
   constructor() {
     this.cacheProvider = new RedisCacheProvider();
@@ -127,12 +128,24 @@ class NetSuiteHTTPServer {
     this.app.use(localhostOriginValidation());
   }
 
+  private getOrCreateOAuthManager(accountKey: string, cfg: AccountConfig, lockProvider: any): OAuthManager {
+    let manager = this.oauthManagers.get(accountKey);
+    if (!manager) {
+      manager = new OAuthManager({
+        storagePath: cfg.sessionPath,
+        callbackPort: cfg.callbackPort,
+        lockProvider: lockProvider
+      });
+      // Start proactive token refresh scheduler in HTTP Server mode
+      manager.startProactiveRefresh();
+
+      this.oauthManagers.set(accountKey, manager);
+    }
+    return manager;
+  }
+
   private createServerInstance(accountKey: string, cfg: AccountConfig, lockProvider: any): Server {
-    const oauthManager = new OAuthManager({
-      storagePath: cfg.sessionPath,
-      callbackPort: cfg.callbackPort,
-      lockProvider: lockProvider
-    });
+    const oauthManager = this.getOrCreateOAuthManager(accountKey, cfg, lockProvider);
 
     const mcpTools = new NetSuiteMCPTools(oauthManager);
     const server = new Server(
@@ -197,9 +210,12 @@ class NetSuiteHTTPServer {
 
     const lockProvider = this.cacheProvider.createLockProvider();
 
-    // Pre-create McpHandlers for all configured accounts
+    // Pre-create McpHandlers and OAuthManagers for all configured accounts
     for (const [key, cfg] of Object.entries(ACCOUNT_CONFIGS)) {
       await fs.mkdir(cfg.sessionPath, { recursive: true });
+
+      // Initialize OAuthManager & start proactive refresh for pre-configured accounts
+      this.getOrCreateOAuthManager(key, cfg, lockProvider);
 
       const handler = createMcpHandler(async () => {
         return this.createServerInstance(key, cfg, lockProvider);
