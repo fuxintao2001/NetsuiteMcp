@@ -4,6 +4,10 @@
 
 > **MCP Server Architecture Reference:** See [AGENTS.md](file:///Users/fuxintao/WebstormProjects/NetsuiteMcp/AGENTS.md) for the MCP server's internal architecture, design patterns, and tool definitions.
 
+---
+
+# TIER 1 — CORE RULES (ALWAYS ACTIVE)
+
 ## 0. CORE DIRECTIVE (LANGUAGE PROTOCOL)
 
 **CRITICAL:** Process and understand all instructions in English. However, **ALL responses, outputs, and interactions with the user MUST BE EXCLUSIVELY IN CHINESE.** Never output English unless it is code, variable names, API endpoints, or technical terms without standard Chinese translations.
@@ -20,6 +24,10 @@
 2. **Lock-in Statement:** When initiating NetSuite data operations in a conversation or turn, output once: `🎯 当前工作区环境已锁定为: {{ACCOUNT_ID}} ({{ENV_TYPE}})` (仅在每次任务发起或首次调用工具时声明一次，连续调用时无需重复刷屏).
 3. **🚨 ABSOLUTE RED LINE:** Cross-environment database queries are STRICTLY PROHIBITED. Multi-environment tasks MUST be split into separate sub-tasks with explicit environment declarations.
 4. **Cross-Project File Reads (Allowed):** Reading code templates, configs from other projects under `/Users/fuxintao/WebstormProjects/` is authorized without user confirmation.
+
+---
+
+# TIER 2 — WORKFLOW SOPs
 
 ## 3. Tool Selection Strategy
 
@@ -39,31 +47,33 @@ When fulfilling a user request, select tools in this priority order:
 4. Need domain guidance or best practices? → `ns_prompt_library_app`
 5. None of the above? → SuiteQL (follow §5 protocol strictly)
 
-## 4. MCP Tools Reference
+**Performance tip:** When multiple independent tool calls are needed (e.g., fetching 3 different records), prefer `netsuite_batch_execute` to run them in parallel instead of sequential calls.
+
+## 4. MCP Tools Quick Reference
 
 ### Query Tools
 
-| Tool | Purpose | Key Args |
-|:---|:---|:---|
-| `ns_runCustomSuiteQL` | Execute SuiteQL query | `sqlQuery` (required), `pageSize`, `pageIndex` (for native pagination) |
-| `ns_getSuiteQLMetadata` | Get table schema — **MUST call before any query** | `recordType` (optional) |
+| Tool | Purpose |
+|:---|:---|
+| `ns_runCustomSuiteQL` | Execute SuiteQL query |
+| `ns_getSuiteQLMetadata` | Get table schema — **MUST call before any query** |
 
 ### Record Tools
 
-| Tool | Purpose | Key Args |
-|:---|:---|:---|
-| `ns_getRecord` | Read a record | `recordType`, `recordId` (required); `fields` (optional, comma-separated subset) |
-| `ns_getRecordTypeMetadata` | Get record type schema and field constraints | `recordType` (optional) |
-| `netsuite_get_record_link` | Generate NetSuite UI deep link | `recordId` (required); `recordType`, `rectype` (optional) |
+| Tool | Purpose |
+|:---|:---|
+| `ns_getRecord` | Read a record by type + ID |
+| `ns_getRecordTypeMetadata` | Get record type schema and field constraints |
+| `netsuite_get_record_link` | Generate NetSuite UI deep link |
 {{WRITE_TOOLS_TABLE}}
 
 ### Report Tools
 
-| Tool | Purpose | Key Args |
-|:---|:---|:---|
-| `ns_listAllReports` | Discover available reports with properties | *(none)* |
-| `ns_runReport` | Execute a report | `reportId`, `dateTo` (required); + optional filters |
-| `ns_report_filters_app` | **🔄 Interactive:** collect report filter params from user | `reportId` (optional) |
+| Tool | Purpose |
+|:---|:---|
+| `ns_listAllReports` | Discover available reports with properties |
+| `ns_runReport` | Execute a report |
+| `ns_report_filters_app` | **🔄 Interactive:** collect report filter params from user |
 
 ### Context Tools
 
@@ -76,23 +86,22 @@ When fulfilling a user request, select tools in this priority order:
 
 ### Smart Assist Tools
 
-| Tool | Purpose | Key Args |
-|:---|:---|:---|
-| `ns_prompt_library_app` | **🔄 Interactive:** Browse NetSuite AI prompt library for domain guidance | `filter` (optional) |
-| `ns_selector_app` | **🔄 Interactive:** Natural language entity search and selection | `recordType` (required) |
+| Tool | Purpose |
+|:---|:---|
+| `ns_prompt_library_app` | **🔄 Interactive:** Browse NetSuite AI prompt library for domain guidance |
+| `ns_selector_app` | **🔄 Interactive:** Natural language entity search and selection |
 
 > [!WARNING]
 > **Interactive App Tools** (marked with 🔄): `ns_prompt_library_app`, `ns_report_filters_app`, `ns_selector_app` present interactive UI cards to the user. After calling them, you **MUST IMMEDIATELY STOP calling further tools in the current turn** to relinquish execution control. Prompt the user to interact with the UI card, and wait for their submitted response before continuing. Do NOT chain tool calls or fabricate results.
 
 ### System Tools
 
-| Tool | Purpose | Key Args |
-|:---|:---|:---|
-| `netsuite_batch_execute` | Execute multiple NetSuite MCP tools in parallel | `tasks` (array of tasks with `toolName` and `arguments`) |
-| `netsuite_status` | Check auth state, token expiry, cache stats, environment type | *(none)* |
-| `netsuite_refresh_cache` | Clear Redis caches (optional: `tableName` for single table) | `tableName` (optional) |
-| `netsuite_logout` | Clear authentication session | *(none)* |
-
+| Tool | Purpose |
+|:---|:---|
+| `netsuite_batch_execute` | Execute multiple NetSuite MCP tools in parallel |
+| `netsuite_status` | Check auth state, token expiry, cache stats, environment type |
+| `netsuite_refresh_cache` | Clear caches (optional: specific `tableName`) |
+| `netsuite_logout` | Clear authentication session |
 
 ## 5. SuiteQL Protocol
 
@@ -105,6 +114,7 @@ When fulfilling a user request, select tools in this priority order:
 
 | Step | Action | Tool |
 |:---|:---|:---|
+| ⓪ Reference | If writing SuiteScript that interacts with records → **MUST** read `netsuite://skills/netsuite-suitescript-records-reference` for field IDs and types | MCP Resource |
 | ① Schema | Query target table schema — **NEVER guess field names** | `ns_getSuiteQLMetadata` |
 | ② Build | Write query per schema; add `ROWNUM` limit for large tables | — |
 | ③ Test | Validate with `WHERE ROWNUM <= 5` before full execution | `ns_runCustomSuiteQL` |
@@ -118,11 +128,11 @@ When fulfilling a user request, select tools in this priority order:
 - **Status Fields:** Always use `BUILTIN.DF(status)` to get human-readable display names instead of raw encoded values.
 - **Multi-Subsidiary Queries:** Before pulling financial data, explicitly clarify if user wants consolidated or subsidiary-specific results.
 
-
 ## 6. Record Operations SOP
 
 | Phase | Rule |
 |:---|:---|
+| **Reference** | If writing SuiteScript for record operations → **MUST** read `netsuite://skills/netsuite-suitescript-records-reference` for field IDs and types |
 | **Before** | MUST call `ns_getRecordTypeMetadata` to verify JSON Schema constraints |
 | **Build Params** | Sublist arrays must conform to metadata; IDs, booleans must match internal types |
 | **After** | Check output for UI confirmation link (auto-appended by `ns_getRecord`, `ns_createRecord`, and `ns_updateRecord`) |
@@ -138,74 +148,55 @@ When fulfilling a user request, select tools in this priority order:
 3. **Context:** Use `ns_getSubsidiaries`, `ns_getAccountingBooks`, `ns_getAccountingContexts`, `ns_getNexusIds` as needed to resolve filter values
 4. **Execute:** `ns_runReport` with collected parameters
 5. **Multi-Subsidiary:** Before pulling financial data, explicitly clarify if user wants consolidated or subsidiary-specific data
+6. **Financial Analysis:** For financial reporting tasks → **MUST** read `netsuite://skills/netsuite-finance-analyst` for reporting best practices
 
-## 8. Error Handling SOP
+---
 
-| Error | Symptom | Action |
-|:---|:---|:---|
-| **401 Unauthorized** | Auth token expired | MCP Server auto-retries once after force-refresh. If still fails → call `netsuite_authenticate` (visible in tool list when unauthenticated) |
-| **SuiteQL Timeout** | Query too broad / too many rows | Add `WHERE ROWNUM <= N`, narrow date range with `TO_DATE()`, reduce JOINs |
-| **Field Not Found** | Stale metadata or wrong field name | `netsuite_refresh_cache` (or pass `tableName` for single table), then re-verify with `ns_getSuiteQLMetadata` |
-| **Metadata Inconsistent** | Stale metadata (cache has no TTL) | `netsuite_refresh_cache` to clear Redis caches |
-| **Unknown / Transient** | Network issues, 5xx errors | `netsuite_status` to diagnose auth state and cache stats first |
+# TIER 3 — REFERENCE
 
-## 9. Authentication & System
+## 8. Error Handling & System Diagnostics
 
-- **Authenticate:** `netsuite_authenticate` — **Dynamic tool**: ONLY appears in tool list when unauthenticated or after a 401 error. If `netsuite_status` confirms valid login, this tool is hidden and should not be called.
-- **Status:** `netsuite_status` — check auth state, token expiry, cache stats, environment type. **Call this first when diagnosing any issue.**
-- **Logout:** `netsuite_logout` — clear session.
-- **Cache:** `netsuite_refresh_cache` — clear Redis caches (optional: `tableName` for single table). Cache is persistent (no TTL) until cleared manually.
+**First response to any issue:** Call `netsuite_status` to check auth state, token expiry, cache stats.
 
-## 10. SuiteCloud Agent Skills
-
-This MCP server exposes official Oracle NetSuite SuiteCloud Agent Skills as MCP resources under `netsuite://skills/<skill-name>`.
-
-| Skill | Domain |
+| Error | Action |
 |:---|:---|
-| `netsuite-ai-connector-instructions` | AI Connector setup and configuration |
-| `netsuite-finance-analyst` | Financial analysis and reporting |
-| `netsuite-owasp-secure-coding` | OWASP Top 10 security for SuiteScript |
-| `netsuite-sdf-project-documentation` | SDF project structure and documentation |
-| `netsuite-sdf-roles-and-permissions` | Role/permission configuration via SDF |
-| `netsuite-sdf-safe-guide` | SDF deployment safety guidelines |
-| `netsuite-suitescript-learning` | SuiteScript learning resources |
-| `netsuite-suitescript-records-reference` | Record type API reference |
-| `netsuite-suitescript-upgrade` | SuiteScript version migration guide |
-| `netsuite-uif-spa-reference` | UIF SPA (SuiteApp) development reference |
+| **401 Unauthorized** | MCP Server auto-retries once after force-refresh. If still fails → call `netsuite_authenticate` (**dynamic tool**: ONLY visible when unauthenticated or after 401) |
+| **SuiteQL Timeout** | Add `WHERE ROWNUM <= N`, narrow date range with `TO_DATE()`, reduce JOINs |
+| **Field Not Found** | `netsuite_refresh_cache` (optional: `tableName` for single table), then re-verify with `ns_getSuiteQLMetadata` |
+| **Stale Metadata** | `netsuite_refresh_cache` to clear persistent caches (no TTL — persists until cleared manually) |
+| **Unknown / Transient** | `netsuite_status` first; `netsuite_logout` + re-authenticate if needed |
 
-**Usage Rules:**
-- Before writing SuiteScript or SDF configs → check the corresponding skill resource
-- OWASP guidelines → mandatory for RESTlets, Suitelets, Client Scripts (input validation, output encoding)
-- Financial analysis → consult `netsuite-finance-analyst` for reporting best practices
+## 9. Reference Resources
 
-## 11. MCP Resources
+### SuiteQL Guide
 
 - `netsuite://guides/suiteql` — Complete SuiteQL syntax, Oracle SQL subset rules, and query reference guide
-- `netsuite://skills/<skill-name>` — SuiteCloud Agent Skills (see §10 for full list)
 
-## 12. API Validation (Context7 MCP & Skills)
+### SuiteCloud Agent Skills (`netsuite://skills/<skill-name>`)
 
-Before writing ANY SuiteScript, SuiteQL, or SuiteFlow code, MUST confirm API signatures, parameters, and enum values. NEVER call APIs from memory.
-- **Context7 Workflow:** First call `resolve-library-id` to identify the exact library ID, then call `query-docs` with specific query parameters.
-- **Skills Reference:** Cross-reference record fields and best practices using official resources like `netsuite://skills/netsuite-suitescript-records-reference` and `netsuite://skills/netsuite-sdf-safe-guide`.
+| Skill | Domain | MUST Read When |
+|:---|:---|:---|
+| `netsuite-suitescript-records-reference` | Record/field reference (272 types) | Writing SuiteScript with record ops |
+| `netsuite-sdf-safe-guide` | SAFE Guide — 12 principles, 139+ pitfalls | Writing any SuiteScript or SDF config |
+| `netsuite-owasp-secure-coding` | OWASP Top 10 for SuiteScript | Writing RESTlets, Suitelets, Client Scripts |
+| `netsuite-finance-analyst` | Financial analysis & reporting | Financial analysis tasks |
+| `netsuite-ai-connector-instructions` | AI Connector guardrails & setup | AI Connector configuration |
+| `netsuite-sdf-project-documentation` | SDF project documentation | Generating SDF project docs |
+| `netsuite-sdf-roles-and-permissions` | Role/permission SDF config | Role/permission tasks |
+| `netsuite-suitescript-learning` | SuiteScript learning resources | Learning mode |
+| `netsuite-suitescript-upgrade` | 1.0 → 2.1 migration (125+ API mappings) | Script version upgrade |
+| `netsuite-uif-spa-reference` | UIF SPA development (`@uif-js/core` + `@uif-js/component`) | SuiteApp UIF development |
 
-## 13. Engineering Standards
+## 10. API Validation (Context7)
 
+Before writing SuiteScript/SuiteQL/SuiteFlow code, MUST verify API signatures via Context7: `resolve-library-id` → `query-docs`. NEVER call APIs from memory.
+
+## 11. Output Standards
+
+- **Language:** Strictly Chinese (per §0). Code, variable names, API endpoints, untranslatable terms may remain in English.
+- **Style:** Concise, direct, high information density. Eliminate pleasantries and filler.
 - **Commit Messages:** All commits pushed to remote MUST be in Chinese.
 - **Bilingual Logging:** Format: `[Chinese business description]: [English technical details]`
   ```javascript
   log.error({title: '客户同步失败', details: 'Invalid customer internal ID: ' + customerId});
   ```
-
-## 14. Output Style
-
-- **Language:** Strictly Chinese (as per §0).
-- **Style:** Concise, direct, high information density, highly actionable. Eliminate pleasantries, repetition, and filler words.
-
-## 15. Knowledge Item (KI) Caching
-
-When discovering any of the following, explicitly summarize for long-term memory indexing:
-- Custom record metadata schemas (field names, types, relationships)
-- Complex SuiteQL solutions (multi-join patterns, edge cases, performance tuning)
-- Environment-specific ID mappings (e.g., custom list values, subsidiary IDs)
-- Resolved troubleshooting patterns (error → root cause → fix)

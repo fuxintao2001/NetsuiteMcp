@@ -29,8 +29,8 @@ const configPath = path.join(projectRoot, 'workspace-agents', 'workspaces.json')
 // Conditional Content Blocks
 // ---------------------------------------------------------------------------
 
-const WRITE_TOOLS_TABLE_SANDBOX = `| \`ns_createRecord\` | Create a new record (**Sandbox only**) | \`recordType\`, \`data\` (stringified JSON) |
-| \`ns_updateRecord\` | Update an existing record (**Sandbox only**) | \`recordType\`, \`recordId\`, \`data\` (stringified JSON) |`;
+const WRITE_TOOLS_TABLE_SANDBOX = `| \`ns_createRecord\` | Create a new record (**Sandbox only**) |
+| \`ns_updateRecord\` | Update an existing record (**Sandbox only**) |`;
 
 const WRITE_TOOLS_TABLE_PRODUCTION = `\n> *Write tools (\`ns_createRecord\`, \`ns_updateRecord\`) are disabled in Production.*\n`;
 
