@@ -1,10 +1,9 @@
-import { lookup } from "dns/promises";
-import fs from "fs/promises";
-import https from "https";
+import { lookup } from "node:dns/promises";
+import fs from "node:fs/promises";
+import https from "node:https";
+import os from "node:os";
+import path from "node:path";
 import { Redis } from "ioredis";
-import os from "os";
-import path from "path";
-import { fileURLToPath } from "url";
 import { shouldRefreshToken } from "../oauth/tokenExchange.js";
 import { RedisLockProvider } from "../utils/redisLock.js";
 
@@ -106,8 +105,9 @@ async function acquireLock(
 		try {
 			await fs.mkdir(lockPath);
 			return true;
-		} catch (err: any) {
-			if (err.code === "EEXIST") {
+		} catch (err: unknown) {
+			const nodeErr = err as { code?: string };
+			if (nodeErr.code === "EEXIST") {
 				try {
 					const stats = await fs.stat(lockPath);
 					const age = Date.now() - stats.mtimeMs;
@@ -136,7 +136,7 @@ async function acquireLock(
 async function releaseLock(lockPath: string): Promise<void> {
 	try {
 		await fs.rmdir(lockPath);
-	} catch (err) {
+	} catch (_err) {
 		// Ignore release errors
 	}
 }
@@ -243,12 +243,13 @@ async function refreshTokens(
 				continue;
 			}
 			throw new Error(`Failed after ${maxAttempts} attempts: ${errorMsg}`);
-		} catch (err: any) {
-			if (attempt < maxAttempts && !err.message.includes("Unrecoverable")) {
-				lastTransientError = err.message;
+		} catch (err: unknown) {
+			const message = err instanceof Error ? err.message : String(err);
+			if (attempt < maxAttempts && !message.includes("Unrecoverable")) {
+				lastTransientError = message;
 				const delay = Math.min(3000 * 2 ** (attempt - 1), 20000);
 				logWarn(
-					`Transient refresh exception (${err.message}). Retrying in ${delay / 1000}s...`,
+					`Transient refresh exception (${message}). Retrying in ${delay / 1000}s...`,
 				);
 				await new Promise((resolve) => setTimeout(resolve, delay));
 				continue;
@@ -297,9 +298,10 @@ export async function runKeepAlive(): Promise<void> {
 		await redis.connect();
 		lockProvider = new RedisLockProvider(redis);
 		logInfo("Redis connected for distributed locking");
-	} catch (err: any) {
+	} catch (err: unknown) {
+		const message = err instanceof Error ? err.message : String(err);
 		logWarn(
-			`Redis connection failed: ${err.message}. Using file locks as fallback.`,
+			`Redis connection failed: ${message}. Using file locks as fallback.`,
 		);
 	}
 
@@ -343,7 +345,7 @@ export async function runKeepAlive(): Promise<void> {
 				try {
 					const hbContent = await fs.readFile(heartbeatFile, "utf-8");
 					const lastBeat = parseInt(hbContent.trim(), 10);
-					if (!isNaN(lastBeat) && Date.now() - lastBeat < 180000) {
+					if (!Number.isNaN(lastBeat) && Date.now() - lastBeat < 180000) {
 						logInfo(
 							`[${accountId}] Skipped (actively managed by running MCP server via heartbeat)`,
 						);
@@ -355,7 +357,7 @@ export async function runKeepAlive(): Promise<void> {
 				}
 
 				let lockAcquired = false;
-				let lockId: string | null = null;
+				let lockId: unknown = null;
 				const lockPath = path.join(sessionDir, "session.lock");
 
 				try {
@@ -491,16 +493,17 @@ export async function runKeepAlive(): Promise<void> {
 					);
 					logSuccess(`[${accountId}] Token refreshed successfully!`);
 					refreshedAccounts++;
-				} catch (err: any) {
+				} catch (err: unknown) {
+					const message = err instanceof Error ? err.message : String(err);
 					logError(
-						`[${accountId}] Failed during refresh operation: ${err.message}`,
+						`[${accountId}] Failed during refresh operation: ${message}`,
 					);
 					failedAccounts++;
 					// If refresh token is truly expired and not caused by a post-network-drop rotation mismatch, mark session unauthenticated
 					try {
 						if (
-							err.message.includes("Unrecoverable") &&
-							!err.message.includes("post-network-drop rotation mismatch")
+							message.includes("Unrecoverable") &&
+							!message.includes("post-network-drop rotation mismatch")
 						) {
 							const fileContent = await fs.readFile(sessionFile, "utf-8");
 							const session = JSON.parse(fileContent) as SessionData;
@@ -516,7 +519,7 @@ export async function runKeepAlive(): Promise<void> {
 								);
 							}
 						} else if (
-							err.message.includes("post-network-drop rotation mismatch")
+							message.includes("post-network-drop rotation mismatch")
 						) {
 							logWarn(
 								`[${accountId}] Preserving session configuration despite network drop rotation mismatch. Will attempt auto-recovery next round.`,
@@ -533,8 +536,9 @@ export async function runKeepAlive(): Promise<void> {
 					}
 				}
 			}
-		} catch (err: any) {
-			logError(`Failed to scan root directory "${root}": ${err.message}`);
+		} catch (err: unknown) {
+			const message = err instanceof Error ? err.message : String(err);
+			logError(`Failed to scan root directory "${root}": ${message}`);
 		}
 	}
 

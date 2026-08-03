@@ -6,14 +6,14 @@
  * Clean helper function to recursively remove nulls, undefineds, and 'links' keys.
  */
 function cleanRecordPayloadHelper(
-	val: any,
+	val: unknown,
 	depth = 0,
-	seen = new WeakSet(),
-): any {
+	seen = new WeakSet<object>(),
+): unknown {
 	if (val === null || val === undefined || depth > 20) {
 		return undefined;
 	}
-	if (typeof val === "object") {
+	if (typeof val === "object" && val !== null) {
 		if (seen.has(val)) return undefined;
 		seen.add(val);
 	}
@@ -23,12 +23,13 @@ function cleanRecordPayloadHelper(
 			.filter((item) => item !== undefined);
 		return cleanedArr.length > 0 ? cleanedArr : undefined;
 	}
-	if (typeof val === "object") {
-		const cleaned: Record<string, any> = {};
+	if (typeof val === "object" && val !== null) {
+		const cleaned: Record<string, unknown> = {};
 		let hasKeys = false;
-		for (const key of Object.keys(val)) {
+		const objVal = val as Record<string, unknown>;
+		for (const key of Object.keys(objVal)) {
 			if (key === "links") continue;
-			const cleanedVal = cleanRecordPayloadHelper(val[key], depth + 1, seen);
+			const cleanedVal = cleanRecordPayloadHelper(objVal[key], depth + 1, seen);
 			if (
 				cleanedVal !== undefined &&
 				cleanedVal !== null &&
@@ -47,7 +48,7 @@ function cleanRecordPayloadHelper(
  * Recursively removes redundant fields (like 'links') and null/undefined values from record objects.
  * Always returns a fallback empty object/array if the root is completely stripped.
  */
-export function cleanRecordPayload(val: any): any {
+export function cleanRecordPayload(val: unknown): unknown {
 	const result = cleanRecordPayloadHelper(val);
 	if (result === undefined) {
 		return Array.isArray(val) ? [] : {};
@@ -58,21 +59,25 @@ export function cleanRecordPayload(val: any): any {
 /**
  * Formats JSON schema (from NetSuite record metadata) into a compact Markdown table.
  */
-export function formatMetadataToCompactMarkdown(schema: any): string {
+export function formatMetadataToCompactMarkdown(schema: unknown): string {
 	if (!schema || typeof schema !== "object") {
 		return String(schema);
 	}
 
+	const schemaObj = schema as Record<string, unknown>;
+
 	// Handle various formats of JSON Schema / responses
-	let properties = schema.properties;
-	if (schema.metadata && typeof schema.metadata === "object") {
-		properties = schema.metadata.properties;
+	let properties = schemaObj.properties as Record<string, unknown> | undefined;
+	if (schemaObj.metadata && typeof schemaObj.metadata === "object") {
+		properties = (schemaObj.metadata as Record<string, unknown>).properties as
+			| Record<string, unknown>
+			| undefined;
 	}
 
 	// Unwrap array/content wrapper if it's from local converted record format or MCP response format
-	if (Array.isArray(schema.content)) {
-		const first = schema.content[0];
-		if (first && first.text && typeof first.text === "string") {
+	if (Array.isArray(schemaObj.content)) {
+		const first = schemaObj.content[0] as { text?: string } | undefined;
+		if (first?.text && typeof first.text === "string") {
 			try {
 				const parsed = JSON.parse(first.text);
 				return formatMetadataToCompactMarkdown(parsed);
@@ -85,8 +90,8 @@ export function formatMetadataToCompactMarkdown(schema: any): string {
 
 	if (!properties || typeof properties !== "object") {
 		// If it's standard JSON but has a success status
-		if (schema.success === true && schema.metadata) {
-			return formatMetadataToCompactMarkdown(schema.metadata);
+		if (schemaObj.success === true && schemaObj.metadata) {
+			return formatMetadataToCompactMarkdown(schemaObj.metadata);
 		}
 		return typeof schema === "string"
 			? schema
@@ -96,12 +101,13 @@ export function formatMetadataToCompactMarkdown(schema: any): string {
 	let output = "| Field | Type | Description | Nullable |\n|---|---|---|---|\n";
 	for (const [key, value] of Object.entries(properties)) {
 		if (!value || typeof value !== "object") continue;
-		const valObj = value as Record<string, any>;
+		const valObj = value as Record<string, unknown>;
+		const innerProps = valObj.properties as Record<string, unknown> | undefined;
 		const typeStr =
-			valObj.type === "object" && valObj.properties
-				? `object (${Object.keys(valObj.properties).join(", ")})`
-				: valObj.type || "string";
-		const desc = (valObj.description || valObj.title || "")
+			valObj.type === "object" && innerProps
+				? `object (${Object.keys(innerProps).join(", ")})`
+				: String(valObj.type || "string");
+		const desc = String(valObj.description || valObj.title || "")
 			.trim()
 			.replace(/\|/g, "\\|")
 			.replace(/\n/g, " ");

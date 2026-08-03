@@ -1,4 +1,4 @@
-import http from "http";
+import http from "node:http";
 
 function escapeHtml(str: string): string {
 	return str.replace(/[&<>"']/g, (m) => {

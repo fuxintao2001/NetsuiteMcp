@@ -1,15 +1,17 @@
+import fs from "node:fs/promises";
+import path from "node:path";
 import {
 	localhostHostValidation,
 	localhostOriginValidation,
 } from "@modelcontextprotocol/express";
 import { createMcpHandler, Server } from "@modelcontextprotocol/server";
 import express, { type Request, type Response } from "express";
-import fs from "fs/promises";
-import path from "path";
 import { registerResourceHandlers } from "./handlers/resources.js";
 import { registerToolHandlers } from "./handlers/tools.js";
 import { NetSuiteMCPTools } from "./mcp/tools.js";
 import { OAuthManager } from "./oauth/manager.js";
+import { cacheService } from "./utils/cache.js";
+import { resolveCustomRecordRectype } from "./utils/metadata.js";
 import { RedisCacheProvider } from "./utils/redisCacheProvider.js";
 
 import type { RedisLockProvider } from "./utils/redisLock.js";
@@ -26,7 +28,8 @@ const ACCOUNT_CONFIGS: Record<string, AccountConfig> = {
 		accountId: "5848789",
 		clientId:
 			process.env.NETSUITE_CLIENT_ID_5848789 ||
-			"a1b2d7195f6788a9c751d8107c5b79d9c8f9ac07eccf3ad910b744002597001e",
+			process.env.NETSUITE_CLIENT_ID ||
+			"",
 		sessionPath:
 			process.env.NETSUITE_SESSION_PATH_5848789 ||
 			path.join(process.env.HOME || "", ".gemini/antigravity/sessions/5848789"),
@@ -36,7 +39,8 @@ const ACCOUNT_CONFIGS: Record<string, AccountConfig> = {
 		accountId: "5848789-sb1",
 		clientId:
 			process.env.NETSUITE_CLIENT_ID_5848789_SB1 ||
-			"0236ead47a3111e43ef133494c12b55c7a83b4f0ad72cc7c2cb2787af636768a",
+			process.env.NETSUITE_CLIENT_ID ||
+			"",
 		sessionPath:
 			process.env.NETSUITE_SESSION_PATH_5848789_SB1 ||
 			path.join(
@@ -49,7 +53,8 @@ const ACCOUNT_CONFIGS: Record<string, AccountConfig> = {
 		accountId: "9260916",
 		clientId:
 			process.env.NETSUITE_CLIENT_ID_9260916 ||
-			"a464dbc30452bd27cde365f221ebe2b28e5fe2edb5d00880aef4f276dcbe6383",
+			process.env.NETSUITE_CLIENT_ID ||
+			"",
 		sessionPath:
 			process.env.NETSUITE_SESSION_PATH_9260916 ||
 			path.join(process.env.HOME || "", ".gemini/antigravity/sessions/9260916"),
@@ -59,7 +64,8 @@ const ACCOUNT_CONFIGS: Record<string, AccountConfig> = {
 		accountId: "9260916-sb1",
 		clientId:
 			process.env.NETSUITE_CLIENT_ID_9260916_SB1 ||
-			"23b3717bc449aa331fc9867222b86f5f8324713abd56076d74f62450de6cf310",
+			process.env.NETSUITE_CLIENT_ID ||
+			"",
 		sessionPath:
 			process.env.NETSUITE_SESSION_PATH_9260916_SB1 ||
 			path.join(
@@ -72,7 +78,8 @@ const ACCOUNT_CONFIGS: Record<string, AccountConfig> = {
 		accountId: "9260916-sb3",
 		clientId:
 			process.env.NETSUITE_CLIENT_ID_9260916_SB3 ||
-			"3a651cfac0d8de2d1c93c0a7c53b38e6627a6e55a1ad602bc759f64c95a2d425",
+			process.env.NETSUITE_CLIENT_ID ||
+			"",
 		sessionPath:
 			process.env.NETSUITE_SESSION_PATH_9260916_SB3 ||
 			path.join(
@@ -139,7 +146,7 @@ async function sendWebResponse(
 					expressRes.write(value);
 				}
 			}
-		} catch (err) {
+		} catch (_err) {
 			// Ignored stream error
 		}
 	}
@@ -245,7 +252,12 @@ class NetSuiteHTTPServer {
 				};
 			},
 			resolveCustomRecordRectype: async (rectype: string) => {
-				return mcpTools.customRecordMappings.get(rectype.toLowerCase()) || null;
+				return resolveCustomRecordRectype(
+					mcpTools,
+					oauthManager,
+					cacheService,
+					rectype,
+				);
 			},
 		});
 
@@ -256,9 +268,10 @@ class NetSuiteHTTPServer {
 	public async start(port: number = 3000): Promise<void> {
 		try {
 			await this.cacheProvider.connect();
-		} catch (err: any) {
+		} catch (err: unknown) {
+			const message = err instanceof Error ? err.message : String(err);
 			console.error(
-				`⚠️ Redis connection failed: ${err.message}. Running without Redis cache.`,
+				`⚠️ Redis connection failed: ${message}. Running without Redis cache.`,
 			);
 		}
 

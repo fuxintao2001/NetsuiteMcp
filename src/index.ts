@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 
+import { readFileSync } from "node:fs";
+import http from "node:http";
+import https from "node:https";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { Server } from "@modelcontextprotocol/server";
 import { StdioServerTransport } from "@modelcontextprotocol/server/stdio";
 import axios from "axios";
-import { readFileSync } from "fs";
-import http from "http";
-import https from "https";
-import { dirname, join } from "path";
-import { fileURLToPath } from "url";
 import { registerResourceHandlers } from "./handlers/resources.js";
 import type { ToolHandlerDeps } from "./handlers/tools.js";
 // Import handlers
@@ -17,6 +17,7 @@ import { OAuthManager } from "./oauth/manager.js";
 import { cacheService } from "./utils/cache.js";
 import { validateEnv } from "./utils/envValidator.js";
 import { installGlobalErrorHandlers } from "./utils/globalErrorHandlers.js";
+import { resolveCustomRecordRectype as resolveRectypeHelper } from "./utils/metadata.js";
 import { RedisCacheProvider } from "./utils/redisCacheProvider.js";
 
 // ---------------------------------------------------------------------------
@@ -204,54 +205,12 @@ class NetSuiteMCPServer {
 	private async resolveCustomRecordRectype(
 		recordType: string,
 	): Promise<number | null> {
-		if (!recordType) return null;
-		const upperType = recordType.toUpperCase().trim();
-		const cached = this.mcpTools.customRecordMappings.get(upperType);
-		if (cached !== undefined) return cached;
-
-		// Dynamically query mapping via SuiteQL
-		try {
-			console.error(
-				`🔍 Resolving custom record type mapping dynamically for ${upperType}...`,
-			);
-			const result = await this.mcpTools.executeTool("ns_runCustomSuiteQL", {
-				sqlQuery: `SELECT internalId FROM customrecordtype WHERE UPPER(scriptId) = '${upperType}'`,
-			});
-			const records = this.mcpTools.extractDataArray(result);
-			const firstRecord = records[0];
-			if (firstRecord) {
-				const internalId = parseInt(
-					String(firstRecord.internalid || firstRecord.internalId),
-					10,
-				);
-				if (!isNaN(internalId)) {
-					this.mcpTools.customRecordMappings.set(upperType, internalId);
-					// Also save to persistent cache if accountId exists
-					const accountId = await this.oauthManager.getAccountId();
-					if (accountId) {
-						const mappingsObj =
-							(await cacheService.get<Record<string, number>>(
-								accountId,
-								"customrecord_mappings",
-							)) || {};
-						mappingsObj[upperType] = internalId;
-						await cacheService.set(
-							accountId,
-							"customrecord_mappings",
-							mappingsObj,
-						);
-					}
-					return internalId;
-				}
-			}
-		} catch (err: unknown) {
-			const msg = err instanceof Error ? err.message : String(err);
-			console.error(
-				`⚠️ Failed to dynamically resolve custom record rectype for ${upperType}: ${msg}`,
-			);
-		}
-
-		return null;
+		return resolveRectypeHelper(
+			this.mcpTools,
+			this.oauthManager,
+			cacheService,
+			recordType,
+		);
 	}
 
 	// -------------------------------------------------------------------------
@@ -355,8 +314,8 @@ async function main(): Promise<void> {
 		process.stdin.on("end", () => {
 			void shutdown();
 		});
-		process.stdout.on("error", (err: any) => {
-			if (err.code === "EPIPE") {
+		process.stdout.on("error", (err: unknown) => {
+			if ((err as { code?: string })?.code === "EPIPE") {
 				void shutdown();
 			}
 		});

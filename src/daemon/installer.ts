@@ -1,8 +1,8 @@
-import { execSync } from "child_process";
-import fs from "fs/promises";
-import os from "os";
-import path from "path";
-import { fileURLToPath } from "url";
+import { execSync } from "node:child_process";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const AGENT_LABEL = "com.suiteinsider.netsuite-mcp-keepalive";
 const PLIST_NAME = `${AGENT_LABEL}.plist`;
@@ -110,8 +110,9 @@ export async function install(): Promise<void> {
 		console.error(`\n✅ LaunchAgent daemon installed and loaded successfully!`);
 		console.error(`   The daemon will run every 10 minutes.`);
 		console.error(`   You can view logs at: tail -f "${paths.logPath}"`);
-	} catch (err: any) {
-		console.error(`❌ Failed to install LaunchAgent: ${err.message}`);
+	} catch (err: unknown) {
+		const message = err instanceof Error ? err.message : String(err);
+		console.error(`❌ Failed to install LaunchAgent: ${message}`);
 		throw err;
 	}
 }
@@ -134,15 +135,17 @@ export async function uninstall(): Promise<void> {
 		try {
 			await fs.unlink(paths.plistPath);
 			console.error(`   Removed Plist file.`);
-		} catch (err: any) {
-			if (err.code !== "ENOENT") {
+		} catch (err: unknown) {
+			const nodeErr = err as { code?: string };
+			if (nodeErr.code !== "ENOENT") {
 				throw err;
 			}
 		}
 
 		console.error(`✅ LaunchAgent daemon uninstalled successfully!`);
-	} catch (err: any) {
-		console.error(`❌ Failed to uninstall LaunchAgent: ${err.message}`);
+	} catch (err: unknown) {
+		const message = err instanceof Error ? err.message : String(err);
+		console.error(`❌ Failed to uninstall LaunchAgent: ${message}`);
 		throw err;
 	}
 }
@@ -166,7 +169,7 @@ export async function status(): Promise<void> {
 
 	console.error(`   File Installed: ${isFileInstalled ? "✅ Yes" : "❌ No"}`);
 
-	let isLoaded = false;
+	let _isLoaded = false;
 	if (isFileInstalled) {
 		try {
 			const listOutput = execSync(`launchctl list | grep ${AGENT_LABEL}`, {
@@ -176,7 +179,7 @@ export async function status(): Promise<void> {
 			console.error(
 				`   Launchctl list detail:\n${listOutput.trim().replace(/^/gm, "     ")}`,
 			);
-			isLoaded = true;
+			_isLoaded = true;
 		} catch {
 			console.error(`   Launchctl status: ❌ Not loaded (or idle/stopped)`);
 		}

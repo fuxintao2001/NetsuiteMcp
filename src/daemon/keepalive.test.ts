@@ -1,3 +1,6 @@
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import {
 	afterEach,
 	beforeEach,
@@ -6,9 +9,6 @@ import {
 	it,
 	jest,
 } from "@jest/globals";
-import fs from "fs/promises";
-import os from "os";
-import path from "path";
 import { runKeepAlive } from "./keepalive.js";
 
 // Simple unit tests for keepalive daemon logic using temporary session files

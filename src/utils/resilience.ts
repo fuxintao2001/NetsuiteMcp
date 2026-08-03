@@ -3,6 +3,8 @@
  * Provides proactive token refresh scheduling to maintain session validity.
  */
 
+import pLimit, { type LimitFunction } from "p-limit";
+
 /** Minimal interface for the OAuthManager used by the scheduler */
 interface TokenRefreshTarget {
 	hasValidSession(): Promise<boolean>;
@@ -196,8 +198,6 @@ export async function retryWithBackoff<T>(
 	}
 }
 
-import pLimit, { type LimitFunction } from "p-limit";
-
 export function getRetryAfterMs(error: unknown): number | null {
 	const err = error as {
 		response?: { headers?: Record<string, string | undefined> };
@@ -208,10 +208,10 @@ export function getRetryAfterMs(error: unknown): number | null {
 	if (!retryAfter) return null;
 
 	const seconds = parseInt(retryAfter, 10);
-	if (!isNaN(seconds)) return seconds * 1000;
+	if (!Number.isNaN(seconds)) return seconds * 1000;
 
 	const dateMs = Date.parse(retryAfter);
-	if (!isNaN(dateMs)) return Math.max(0, dateMs - Date.now());
+	if (!Number.isNaN(dateMs)) return Math.max(0, dateMs - Date.now());
 
 	return null;
 }

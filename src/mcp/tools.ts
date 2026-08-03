@@ -1,9 +1,8 @@
-import { randomUUID } from "crypto";
-import fs from "fs/promises";
-import { dirname, join } from "path";
-import { fileURLToPath } from "url";
+import { randomUUID } from "node:crypto";
+import fs from "node:fs/promises";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { OAuthManager } from "../oauth/manager.js";
-import { TokenRefreshError } from "../oauth/tokenExchange.js";
 import { cacheService } from "../utils/cache.js";
 import {
 	formatNetSuiteAccountHost,
@@ -11,6 +10,7 @@ import {
 } from "../utils/environment.js";
 import { parseNetSuiteError } from "../utils/errors.js";
 import { httpClient } from "../utils/httpClient.js";
+import { type JsonSchemaProperty, mapFieldType } from "../utils/metadata.js";
 import { ConcurrencyLimiter, retryWithBackoff } from "../utils/resilience.js";
 
 /**
@@ -299,7 +299,7 @@ export class NetSuiteMCPTools {
 					String(record.internalid || record.internalId),
 					10,
 				);
-				if (scriptId && !isNaN(internalId)) {
+				if (scriptId && !Number.isNaN(internalId)) {
 					this.customRecordMappings.set(scriptId, internalId);
 					newMappings[scriptId] = internalId;
 				}
@@ -344,7 +344,7 @@ export class NetSuiteMCPTools {
 			console.error("🚀 Seeding metadata cache from local records.json...");
 			const fileContent = await fs.readFile(recordsJsonPath, "utf-8");
 			const data = JSON.parse(fileContent);
-			if (!data || !data.records) return;
+			if (!data?.records) return;
 
 			const highFrequencyTypes = [
 				"customer",
@@ -397,61 +397,31 @@ export class NetSuiteMCPTools {
 	 * Convert a record info from records.json into NetSuite REST API metadata format.
 	 */
 	private convertRecordInfoToMetadata(recordInfo: LocalRecordInfo): unknown {
-		const properties: Record<string, any> = {};
+		const properties: Record<string, JsonSchemaProperty> = {};
 
 		for (const field of recordInfo.fields || []) {
 			if (!field.internalId) continue;
 
-			const prop: Record<string, any> = {
+			const prop: JsonSchemaProperty = {
 				title: field.label || field.internalId,
 				nullable: field.required !== "true",
+				...(field.help ? { description: field.help } : {}),
+				...mapFieldType(field.type),
 			};
-
-			if (field.help) {
-				prop.description = field.help;
-			}
-
-			const rawType = (field.type || "text").toLowerCase();
-			if (rawType === "checkbox" || rawType === "boolean") {
-				prop.type = "boolean";
-			} else if (
-				rawType === "float" ||
-				rawType === "double" ||
-				rawType === "currency"
-			) {
-				prop.type = "number";
-				prop.format = "double";
-			} else if (rawType === "integer") {
-				prop.type = "integer";
-			} else if (rawType === "date") {
-				prop.type = "string";
-				prop.format = "date";
-			} else if (rawType === "datetime" || rawType === "date-time") {
-				prop.type = "string";
-				prop.format = "date-time";
-			} else if (rawType === "select" || rawType === "multiselect") {
-				prop.type = "object";
-				prop.properties = {
-					id: { title: "Internal identifier", type: "string" },
-					refName: { title: "Reference Name", type: "string" },
-				};
-			} else {
-				prop.type = "string";
-			}
 
 			properties[field.internalId] = prop;
 		}
 
-		if (!properties["id"]) {
-			properties["id"] = {
+		if (!properties.id) {
+			properties.id = {
 				title: "Internal ID",
 				type: "string",
 				description: "The internal ID for this record",
 				nullable: true,
 			};
 		}
-		if (!properties["externalId"]) {
-			properties["externalId"] = {
+		if (!properties.externalId) {
+			properties.externalId = {
 				title: "External ID",
 				type: "string",
 				description: "The external ID for this record",
@@ -509,14 +479,16 @@ export class NetSuiteMCPTools {
 	// Private helpers
 	// ---------------------------------------------------------------------------
 
-	private isRetryableError(error: any): boolean {
-		if (
-			error.code === "ECONNABORTED" ||
-			error.message?.includes("Network Error")
-		) {
+	private isRetryableError(error: unknown): boolean {
+		const err = error as {
+			code?: string;
+			message?: string;
+			response?: { status?: number };
+		};
+		if (err.code === "ECONNABORTED" || err.message?.includes("Network Error")) {
 			return true;
 		}
-		const status = error.response?.status;
+		const status = err.response?.status;
 		return status === 429 || status === 502 || status === 503 || status === 504;
 	}
 
@@ -532,10 +504,11 @@ export class NetSuiteMCPTools {
 					factor: 2,
 					jitter: true,
 				},
-				(error: any, attempt: number, delayMs: number) => {
+				(error: unknown, attempt: number, delayMs: number) => {
+					const msg = error instanceof Error ? error.message : String(error);
 					console.error(
 						`⚠️ [NetSuite Request Retry] Attempt ${attempt} failed. ` +
-							`Retrying in ${Math.round(delayMs)}ms... Error: ${error.message || error}`,
+							`Retrying in ${Math.round(delayMs)}ms... Error: ${msg}`,
 					);
 				},
 			);

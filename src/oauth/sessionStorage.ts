@@ -1,5 +1,5 @@
-import fs from "fs/promises";
-import path from "path";
+import fs from "node:fs/promises";
+import path from "node:path";
 
 export interface SessionData {
 	pkce?: string | null;
@@ -124,7 +124,7 @@ export class SessionStorage {
 	async isAuthenticated(): Promise<boolean> {
 		try {
 			const session = await this.load();
-			return !!(session && session.authenticated && session.tokens);
+			return !!(session?.authenticated && session.tokens);
 		} catch {
 			return false;
 		}
@@ -151,7 +151,7 @@ export class SessionStorage {
 			const heartbeatFile = path.join(this.storagePath, "session.heartbeat");
 			const content = await fs.readFile(heartbeatFile, "utf-8");
 			const lastBeat = parseInt(content.trim(), 10);
-			if (isNaN(lastBeat)) return false;
+			if (Number.isNaN(lastBeat)) return false;
 			return Date.now() - lastBeat < maxAgeMs;
 		} catch {
 			return false;

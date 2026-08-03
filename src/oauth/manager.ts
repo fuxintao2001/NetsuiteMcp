@@ -1,6 +1,6 @@
-import crypto from "crypto";
-import fs from "fs/promises";
-import path from "path";
+import crypto from "node:crypto";
+import fs from "node:fs/promises";
+import path from "node:path";
 import { openBrowser } from "../utils/browserLauncher.js";
 import { formatNetSuiteAccountHost } from "../utils/environment.js";
 import type { RedisLockProvider } from "../utils/redisLock.js";
@@ -8,8 +8,7 @@ import { TokenRefreshScheduler } from "../utils/resilience.js";
 import { CallbackServer } from "./callbackServer.js";
 import type { PKCEChallenge } from "./pkce.js";
 import { generatePKCE } from "./pkce.js";
-import type { TokenData } from "./sessionStorage.js";
-import { SessionStorage } from "./sessionStorage.js";
+import { type SessionData, SessionStorage } from "./sessionStorage.js";
 import {
 	exchangeCodeForTokens,
 	refreshAccessToken,
@@ -30,8 +29,9 @@ async function acquireLock(
 		try {
 			await fs.mkdir(lockPath);
 			return true;
-		} catch (err: any) {
-			if (err.code === "EEXIST") {
+		} catch (err: unknown) {
+			const nodeErr = err as { code?: string };
+			if (nodeErr.code === "EEXIST") {
 				// Check lock age to prevent deadlocks from crashed processes
 				try {
 					const stats = await fs.stat(lockPath);
@@ -157,7 +157,7 @@ export class OAuthManager {
 			const message = error instanceof Error ? error.message : String(error);
 			console.error(`❌ Authentication failed: ${message}\n`);
 			// Restore existing session if it had tokens, clearing PKCE/state
-			if (existingSession && existingSession.tokens) {
+			if (existingSession?.tokens) {
 				await this.storage.save(existingSession);
 			} else {
 				await this.storage.save(existingSession || {});
@@ -197,7 +197,7 @@ export class OAuthManager {
 	private async handleAuthorizationCode(code: string): Promise<void> {
 		const session = await this.storage.load();
 
-		if (!session || !session.pkce) {
+		if (!session?.pkce) {
 			throw new Error(
 				"Invalid session or PKCE challenge not found. Please try connecting again.",
 			);
@@ -224,14 +224,14 @@ export class OAuthManager {
 	}
 
 	private async executeTokenRefresh(
-		session: any,
+		session: SessionData,
 		tokenToRefresh: string,
 	): Promise<string> {
 		this.refreshPromise = (async () => {
 			const accountId =
 				session?.config?.accountId || session?.tokens?.accountId || "unknown";
 			const lockResource = `token_refresh:${accountId}`;
-			let lockId: any = null;
+			let lockId: unknown = null;
 			const lockPath = path.join(this.storage.getStoragePath(), "session.lock");
 			let fileLockAcquired = false;
 
@@ -257,7 +257,7 @@ export class OAuthManager {
 
 				// Reload session from disk after lock is acquired to check for concurrent updates
 				const currentSession = await this.storage.load();
-				if (currentSession && currentSession.tokens) {
+				if (currentSession?.tokens) {
 					const currentToken = currentSession.tokens.access_token;
 					// If the token has already been refreshed by another process, reuse it
 					if (
@@ -283,7 +283,14 @@ export class OAuthManager {
 					session = currentSession;
 				}
 
-				const oldRT = session.tokens?.refresh_token?.slice(-8) || "unknown";
+				if (!session.tokens) {
+					throw new TokenRefreshError(
+						"No tokens available to refresh in session",
+						false,
+					);
+				}
+
+				const oldRT = session.tokens.refresh_token?.slice(-8) || "unknown";
 				const newTokens = await refreshAccessToken(session.tokens);
 				const newRT = newTokens.refresh_token?.slice(-8) || "unchanged";
 				console.error(
@@ -349,7 +356,7 @@ export class OAuthManager {
 		this.refreshPromise = (async () => {
 			try {
 				const session = await this.storage.load();
-				if (!session || !session.tokens) {
+				if (!session?.tokens) {
 					throw new Error(
 						"Not authenticated. Please run authentication first.",
 					);
@@ -377,7 +384,7 @@ export class OAuthManager {
 	 */
 	async forceRefreshToken(failedToken?: string): Promise<string> {
 		const session = await this.storage.load();
-		if (!session || !session.tokens) {
+		if (!session?.tokens) {
 			throw new Error("Not authenticated. Please run authentication first.");
 		}
 
@@ -474,7 +481,7 @@ export class OAuthManager {
 
 		const lockPath = path.join(this.storage.getStoragePath(), "session.lock");
 		let lockAcquired = false;
-		let lockId: any = null;
+		let lockId: unknown = null;
 		const lockResource = `token_refresh:${session?.config?.accountId || session?.tokens?.accountId || "unknown"}`;
 
 		for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -501,11 +508,7 @@ export class OAuthManager {
 
 				// Reload session from disk after lock is acquired to check if another process recovered it
 				const currentSession = await this.storage.load();
-				if (
-					currentSession &&
-					currentSession.tokens &&
-					currentSession.authenticated
-				) {
+				if (currentSession?.tokens && currentSession.authenticated) {
 					if (!shouldRefreshToken(currentSession.tokens)) {
 						console.error(
 							"🔄 Session was already recovered by another process concurrently.",

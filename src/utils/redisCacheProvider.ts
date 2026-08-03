@@ -7,7 +7,7 @@ export class RedisCacheProvider implements CacheProvider {
 	private readonly redisUrl: string;
 	private readonly isMock: boolean = false;
 
-	constructor(redisUrl?: string, mockClient?: any) {
+	constructor(redisUrl?: string, mockClient?: Redis) {
 		this.redisUrl =
 			redisUrl || process.env.REDIS_URL || "redis://localhost:6379";
 		if (mockClient) {

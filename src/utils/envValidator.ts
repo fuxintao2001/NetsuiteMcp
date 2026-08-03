@@ -6,7 +6,8 @@ export const envSchema = z.object({
 		.optional()
 		.transform((val) => (val ? parseInt(val, 10) : undefined))
 		.refine(
-			(val) => val === undefined || (!isNaN(val) && val >= 1 && val <= 65535),
+			(val) =>
+				val === undefined || (!Number.isNaN(val) && val >= 1 && val <= 65535),
 			{
 				message: "PORT must be a number between 1 and 65535",
 			},
@@ -15,7 +16,7 @@ export const envSchema = z.object({
 		.string()
 		.optional()
 		.transform((val) => (val ? parseInt(val, 10) : 8080))
-		.refine((val) => !isNaN(val) && val >= 1 && val <= 65535, {
+		.refine((val) => !Number.isNaN(val) && val >= 1 && val <= 65535, {
 			message: "OAUTH_CALLBACK_PORT must be a number between 1 and 65535",
 		}),
 	NETSUITE_ACCOUNT_ID: z.string().optional(),

@@ -6,7 +6,7 @@ import Redlock from "redlock";
  * Provides distributed locking capabilities using Redis.
  */
 export class RedisLockProvider {
-	private redlock: any;
+	private redlock: unknown;
 	private readonly keyPrefix = "nsmcp:lock:";
 
 	/**
@@ -30,11 +30,19 @@ export class RedisLockProvider {
 	 * @param ttlMs Time to live for the lock in milliseconds (default: 10000ms).
 	 * @returns A promise that resolves to the lock object if successful, or null if the lock couldn't be acquired.
 	 */
-	async acquire(resource: string, ttlMs: number = 10000): Promise<any | null> {
+	async acquire(
+		resource: string,
+		ttlMs: number = 10000,
+	): Promise<unknown | null> {
 		const key = `${this.keyPrefix}${resource}`;
 		try {
-			return await this.redlock.acquire([key], ttlMs);
-		} catch (err) {
+			const lockObj = await (
+				this.redlock as {
+					acquire: (keys: string[], ttl: number) => Promise<unknown>;
+				}
+			).acquire([key], ttlMs);
+			return lockObj;
+		} catch (_err) {
 			// redlock throws an error if it fails to acquire the lock after retries
 			return null;
 		}
@@ -47,11 +55,12 @@ export class RedisLockProvider {
 	 * @param lock The lock object returned by acquire().
 	 * @returns A promise that resolves to true if the lock was successfully released, false otherwise.
 	 */
-	async release(resource: string, lock: any): Promise<boolean> {
+	async release(_resource: string, lock: unknown): Promise<boolean> {
+		if (!lock || typeof lock !== "object") return false;
 		try {
-			await lock.release();
+			await (lock as { release: () => Promise<void> }).release();
 			return true;
-		} catch (err) {
+		} catch (_err) {
 			return false;
 		}
 	}

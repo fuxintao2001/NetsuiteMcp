@@ -55,7 +55,7 @@ describe("Global Error Handlers", () => {
 		installGlobalErrorHandlers(mockProcess, mockLogger);
 
 		const error = new Error("Test Exception");
-		eventListeners["uncaughtException"](error);
+		eventListeners.uncaughtException(error);
 
 		expect(mockLogger.error).toHaveBeenCalledWith(
 			"[MCP] Uncaught Exception:",
@@ -68,7 +68,7 @@ describe("Global Error Handlers", () => {
 		installGlobalErrorHandlers(mockProcess, mockLogger);
 
 		const brokenStdioError = { code: "EPIPE" };
-		eventListeners["uncaughtException"](brokenStdioError);
+		eventListeners.uncaughtException(brokenStdioError);
 
 		expect(mockProcess.exitCode).toBe(0);
 		expect(mockLogger.error).not.toHaveBeenCalled();
@@ -78,10 +78,10 @@ describe("Global Error Handlers", () => {
 	it("should exit with 0 on SIGTERM or stdin close", () => {
 		installGlobalErrorHandlers(mockProcess, mockLogger);
 
-		eventListeners["SIGTERM"]();
+		eventListeners.SIGTERM();
 		expect(mockProcess.exit).toHaveBeenCalledWith(0);
 
-		stdinListeners["close"]();
+		stdinListeners.close();
 		expect(mockProcess.exit).toHaveBeenCalledWith(0);
 	});
 });

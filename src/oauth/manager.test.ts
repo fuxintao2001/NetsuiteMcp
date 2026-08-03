@@ -1,3 +1,5 @@
+import fs from "node:fs/promises";
+import path from "node:path";
 import {
 	afterEach,
 	beforeEach,
@@ -6,8 +8,6 @@ import {
 	it,
 	jest,
 } from "@jest/globals";
-import fs from "fs/promises";
-import path from "path";
 import { httpClient } from "../utils/httpClient.js";
 import { CallbackServer } from "./callbackServer.js";
 import { OAuthManager } from "./manager.js";
@@ -43,7 +43,7 @@ describe("OAuthManager Integration tests", () => {
 	describe("startAuthFlow", () => {
 		it("should orchestrate start, launch browser, and wait for callback", async () => {
 			startSpy.mockImplementation(
-				async (state: string, callback: (code: string) => Promise<void>) => {
+				async (_state: string, callback: (code: string) => Promise<void>) => {
 					// Execute callback
 					await callback("new-auth-code");
 				},

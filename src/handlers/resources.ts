@@ -1,6 +1,6 @@
+import fs from "node:fs/promises";
+import { basename, join } from "node:path";
 import type { Server } from "@modelcontextprotocol/server";
-import fs from "fs/promises";
-import { basename, join } from "path";
 import { getSkillsDir } from "../utils/environment.js";
 
 // ---------------------------------------------------------------------------
@@ -11,7 +11,7 @@ function parseFrontmatter(content: string): {
 	description?: string;
 } {
 	const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
-	if (!match || !match[1]) return {};
+	if (!match?.[1]) return {};
 	const frontmatterText = match[1];
 	const lines = frontmatterText.split("\n");
 	const result: { name?: string; description?: string } = {};
@@ -40,7 +40,7 @@ function parseFrontmatter(content: string): {
 			currentKey = null;
 		} else if (currentKey && line.startsWith(" ")) {
 			if (currentKey === "description" && result.description) {
-				result.description += " " + trimmed;
+				result.description += ` ${trimmed}`;
 			}
 		}
 	}

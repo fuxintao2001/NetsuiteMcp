@@ -14,6 +14,12 @@ import {
 } from "../utils/contextSlimmer.js";
 import { buildEnvSuffix, isSandboxAccount } from "../utils/environment.js";
 import { asyncJsonParse } from "../utils/json.js";
+import {
+	type JsonSchemaProperty,
+	mapFieldType,
+	sanitizeIntegerId,
+	unwrapMcpContent,
+} from "../utils/metadata.js";
 import { generateNetSuiteUrl } from "../utils/netsuiteUrls.js";
 import {
 	AUTH_TOOL,
@@ -431,13 +437,22 @@ async function handleStatus(oauthManager: OAuthManager): Promise<ToolResponse> {
 async function appendRecordLink(
 	responseText: string,
 	args: Record<string, unknown>,
-	result: any,
+	result: unknown,
 	oauthManager: OAuthManager,
 	resolveRectype: (type: string) => number | null | Promise<number | null>,
 ): Promise<string> {
+	const resObj =
+		typeof result === "object" && result !== null
+			? (result as Record<string, unknown>)
+			: null;
 	const recordId =
-		args.recordId || (result && (result.id || result.internalid));
-	const recordType = args.recordType || (result && result.recordType);
+		(args.recordId as string) ||
+		(resObj && (resObj.id || resObj.internalid)
+			? String(resObj.id || resObj.internalid)
+			: undefined);
+	const recordType =
+		(args.recordType as string) ||
+		(resObj?.recordType ? String(resObj.recordType) : undefined);
 
 	if (!recordId) return responseText;
 
@@ -639,8 +654,8 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
 			}
 
 			// --- Proxy to NetSuite MCP API ---
-			let result: any;
-			let executeError: any = null;
+			let result: unknown;
+			let executeError: unknown = null;
 
 			try {
 				result = await mcpTools.executeTool(name, safeArgs);
@@ -663,27 +678,22 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
 				const hydratedResult = await hydrateMetadataIfNeeded(
 					name,
 					recordTypeRaw,
-					result || null,
+					result ?? null,
 					mcpTools,
 					resolveCustomRecordRectype,
 				);
 
 				if (hydratedResult) {
-					let parsed: any = null;
-					if (Array.isArray(hydratedResult.content)) {
-						const first = hydratedResult.content[0];
-						if (first && first.text && typeof first.text === "string") {
-							try {
-								parsed = JSON.parse(first.text);
-							} catch {
-								/* ignore */
-							}
-						}
-					} else if (typeof hydratedResult === "object") {
-						parsed = hydratedResult;
-					}
+					const parsed = unwrapMcpContent(hydratedResult) as Record<
+						string,
+						unknown
+					> | null;
 
-					if (parsed && parsed.success === false) {
+					if (
+						parsed &&
+						typeof parsed === "object" &&
+						parsed.success === false
+					) {
 						const errorMsg =
 							parsed.error || parsed.message || JSON.stringify(parsed);
 						return textResult(`❌ NetSuite Error: ${errorMsg}`, true);
@@ -703,20 +713,16 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
 			}
 
 			// Check if the record tool call returned a NetSuite-level error
-			let parsedRecordResult: any = null;
-			if (result) {
-				if (typeof result === "string") {
-					try {
-						parsedRecordResult = JSON.parse(result);
-					} catch {
-						/* ignore */
-					}
-				} else if (typeof result === "object") {
-					parsedRecordResult = result;
-				}
-			}
+			const parsedRecordResult = unwrapMcpContent(result) as Record<
+				string,
+				unknown
+			> | null;
 
-			if (parsedRecordResult && parsedRecordResult.success === false) {
+			if (
+				parsedRecordResult &&
+				typeof parsedRecordResult === "object" &&
+				parsedRecordResult.success === false
+			) {
 				const errorMsg =
 					parsedRecordResult.error ||
 					parsedRecordResult.message ||
@@ -765,23 +771,25 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
 
 /** Hydrates NetSuite custom record metadata with custom fields from SuiteQL if needed. */
 async function hydrateMetadataIfNeeded(
-	toolName: string,
+	_toolName: string,
 	recordTypeRaw: unknown,
-	originalResult: any,
+	originalResult: unknown,
 	mcpTools: NetSuiteMCPTools,
 	resolveRectype: (type: string) => number | null | Promise<number | null>,
-): Promise<any> {
+): Promise<unknown> {
 	const recordType =
 		typeof recordTypeRaw === "string" ? recordTypeRaw.trim() : "";
-	if (!recordType || !recordType.toLowerCase().startsWith("customrecord")) {
+	if (!recordType?.toLowerCase().startsWith("customrecord")) {
 		return originalResult;
 	}
 
 	try {
-		const rectype = await resolveRectype(recordType);
-		if (!rectype) {
+		const rawRectype = await resolveRectype(recordType);
+		if (!rawRectype) {
 			return originalResult;
 		}
+
+		const rectype = sanitizeIntegerId(rawRectype);
 
 		console.error(
 			`🔍 Hydrating custom record metadata for ${recordType} (rectype: ${rectype})...`,
@@ -795,35 +803,7 @@ async function hydrateMetadataIfNeeded(
 			return originalResult;
 		}
 
-		const mapFieldType = (
-			fieldType: string | undefined,
-		): Record<string, any> => {
-			const type = (fieldType || "TEXT").toUpperCase();
-			if (type === "CHECKBOX" || type === "BOOLEAN") return { type: "boolean" };
-			if (type === "INTEGER") return { type: "integer" };
-			if (
-				type === "FLOAT" ||
-				type === "DOUBLE" ||
-				type === "CURRENCY" ||
-				type === "PERCENT"
-			) {
-				return { type: "number", format: "double" };
-			}
-			if (type === "DATE") return { type: "string", format: "date" };
-			if (type === "DATETIME") return { type: "string", format: "date-time" };
-			if (type === "SELECT" || type === "MULTISELECT" || type === "RECORD") {
-				return {
-					type: "object",
-					properties: {
-						id: { title: "Internal identifier", type: "string" },
-						refName: { title: "Reference Name", type: "string" },
-					},
-				};
-			}
-			return { type: "string" };
-		};
-
-		const properties: Record<string, any> = {
+		const properties: Record<string, JsonSchemaProperty> = {
 			id: { title: "Internal ID", type: "string", nullable: true },
 			name: { title: "Name", type: "string", nullable: true },
 			externalId: { title: "External ID", type: "string", nullable: true },
@@ -852,28 +832,26 @@ async function hydrateMetadataIfNeeded(
 			}
 		}
 
-		let originalProperties: Record<string, any> = {};
-		let parsedOriginal: any = null;
+		let originalProperties: Record<string, JsonSchemaProperty> = {};
+		const parsedOriginal = unwrapMcpContent(originalResult) as Record<
+			string,
+			unknown
+		> | null;
 
-		if (originalResult) {
-			if (Array.isArray(originalResult.content)) {
-				const first = originalResult.content[0];
-				if (first && first.text && typeof first.text === "string") {
-					try {
-						parsedOriginal = JSON.parse(first.text);
-					} catch {
-						/* ignore */
-					}
-				}
-			} else if (typeof originalResult === "object") {
-				parsedOriginal = originalResult;
-			}
-		}
-
-		if (parsedOriginal) {
-			const meta = parsedOriginal.metadata || parsedOriginal;
-			if (meta && typeof meta.properties === "object") {
-				originalProperties = meta.properties;
+		if (parsedOriginal && typeof parsedOriginal === "object") {
+			const meta = (parsedOriginal.metadata || parsedOriginal) as Record<
+				string,
+				unknown
+			>;
+			if (
+				meta &&
+				typeof meta.properties === "object" &&
+				meta.properties !== null
+			) {
+				originalProperties = meta.properties as Record<
+					string,
+					JsonSchemaProperty
+				>;
 			}
 		}
 

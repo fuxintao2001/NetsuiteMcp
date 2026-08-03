@@ -1,3 +1,5 @@
+import fs from "node:fs/promises";
+import path from "node:path";
 import {
 	afterEach,
 	beforeEach,
@@ -6,8 +8,6 @@ import {
 	it,
 	jest,
 } from "@jest/globals";
-import fs from "fs/promises";
-import path from "path";
 import { registerResourceHandlers } from "./resources.js";
 import { registerToolHandlers } from "./tools.js";
 
@@ -130,7 +130,7 @@ describe("MCP Handler Wires", () => {
 			mockOAuthManager.getAccountId.mockResolvedValue("9260916_SB3");
 			const listFn = registeredHandlers.get("tools/list");
 
-			const result = await listFn!();
+			const result = await listFn?.();
 			const names = result.tools.map((t: any) => t.name);
 
 			expect(names).toContain("ns_createRecord");
@@ -143,7 +143,7 @@ describe("MCP Handler Wires", () => {
 			mockOAuthManager.getAccountId.mockResolvedValue("123456");
 			const listFn = registeredHandlers.get("tools/list");
 
-			const result = await listFn!();
+			const result = await listFn?.();
 			const names = result.tools.map((t: any) => t.name);
 
 			expect(names).not.toContain("ns_createRecord");
@@ -155,7 +155,7 @@ describe("MCP Handler Wires", () => {
 			mockOAuthManager.hasValidSession.mockResolvedValue(false);
 			const listFn = registeredHandlers.get("tools/list");
 
-			const result = await listFn!();
+			const result = await listFn?.();
 			const names = result.tools.map((t: any) => t.name);
 
 			expect(names).toEqual([
@@ -168,7 +168,7 @@ describe("MCP Handler Wires", () => {
 		it("should delegate tool execution to mcpTools.executeTool", async () => {
 			const callFn = registeredHandlers.get("tools/call");
 
-			const res = await callFn!({
+			const res = await callFn?.({
 				params: {
 					name: "ns_getRecord",
 					arguments: { recordType: "customer", id: "101" },
@@ -185,7 +185,7 @@ describe("MCP Handler Wires", () => {
 		it("should resolve custom record string rectype in ns_runCustomSuiteQL", async () => {
 			const callFn = registeredHandlers.get("tools/call");
 
-			await callFn!({
+			await callFn?.({
 				params: {
 					name: "ns_runCustomSuiteQL",
 					arguments: {
@@ -217,7 +217,7 @@ describe("MCP Handler Wires", () => {
 		it("should throw error when custom record rectype cannot be resolved", async () => {
 			const callFn = registeredHandlers.get("tools/call");
 
-			const res = await callFn!({
+			const res = await callFn?.({
 				params: {
 					name: "ns_runCustomSuiteQL",
 					arguments: {
@@ -239,7 +239,7 @@ describe("MCP Handler Wires", () => {
 		it("should handle local authentication tool call", async () => {
 			const callFn = registeredHandlers.get("tools/call");
 
-			const res = await callFn!({
+			const res = await callFn?.({
 				params: {
 					name: "netsuite_authenticate",
 					arguments: {},
@@ -253,7 +253,7 @@ describe("MCP Handler Wires", () => {
 		it("should handle local logout tool call", async () => {
 			const callFn = registeredHandlers.get("tools/call");
 
-			const res = await callFn!({
+			const res = await callFn?.({
 				params: {
 					name: "netsuite_logout",
 					arguments: {},
@@ -267,7 +267,7 @@ describe("MCP Handler Wires", () => {
 		it("should handle local status tool call", async () => {
 			const callFn = registeredHandlers.get("tools/call");
 
-			const res = await callFn!({
+			const res = await callFn?.({
 				params: {
 					name: "netsuite_status",
 					arguments: {},
@@ -285,7 +285,7 @@ describe("MCP Handler Wires", () => {
 					.mockResolvedValueOnce({ id: "1", name: "Cust 1" })
 					.mockRejectedValueOnce(new Error("Record not found"));
 
-				const res = await callFn!({
+				const res = await callFn?.({
 					params: {
 						name: "netsuite_batch_execute",
 						arguments: {
@@ -315,7 +315,7 @@ describe("MCP Handler Wires", () => {
 				mockOAuthManager.getAccountId.mockResolvedValue("123456");
 				const callFn = registeredHandlers.get("tools/call");
 
-				const res = await callFn!({
+				const res = await callFn?.({
 					params: {
 						name: "netsuite_batch_execute",
 						arguments: {
@@ -343,7 +343,7 @@ describe("MCP Handler Wires", () => {
 					arguments: {},
 				}));
 
-				const res = await callFn!({
+				const res = await callFn?.({
 					params: {
 						name: "netsuite_batch_execute",
 						arguments: { tasks },
@@ -368,7 +368,7 @@ describe("MCP Handler Wires", () => {
 
 		it("should read the suiteql guide file content successfully", async () => {
 			const readFn = registeredHandlers.get("resources/read");
-			const res = await readFn!({
+			const res = await readFn?.({
 				params: { uri: "netsuite://guides/suiteql" },
 			});
 

@@ -52,7 +52,7 @@ export class NoopCacheProvider implements CacheProvider {
 	async get<T>(): Promise<T | null> {
 		return null;
 	}
-	async set<T>(): Promise<void> {}
+	async set<_T>(): Promise<void> {}
 	async delete(): Promise<void> {}
 	async clearAccountCache(): Promise<void> {}
 	async getStats(): Promise<CacheStats> {
