@@ -107,8 +107,10 @@ export class OAuthManager {
 	/**
 	 * Start OAuth flow with local callback server
 	 */
-	async startAuthFlow(config: AuthFlowConfig): Promise<string> {
-		const { accountId, clientId } = config;
+	async startAuthFlow(config: Partial<AuthFlowConfig> = {}): Promise<string> {
+		const existingSession = await this.storage.load();
+		const accountId = config.accountId || existingSession?.config?.accountId;
+		const clientId = config.clientId || existingSession?.config?.clientId;
 
 		if (!accountId || !clientId) {
 			throw new Error("accountId and clientId are required");
@@ -119,7 +121,6 @@ export class OAuthManager {
 		const redirectUri = `http://localhost:${this.callbackPort}/callback`;
 
 		// Preserve existing tokens and authenticated state — don't destroy a recoverable session
-		const existingSession = await this.storage.load();
 		await this.storage.save({
 			...existingSession,
 			pkce: pkce.code_verifier,
