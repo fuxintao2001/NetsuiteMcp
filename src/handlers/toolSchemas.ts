@@ -123,6 +123,59 @@ export const BATCH_EXECUTE_TOOL = {
 	},
 };
 
+export const SCRIPT_LOGS_TOOL = {
+	name: "netsuite_get_script_logs",
+	description:
+		"Query NetSuite Script Execution Logs (ScriptNote table). Returns structured log entries with optional filtering by script, log level, date range, title/detail keywords, and deployment. Logs are retained for ~30 days by NetSuite.",
+	inputSchema: {
+		type: "object" as const,
+		properties: {
+			scriptId: {
+				type: "string",
+				description:
+					"Filter by script's Script ID (e.g. customscript_my_ue). Matches against Script.scriptid.",
+			},
+			type: {
+				type: "string",
+				description:
+					"Filter by log level: DEBUG, AUDIT, ERROR, or EMERGENCY.",
+				enum: ["DEBUG", "AUDIT", "ERROR", "EMERGENCY"],
+			},
+			dateFrom: {
+				type: "string",
+				description:
+					"Start date filter in YYYY-MM-DD format (inclusive).",
+			},
+			dateTo: {
+				type: "string",
+				description:
+					"End date filter in YYYY-MM-DD format (inclusive).",
+			},
+			title: {
+				type: "string",
+				description:
+					"Filter by log title keyword (LIKE fuzzy match).",
+			},
+			detail: {
+				type: "string",
+				description:
+					"Filter by log detail/message keyword (LIKE fuzzy match).",
+			},
+			deploymentId: {
+				type: "string",
+				description:
+					"Filter by deployment Script ID (e.g. customdeploy_my_ue). Matches against ScriptDeployment.scriptid.",
+			},
+			limit: {
+				type: "integer",
+				description:
+					"Maximum number of log entries to return. Default: 50, Max: 200.",
+			},
+		},
+		required: [],
+	},
+};
+
 /** All locally-handled tools (excluding AUTH_TOOL which has special routing). */
 export const LOCAL_TOOLS = [
 	RECORD_LINK_TOOL,
@@ -130,6 +183,7 @@ export const LOCAL_TOOLS = [
 	LOGOUT_TOOL,
 	STATUS_TOOL,
 	BATCH_EXECUTE_TOOL,
+	SCRIPT_LOGS_TOOL,
 ];
 
 // ---------------------------------------------------------------------------

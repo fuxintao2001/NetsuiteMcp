@@ -57,6 +57,7 @@ When fulfilling a user request, select tools in this priority order:
 |:---|:---|
 | `ns_runCustomSuiteQL` | Execute SuiteQL query |
 | `ns_getSuiteQLMetadata` | Get table schema — **MUST call before any query** |
+| `netsuite_get_script_logs` | Query script execution logs (ScriptNote table) with optional filters |
 
 ### Record Tools
 
@@ -122,7 +123,7 @@ When fulfilling a user request, select tools in this priority order:
 
 ### Supplementary Rules (not covered in tool descriptions)
 
-- **Script Execution Logs:** Query the `ScriptNote` table for script logs (see `netsuite://guides/suiteql` §7 for patterns).
+- **Script Execution Logs:** Prefer `netsuite_get_script_logs` for convenient filtering. Alternatively, query the `ScriptNote` table directly via SuiteQL (see `netsuite://guides/suiteql` §7 for patterns).
 - **Native Pagination:** For high-volume result sets, prefer `pageSize` + `pageIndex` API parameters over SQL-level `ROWNUM` pagination. This enables efficient iteration through large datasets.
 - **Amount Fields:** `transamount` = local currency, `foreignamount` = foreign currency. Clarify which one the user needs.
 - **Status Fields:** Always use `BUILTIN.DF(status)` to get human-readable display names instead of raw encoded values.

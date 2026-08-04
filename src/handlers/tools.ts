@@ -259,6 +259,127 @@ async function handleGetParallelMetadata(
 	);
 }
 
+async function handleGetScriptLogs(
+	args: Record<string, unknown>,
+	mcpTools: NetSuiteMCPTools,
+): Promise<ToolResponse> {
+	const scriptId = args.scriptId as string | undefined;
+	const logType = args.type as string | undefined;
+	const dateFrom = args.dateFrom as string | undefined;
+	const dateTo = args.dateTo as string | undefined;
+	const title = args.title as string | undefined;
+	const detail = args.detail as string | undefined;
+	const deploymentId = args.deploymentId as string | undefined;
+	const rawLimit = args.limit as number | undefined;
+	const limit = Math.min(Math.max(rawLimit || 50, 1), 200);
+
+	// Validate date formats if provided
+	const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+	if (dateFrom && !dateRegex.test(dateFrom)) {
+		return textResult(
+			"❌ Invalid dateFrom format. Use YYYY-MM-DD.",
+			true,
+		);
+	}
+	if (dateTo && !dateRegex.test(dateTo)) {
+		return textResult(
+			"❌ Invalid dateTo format. Use YYYY-MM-DD.",
+			true,
+		);
+	}
+
+	// Validate log type if provided
+	const validTypes = ["DEBUG", "AUDIT", "ERROR", "EMERGENCY"];
+	if (logType && !validTypes.includes(logType.toUpperCase())) {
+		return textResult(
+			`❌ Invalid log type '${logType}'. Must be one of: ${validTypes.join(", ")}.`,
+			true,
+		);
+	}
+
+	// Determine if we need JOINs
+	const needsScriptJoin = !!scriptId;
+	const needsDeploymentJoin = !!deploymentId;
+
+	// Build SELECT
+	let sql = `SELECT sn.date, sn.type, sn.title, sn.detail`;
+	if (needsScriptJoin) {
+		sql += `, s.scriptid AS scriptScriptId, s.name AS scriptName`;
+	} else {
+		sql += `, BUILTIN.DF(sn.scripttype) AS scriptName`;
+	}
+	if (needsDeploymentJoin) {
+		sql += `, sd.scriptid AS deploymentScriptId, sd.title AS deploymentTitle`;
+	}
+
+	// Build FROM with JOINs
+	sql += ` FROM ScriptNote AS sn`;
+	if (needsScriptJoin) {
+		sql += ` INNER JOIN Script AS s ON sn.scripttype = s.id`;
+	}
+	if (needsDeploymentJoin) {
+		sql += ` INNER JOIN ScriptDeployment AS sd ON sn.scripttype = sd.script`;
+	}
+
+	// Build WHERE clauses
+	const conditions: string[] = [];
+
+	if (scriptId) {
+		const escapedScriptId = scriptId.replace(/'/g, "''");
+		conditions.push(`s.scriptid = '${escapedScriptId}'`);
+	}
+	if (logType) {
+		conditions.push(`sn.type = '${logType.toUpperCase()}'`);
+	}
+	if (dateFrom) {
+		conditions.push(`sn.date >= TO_DATE('${dateFrom}', 'YYYY-MM-DD')`);
+	}
+	if (dateTo) {
+		conditions.push(`sn.date <= TO_DATE('${dateTo}', 'YYYY-MM-DD')`);
+	}
+	if (title) {
+		const escapedTitle = title.replace(/'/g, "''").replace(/%/g, "\\%");
+		conditions.push(`sn.title LIKE '%${escapedTitle}%'`);
+	}
+	if (detail) {
+		const escapedDetail = detail.replace(/'/g, "''").replace(/%/g, "\\%");
+		conditions.push(`sn.detail LIKE '%${escapedDetail}%'`);
+	}
+	if (deploymentId) {
+		const escapedDeploymentId = deploymentId.replace(/'/g, "''");
+		conditions.push(`sd.scriptid = '${escapedDeploymentId}'`);
+	}
+
+	if (conditions.length > 0) {
+		sql += ` WHERE ${conditions.join(" AND ")}`;
+	}
+
+	sql += ` ORDER BY sn.date DESC FETCH FIRST ${limit} ROWS ONLY`;
+
+	try {
+		const result = await mcpTools.executeTool("ns_runCustomSuiteQL", {
+			sqlQuery: sql,
+		});
+
+		const data = mcpTools.extractDataArray(result);
+
+		return textResult(
+			JSON.stringify(
+				{
+					totalResults: data.length,
+					query: sql,
+					data,
+				},
+				null,
+				2,
+			),
+		);
+	} catch (err: unknown) {
+		const msg = err instanceof Error ? err.message : String(err);
+		return textResult(`❌ Failed to query script logs: ${msg}`, true);
+	}
+}
+
 interface BatchTask {
 	toolName: string;
 	arguments?: Record<string, unknown>;
@@ -640,6 +761,9 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
 			}
 			if (name === "netsuite_batch_execute") {
 				return await handleBatchExecute(safeArgs, deps);
+			}
+			if (name === "netsuite_get_script_logs") {
+				return await handleGetScriptLogs(safeArgs, mcpTools);
 			}
 
 			// --- Block write operations in production ---

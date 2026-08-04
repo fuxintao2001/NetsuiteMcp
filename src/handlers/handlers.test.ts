@@ -354,6 +354,141 @@ describe("MCP Handler Wires", () => {
 				expect(res.content[0].text).toContain("maximum limit of 10");
 			});
 		});
+
+		describe("netsuite_get_script_logs tool", () => {
+			it("should generate default query with no filters", async () => {
+				const callFn = registeredHandlers.get("tools/call");
+
+				mockMCPTools.executeTool.mockResolvedValueOnce({
+					data: [
+						{
+							date: "2026-08-01",
+							type: "ERROR",
+							title: "Test Error",
+							detail: "Something failed",
+						},
+					],
+				});
+
+				const res = await callFn?.({
+					params: {
+						name: "netsuite_get_script_logs",
+						arguments: {},
+					},
+				});
+
+				expect(mockMCPTools.executeTool).toHaveBeenCalledWith(
+					"ns_runCustomSuiteQL",
+					expect.objectContaining({
+						sqlQuery: expect.stringContaining("FROM ScriptNote AS sn"),
+					}),
+				);
+
+				const parsed = JSON.parse(res.content[0].text);
+				expect(parsed.totalResults).toBe(1);
+				expect(parsed.data[0].type).toBe("ERROR");
+				// Default limit should be 50
+				expect(parsed.query).toContain("FETCH FIRST 50 ROWS ONLY");
+				// No WHERE clause when no filters
+				expect(parsed.query).not.toContain("WHERE");
+			});
+
+			it("should generate query with all filters applied", async () => {
+				const callFn = registeredHandlers.get("tools/call");
+
+				mockMCPTools.executeTool.mockResolvedValueOnce({ data: [] });
+
+				await callFn?.({
+					params: {
+						name: "netsuite_get_script_logs",
+						arguments: {
+							scriptId: "customscript_my_ue",
+							type: "ERROR",
+							dateFrom: "2026-07-01",
+							dateTo: "2026-07-31",
+							title: "timeout",
+							detail: "exceeded",
+							deploymentId: "customdeploy_my_ue",
+							limit: 100,
+						},
+					},
+				});
+
+				const sqlArg = mockMCPTools.executeTool.mock.calls[0][1].sqlQuery as string;
+				expect(sqlArg).toContain("INNER JOIN Script AS s ON sn.scripttype = s.id");
+				expect(sqlArg).toContain("INNER JOIN ScriptDeployment AS sd ON sn.scripttype = sd.script");
+				expect(sqlArg).toContain("s.scriptid = 'customscript_my_ue'");
+				expect(sqlArg).toContain("sn.type = 'ERROR'");
+				expect(sqlArg).toContain("TO_DATE('2026-07-01', 'YYYY-MM-DD')");
+				expect(sqlArg).toContain("TO_DATE('2026-07-31', 'YYYY-MM-DD')");
+				expect(sqlArg).toContain("sn.title LIKE '%timeout%'");
+				expect(sqlArg).toContain("sn.detail LIKE '%exceeded%'");
+				expect(sqlArg).toContain("sd.scriptid = 'customdeploy_my_ue'");
+				expect(sqlArg).toContain("FETCH FIRST 100 ROWS ONLY");
+			});
+
+			it("should reject invalid date format", async () => {
+				const callFn = registeredHandlers.get("tools/call");
+
+				const res = await callFn?.({
+					params: {
+						name: "netsuite_get_script_logs",
+						arguments: { dateFrom: "01-07-2026" },
+					},
+				});
+
+				expect(res.isError).toBe(true);
+				expect(res.content[0].text).toContain("Invalid dateFrom format");
+			});
+
+			it("should reject invalid log type", async () => {
+				const callFn = registeredHandlers.get("tools/call");
+
+				const res = await callFn?.({
+					params: {
+						name: "netsuite_get_script_logs",
+						arguments: { type: "WARN" },
+					},
+				});
+
+				expect(res.isError).toBe(true);
+				expect(res.content[0].text).toContain("Invalid log type");
+			});
+
+			it("should cap limit at 200", async () => {
+				const callFn = registeredHandlers.get("tools/call");
+
+				mockMCPTools.executeTool.mockResolvedValueOnce({ data: [] });
+
+				const res = await callFn?.({
+					params: {
+						name: "netsuite_get_script_logs",
+						arguments: { limit: 500 },
+					},
+				});
+
+				const parsed = JSON.parse(res.content[0].text);
+				expect(parsed.query).toContain("FETCH FIRST 200 ROWS ONLY");
+			});
+
+			it("should return error when SuiteQL execution fails", async () => {
+				const callFn = registeredHandlers.get("tools/call");
+
+				mockMCPTools.executeTool.mockRejectedValueOnce(
+					new Error("SuiteQL query failed: invalid table"),
+				);
+
+				const res = await callFn?.({
+					params: {
+						name: "netsuite_get_script_logs",
+						arguments: {},
+					},
+				});
+
+				expect(res.isError).toBe(true);
+				expect(res.content[0].text).toContain("Failed to query script logs");
+			});
+		});
 	});
 
 	describe("Resources Handler Wiring", () => {
