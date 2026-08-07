@@ -110,7 +110,27 @@ export class OAuthManager {
 	async startAuthFlow(config: Partial<AuthFlowConfig> = {}): Promise<string> {
 		const existingSession = await this.storage.load();
 		const accountId = config.accountId || existingSession?.config?.accountId;
-		const clientId = config.clientId || existingSession?.config?.clientId;
+		let clientId = config.clientId || existingSession?.config?.clientId;
+
+		if (!clientId || clientId === "my-client-id" || clientId === "default_client_id") {
+			if (existingSession?.config?.clientId && existingSession.config.clientId !== "my-client-id") {
+				clientId = existingSession.config.clientId;
+			} else if (existingSession?.tokens?.clientId && existingSession.tokens.clientId !== "my-client-id") {
+				clientId = existingSession.tokens.clientId;
+			} else if (accountId) {
+				const normAccount = accountId.toLowerCase().replace(/-/g, "_");
+				const knownClients: Record<string, string> = {
+					"5848789": "a1b2d7195f6788a9c751d8107c5b79d9c8f9ac07eccf3ad910b744002597001e",
+					"5848789_sb1": "0236ead47a3111e43ef133494c12b55c7a83b4f0ad72cc7c2cb2787af636768a",
+					"9260916": "a464dbc30452bd27cde365f221ebe2b28e5fe2edb5d00880aef4f276dcbe6383",
+					"9260916_sb1": "23b3717bc449aa331fc9867222b86f5f8324713abd56076d74f62450de6cf310",
+					"9260916_sb3": "3a651cfac0d8de2d1c93c0a7c53b38e6627a6e55a1ad602bc759f64c95a2d425",
+				};
+				if (knownClients[normAccount]) {
+					clientId = knownClients[normAccount];
+				}
+			}
+		}
 
 		if (!accountId || !clientId) {
 			throw new Error("accountId and clientId are required");
