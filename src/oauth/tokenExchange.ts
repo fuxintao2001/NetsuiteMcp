@@ -44,12 +44,23 @@ function isRetryableTokenError(error: unknown): boolean {
 		message?: string;
 		response?: { status?: number };
 	};
-	if (err.code === "ECONNABORTED" || err.message?.includes("Network Error")) {
+
+	// ONLY retry if we are 100% certain the request never reached NetSuite
+	// (to prevent Token Rotation Mismatches & Replay Attack revocation)
+	const safeNetworkCodes = [
+		"ENOTFOUND",
+		"ECONNREFUSED",
+		"ENETUNREACH",
+		"EAI_AGAIN",
+	];
+	if (err.code && safeNetworkCodes.includes(err.code)) {
 		return true;
 	}
 
 	const status = err.response?.status;
-	return status === 429 || status === 502 || status === 503 || status === 504;
+	// 429 Too Many Requests: rejected safely before processing
+	// 503 Service Unavailable: rejected by NetSuite's edge/load balancer
+	return status === 429 || status === 503;
 }
 
 async function postTokenRequest(

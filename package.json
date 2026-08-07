@@ -15,6 +15,7 @@
     "build": "rimraf dist && tsc",
     "fetch-skills": "node scripts/fetch-skills.js",
     "sync-agents": "node scripts/sync-agents.js",
+    "auth:all": "tsx scripts/bulk-auth.ts",
     "daemon:install": "node scripts/daemon.js install",
     "daemon:uninstall": "node scripts/daemon.js uninstall",
     "daemon:status": "node scripts/daemon.js status",

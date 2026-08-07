@@ -224,32 +224,36 @@ async function refreshTokens(
 
 			const errorMsg = `HTTP ${res.status}: ${res.data}`;
 			if (res.status === 400 || res.status === 401) {
-				// If we just suffered a network/TLS socket disconnect on attempt 1, and on attempt 2 we get HTTP 400,
-				// it means NetSuite likely processed the rotation during the dropped socket.
-				if (lastTransientError) {
-					throw new Error(
-						`Unrecoverable (post-network-drop rotation mismatch): ${errorMsg} (Prior network error: ${lastTransientError})`,
-					);
-				}
 				throw new Error(`Unrecoverable error refreshing tokens: ${errorMsg}`);
 			}
 
-			if (attempt < maxAttempts) {
-				const delay = Math.min(3000 * 2 ** (attempt - 1), 20000);
-				logWarn(
-					`Transient refresh error (${errorMsg}). Retrying in ${delay / 1000}s...`,
-				);
-				await new Promise((resolve) => setTimeout(resolve, delay));
-				continue;
+			// ONLY retry on safe HTTP statuses (rejected before processing)
+			if (res.status === 429 || res.status === 503) {
+				if (attempt < maxAttempts) {
+					const delay = Math.min(3000 * 2 ** (attempt - 1), 20000);
+					logWarn(
+						`Transient refresh error (${errorMsg}). Retrying in ${delay / 1000}s...`,
+					);
+					await new Promise((resolve) => setTimeout(resolve, delay));
+					continue;
+				}
 			}
 			throw new Error(`Failed after ${maxAttempts} attempts: ${errorMsg}`);
 		} catch (err: unknown) {
 			const message = err instanceof Error ? err.message : String(err);
-			if (attempt < maxAttempts && !message.includes("Unrecoverable")) {
+			
+			// ONLY retry on safe, pre-flight errors where we know the request didn't reach NetSuite
+			const isSafeNetworkError =
+				message.includes("ENOTFOUND") ||
+				message.includes("ECONNREFUSED") ||
+				message.includes("ENETUNREACH") ||
+				message.includes("EAI_AGAIN");
+
+			if (attempt < maxAttempts && !message.includes("Unrecoverable") && isSafeNetworkError) {
 				lastTransientError = message;
 				const delay = Math.min(3000 * 2 ** (attempt - 1), 20000);
 				logWarn(
-					`Transient refresh exception (${message}). Retrying in ${delay / 1000}s...`,
+					`Safe pre-flight network exception (${message}). Retrying in ${delay / 1000}s...`,
 				);
 				await new Promise((resolve) => setTimeout(resolve, delay));
 				continue;
@@ -278,9 +282,10 @@ export async function runKeepAlive(): Promise<void> {
 			);
 			await new Promise((resolve) => setTimeout(resolve, 10000));
 			if (!(await checkNetworkReadiness())) {
-				logWarn(
-					"Network still unreachable after wait. Proceeding with scan with resilient backoff...",
+				logError(
+					"Network still unreachable after wait. Aborting keepalive scan to prevent token rotation mismatches.",
 				);
+				return;
 			} else {
 				logSuccess("Network stabilized!");
 			}
