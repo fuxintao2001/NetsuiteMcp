@@ -99,6 +99,12 @@ export class TokenRefreshScheduler {
 			const wasSleeping = elapsed > this.intervalMs * 3;
 			this.lastTickTime = now;
 
+			if (wasSleeping) {
+				console.error(
+					`⏰ [TokenRefreshScheduler] System woke from sleep (elapsed ${Math.round(elapsed / 1000)}s)`,
+				);
+			}
+
 			const hasSession = await this.target.hasValidSession();
 
 			if (!hasSession) {

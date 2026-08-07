@@ -7,7 +7,9 @@ import {
 describe("suiteqlGuard", () => {
 	describe("validateSuiteQL", () => {
 		it("should validate a simple valid SELECT query", () => {
-			const res = validateSuiteQL("SELECT id, name FROM customer WHERE isinactive = 'F'");
+			const res = validateSuiteQL(
+				"SELECT id, name FROM customer WHERE isinactive = 'F'",
+			);
 			expect(res.valid).toBe(true);
 			expect(res.reason).toBeUndefined();
 		});
@@ -33,25 +35,35 @@ describe("suiteqlGuard", () => {
 		it("should reject non-SELECT / non-WITH query statements", () => {
 			const res = validateSuiteQL("SHOW TABLES");
 			expect(res.valid).toBe(false);
-			expect(res.reason).toContain("must begin with a SELECT or WITH statement");
+			expect(res.reason).toContain(
+				"must begin with a SELECT or WITH statement",
+			);
 		});
 
 		it("should reject DDL/DML mutation keywords like DELETE", () => {
 			const res = validateSuiteQL("DELETE FROM customer WHERE id = 1");
 			expect(res.valid).toBe(false);
-			expect(res.reason).toContain("must begin with a SELECT or WITH statement");
+			expect(res.reason).toContain(
+				"must begin with a SELECT or WITH statement",
+			);
 		});
 
 		it("should reject DROP queries", () => {
 			const res = validateSuiteQL("DROP TABLE customer");
 			expect(res.valid).toBe(false);
-			expect(res.reason).toContain("must begin with a SELECT or WITH statement");
+			expect(res.reason).toContain(
+				"must begin with a SELECT or WITH statement",
+			);
 		});
 
 		it("should reject UPDATE queries embedded after SELECT", () => {
-			const res = validateSuiteQL("SELECT id FROM customer WHERE id = 1 UPDATE customer SET name = 'bad'");
+			const res = validateSuiteQL(
+				"SELECT id FROM customer WHERE id = 1 UPDATE customer SET name = 'bad'",
+			);
 			expect(res.valid).toBe(false);
-			expect(res.reason).toContain("disallowed mutation or DDL keyword: 'UPDATE'");
+			expect(res.reason).toContain(
+				"disallowed mutation or DDL keyword: 'UPDATE'",
+			);
 		});
 
 		it("should reject queries with comments (--)", () => {
@@ -67,9 +79,13 @@ describe("suiteqlGuard", () => {
 		});
 
 		it("should reject multi-statement injection with semicolons", () => {
-			const res = validateSuiteQL("SELECT id FROM customer; SELECT id FROM item;");
+			const res = validateSuiteQL(
+				"SELECT id FROM customer; SELECT id FROM item;",
+			);
 			expect(res.valid).toBe(false);
-			expect(res.reason).toContain("multiple statements separated by semicolons");
+			expect(res.reason).toContain(
+				"multiple statements separated by semicolons",
+			);
 		});
 	});
 
@@ -81,9 +97,9 @@ describe("suiteqlGuard", () => {
 		});
 
 		it("should throw SuiteQLValidationError on invalid query", () => {
-			expect(() =>
-				assertValidSuiteQL("DROP TABLE item"),
-			).toThrow(SuiteQLValidationError);
+			expect(() => assertValidSuiteQL("DROP TABLE item")).toThrow(
+				SuiteQLValidationError,
+			);
 		});
 	});
 });

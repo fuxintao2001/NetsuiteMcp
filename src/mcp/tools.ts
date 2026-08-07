@@ -21,12 +21,13 @@ function extractTableNames(sqlQuery: string): string[] {
 	const normalized = sqlQuery.toLowerCase();
 	const tables = new Set<string>();
 	const regex = /\b(?:from|join)\s+([a-zA-Z0-9_-]+)\b/g;
-	let match;
-	while ((match = regex.exec(normalized)) !== null) {
+	let match = regex.exec(normalized);
+	while (match !== null) {
 		const tableName = match[1];
 		if (tableName !== undefined) {
 			tables.add(tableName);
 		}
+		match = regex.exec(normalized);
 	}
 	return Array.from(tables);
 }

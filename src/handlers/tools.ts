@@ -276,16 +276,10 @@ async function handleGetScriptLogs(
 	// Validate date formats if provided
 	const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
 	if (dateFrom && !dateRegex.test(dateFrom)) {
-		return textResult(
-			"❌ Invalid dateFrom format. Use YYYY-MM-DD.",
-			true,
-		);
+		return textResult("❌ Invalid dateFrom format. Use YYYY-MM-DD.", true);
 	}
 	if (dateTo && !dateRegex.test(dateTo)) {
-		return textResult(
-			"❌ Invalid dateTo format. Use YYYY-MM-DD.",
-			true,
-		);
+		return textResult("❌ Invalid dateTo format. Use YYYY-MM-DD.", true);
 	}
 
 	// Validate log type if provided

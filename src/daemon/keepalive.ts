@@ -205,7 +205,6 @@ async function refreshTokens(
 	// Retry up to 4 times with exponential backoff on transient errors
 	let attempt = 0;
 	const maxAttempts = 4;
-	let lastTransientError: string | null = null;
 
 	while (true) {
 		attempt++;
@@ -241,7 +240,7 @@ async function refreshTokens(
 			throw new Error(`Failed after ${maxAttempts} attempts: ${errorMsg}`);
 		} catch (err: unknown) {
 			const message = err instanceof Error ? err.message : String(err);
-			
+
 			// ONLY retry on safe, pre-flight errors where we know the request didn't reach NetSuite
 			const isSafeNetworkError =
 				message.includes("ENOTFOUND") ||
@@ -249,8 +248,11 @@ async function refreshTokens(
 				message.includes("ENETUNREACH") ||
 				message.includes("EAI_AGAIN");
 
-			if (attempt < maxAttempts && !message.includes("Unrecoverable") && isSafeNetworkError) {
-				lastTransientError = message;
+			if (
+				attempt < maxAttempts &&
+				!message.includes("Unrecoverable") &&
+				isSafeNetworkError
+			) {
 				const delay = Math.min(3000 * 2 ** (attempt - 1), 20000);
 				logWarn(
 					`Safe pre-flight network exception (${message}). Retrying in ${delay / 1000}s...`,
@@ -451,12 +453,14 @@ export async function runKeepAlive(): Promise<void> {
 						currentTokens.refresh_token,
 					);
 
+					const expiresInSeconds = newTokens.expires_in ?? 3600;
 					const updatedTokens: TokenData = {
 						...currentTokens,
-						access_token: newTokens.access_token!,
-						refresh_token: newTokens.refresh_token!,
-						expires_in: newTokens.expires_in!,
-						expires_at: Date.now() + newTokens.expires_in! * 1000,
+						access_token: newTokens.access_token ?? currentTokens.access_token,
+						refresh_token:
+							newTokens.refresh_token ?? currentTokens.refresh_token,
+						expires_in: expiresInSeconds,
+						expires_at: Date.now() + expiresInSeconds * 1000,
 					};
 
 					// Token Rotation safety: verify refresh_token hasn't been rotated by another process

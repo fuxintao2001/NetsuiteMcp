@@ -190,8 +190,12 @@ export async function install(): Promise<void> {
 		console.error(
 			`\n✅ macOS LaunchAgent daemons installed and loaded successfully!`,
 		);
-		console.error(`   1. HTTP Server Daemon: ${SERVER_LABEL} (Port 3000, KeepAlive)`);
-		console.error(`   2. Token Refresh Daemon: ${KEEPALIVE_LABEL} (Every 10 mins)`);
+		console.error(
+			`   1. HTTP Server Daemon: ${SERVER_LABEL} (Port 3000, KeepAlive)`,
+		);
+		console.error(
+			`   2. Token Refresh Daemon: ${KEEPALIVE_LABEL} (Every 10 mins)`,
+		);
 		console.error(`   Server logs: tail -f "${paths.serverLogPath}"`);
 		console.error(`   Daemon logs: tail -f "${paths.keepaliveLogPath}"`);
 	} catch (err: unknown) {
@@ -236,8 +240,18 @@ export async function status(): Promise<void> {
 	console.error(`📋 LaunchAgent Daemons Status:`);
 
 	for (const daemon of [
-		{ label: SERVER_LABEL, plist: paths.serverPlistPath, log: paths.serverLogPath, name: "HTTP Server Daemon (Port 3000)" },
-		{ label: KEEPALIVE_LABEL, plist: paths.keepalivePlistPath, log: paths.keepaliveLogPath, name: "Token Refresh Keepalive Daemon" },
+		{
+			label: SERVER_LABEL,
+			plist: paths.serverPlistPath,
+			log: paths.serverLogPath,
+			name: "HTTP Server Daemon (Port 3000)",
+		},
+		{
+			label: KEEPALIVE_LABEL,
+			plist: paths.keepalivePlistPath,
+			log: paths.keepaliveLogPath,
+			name: "Token Refresh Keepalive Daemon",
+		},
 	]) {
 		console.error(`\n🔹 ${daemon.name}:`);
 		console.error(`   Plist path: ${daemon.plist}`);
@@ -274,7 +288,9 @@ export async function status(): Promise<void> {
 				const logs = execSync(`tail -n 3 "${daemon.log}"`, {
 					encoding: "utf-8",
 				});
-				console.error(`   Last 3 log lines:\n${logs.trim().replace(/^/gm, "     ")}`);
+				console.error(
+					`   Last 3 log lines:\n${logs.trim().replace(/^/gm, "     ")}`,
+				);
 			} catch {
 				// Ignored
 			}

@@ -4,18 +4,18 @@ import { installGlobalErrorHandlers } from "./globalErrorHandlers.js";
 describe("Global Error Handlers", () => {
 	let mockProcess: any;
 	let mockLogger: any;
-	let eventListeners: Record<string, Function>;
-	let stdinListeners: Record<string, Function>;
+	let eventListeners: Record<string, (...args: unknown[]) => void>;
+	let stdinListeners: Record<string, (...args: unknown[]) => void>;
 
 	beforeEach(() => {
 		eventListeners = {};
 		stdinListeners = {};
 		mockProcess = {
-			on: jest.fn((event: string, listener: Function) => {
+			on: jest.fn((event: string, listener: (...args: unknown[]) => void) => {
 				eventListeners[event] = listener;
 			}),
 			stdin: {
-				on: jest.fn((event: string, listener: Function) => {
+				on: jest.fn((event: string, listener: (...args: unknown[]) => void) => {
 					stdinListeners[event] = listener;
 				}),
 			},

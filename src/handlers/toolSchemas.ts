@@ -137,29 +137,24 @@ export const SCRIPT_LOGS_TOOL = {
 			},
 			type: {
 				type: "string",
-				description:
-					"Filter by log level: DEBUG, AUDIT, ERROR, or EMERGENCY.",
+				description: "Filter by log level: DEBUG, AUDIT, ERROR, or EMERGENCY.",
 				enum: ["DEBUG", "AUDIT", "ERROR", "EMERGENCY"],
 			},
 			dateFrom: {
 				type: "string",
-				description:
-					"Start date filter in YYYY-MM-DD format (inclusive).",
+				description: "Start date filter in YYYY-MM-DD format (inclusive).",
 			},
 			dateTo: {
 				type: "string",
-				description:
-					"End date filter in YYYY-MM-DD format (inclusive).",
+				description: "End date filter in YYYY-MM-DD format (inclusive).",
 			},
 			title: {
 				type: "string",
-				description:
-					"Filter by log title keyword (LIKE fuzzy match).",
+				description: "Filter by log title keyword (LIKE fuzzy match).",
 			},
 			detail: {
 				type: "string",
-				description:
-					"Filter by log detail/message keyword (LIKE fuzzy match).",
+				description: "Filter by log detail/message keyword (LIKE fuzzy match).",
 			},
 			deploymentId: {
 				type: "string",
@@ -176,16 +171,6 @@ export const SCRIPT_LOGS_TOOL = {
 	},
 };
 
-/** All locally-handled tools (excluding AUTH_TOOL which has special routing). */
-export const LOCAL_TOOLS = [
-	RECORD_LINK_TOOL,
-	REFRESH_CACHE_TOOL,
-	LOGOUT_TOOL,
-	STATUS_TOOL,
-	BATCH_EXECUTE_TOOL,
-	SCRIPT_LOGS_TOOL,
-];
-
 // ---------------------------------------------------------------------------
 // Tool description enhancement suffixes
 // ---------------------------------------------------------------------------
@@ -196,16 +181,142 @@ export const LOCAL_TOOLS = [
  * sees them at tool-discovery time, before writing any query.
  */
 export const SUITEQL_RULES_SUFFIX = `
-⚠️ MANDATORY RULES:
-1. MUST call ns_getSuiteQLMetadata FIRST to verify table/field names.
-2. Do NOT use SELECT * — explicitly list required fields.
-3. MUST include pagination: FETCH FIRST N ROWS ONLY or ROWNUM <= N (NOT LIMIT).
-4. Use TO_DATE('YYYY-MM-DD', 'YYYY-MM-DD') for dates (no bare strings).
-5. Use BUILTIN.DF(field) for display values instead of complex JOINs.
-6. Use id for primary keys (not internalid).`;
+
+⚠️ ═══ MANDATORY SUITEQL PROTOCOL & SELF-ITERATION WORKFLOW ═══
+
+🔒 STEP 1 — RECONNAISSANCE (Before writing ANY query):
+  Always call ns_getSuiteQLMetadata to verify exact table/field names and case-sensitivity before executing custom queries.
+
+📝 STEP 2 — SYNTAX & PAGINATION RULES (Non-negotiable):
+  a) Explicit Column Selection: NO 'SELECT *'. Explicitly specify each required field name.
+  b) Pagination: Use 'FETCH FIRST N ROWS ONLY' or 'WHERE ROWNUM <= N'. NEVER use 'LIMIT' or 'OFFSET' (unsupported by SuiteQL).
+  c) Date Handling: Wrap date literals in TO_DATE('<value>', '<format>'), e.g. TO_DATE('2025-01-15', 'YYYY-MM-DD'). NEVER compare bare date strings.
+  d) Display Name Extraction: Use BUILTIN.DF(<foreign_key_field>) (e.g., BUILTIN.DF(entity), BUILTIN.DF(status), BUILTIN.DF(subsidiary)) to retrieve human-readable text labels instead of writing multi-table JOINs.
+  e) Primary Key Naming: The primary key column for NetSuite tables is 'id' (NOT 'internalid').
+  f) Null Value Handling: Use NVL(field, default_value) to replace NULLs, e.g. NVL(memo, 'None').
+  g) Security Guardrails: Queries MUST begin with SELECT or WITH. SQL comments (-- or /* */ or #) are strictly prohibited.
+
+📋 TRANSACTION TYPE SHORTCODES (Use in WHERE type = '...'):
+  • Sales Orders: SalesOrd | Invoices: CustInvc | Purchase Orders: PurchOrd | Vendor Bills: VendBill
+  • Journal Entries: Journal | Credit Memos: CustCred | Item Receipts: ItemRcpt | Item Fulfillments: ItemShip
+  • Cash Sales: CashSale | Vendor Payments: VendPymt | Customer Payments: CustPymt | Quotes: Estimate
+  • Return Auths: RtnAuth | Checks: Check | Deposits: Deposit | Transfer Orders: Transfer
+
+🔄 STEP 3 — AUTOMATIC SELF-HEALING LOOP (Mandatory on failure):
+  If query execution returns an error (e.g. invalid column, syntax error, missing permission) or unexpectedly empty results, DO NOT interrupt the user.
+  Follow this self-healing procedure (up to 3 retry iterations):
+    1. Parse the error message to pinpoint the exact failure (e.g., misspelled field or wrong type code).
+    2. Re-call ns_getSuiteQLMetadata to inspect table schema and confirm valid field names/types.
+    3. Correct the SuiteQL statement and re-run ns_runCustomSuiteQL.
+    4. Only report failure to the user after 3 unsuccessful automated retries.`;
 
 /**
  * Metadata usage hint to append to the `ns_getSuiteQLMetadata` tool description.
  */
 export const METADATA_RULES_SUFFIX = `
-⚠️ MUST be called before ns_runCustomSuiteQL to verify field names and types. Field names are case-sensitive — use them exactly as returned. Only fields marked x-n:joinable=true can be used in JOIN clauses.`;
+
+⚠️ MANDATORY: Call this tool BEFORE writing any SuiteQL query to verify exact field names, types, and case-sensitivity.
+- Field names are CASE-SENSITIVE — use them exactly as returned (e.g., 'tranid' instead of 'TranId').
+- Eliminates guesswork and prevents INVALID_SEARCH_SELECT_FIELD errors.
+- If a subsequent ns_runCustomSuiteQL query fails, re-call this tool to self-heal and inspect field definitions.
+- For custom records (customrecord_*), this returns both system and custom field definitions.`;
+
+/**
+ * SuiteQL rules hint to append to `netsuite_run_parallel_queries`.
+ */
+export const PARALLEL_QUERIES_RULES_SUFFIX = `
+
+⚠️ MANDATORY FOR PARALLEL QUERIES:
+Every SuiteQL query in the input array MUST follow the SuiteQL Protocol:
+- Explicit column selection (NO 'SELECT *').
+- Use 'FETCH FIRST N ROWS ONLY' or 'ROWNUM <= N' (NO 'LIMIT'/'OFFSET').
+- Use TO_DATE('YYYY-MM-DD', 'YYYY-MM-DD') for dates and BUILTIN.DF(field) for foreign key labels.
+- Primary key is 'id'. Call ns_getSuiteQLMetadata first if unsure of field names.`;
+
+export const RUN_PARALLEL_QUERIES_TOOL = {
+	name: "netsuite_run_parallel_queries",
+	description:
+		"Run multiple SuiteQL queries concurrently in parallel (up to 5 concurrent queries). Returns structured individual results." +
+		PARALLEL_QUERIES_RULES_SUFFIX,
+	inputSchema: {
+		type: "object" as const,
+		properties: {
+			queries: {
+				type: "array",
+				description: "Array of SuiteQL query strings to execute in parallel.",
+				items: { type: "string" },
+			},
+		},
+		required: ["queries"],
+	},
+};
+
+export const GET_PARALLEL_RECORDS_TOOL = {
+	name: "netsuite_get_parallel_records",
+	description:
+		"Fetch multiple NetSuite records concurrently in parallel. Minimizes network round-trip overhead.",
+	inputSchema: {
+		type: "object" as const,
+		properties: {
+			records: {
+				type: "array",
+				description: "Array of record requests to fetch in parallel.",
+				items: {
+					type: "object",
+					properties: {
+						recordType: {
+							type: "string",
+							description: "NetSuite record type (e.g. customer, salesorder).",
+						},
+						recordId: {
+							type: "string",
+							description: "Internal ID of the record.",
+						},
+						fields: {
+							type: "string",
+							description:
+								"Optional comma-separated list of field IDs to retrieve.",
+						},
+					},
+					required: ["recordType", "recordId"],
+				},
+			},
+		},
+		required: ["records"],
+	},
+};
+
+export const GET_PARALLEL_METADATA_TOOL = {
+	name: "netsuite_get_parallel_metadata",
+	description:
+		"Fetch metadata for multiple NetSuite record types concurrently in parallel.",
+	inputSchema: {
+		type: "object" as const,
+		properties: {
+			recordTypes: {
+				type: "array",
+				description: "Array of NetSuite record type strings.",
+				items: { type: "string" },
+			},
+			type: {
+				type: "string",
+				description: "Metadata type: 'record' or 'suiteql'. Default: 'record'.",
+				enum: ["record", "suiteql"],
+			},
+		},
+		required: ["recordTypes"],
+	},
+};
+
+/** All locally-handled tools (excluding AUTH_TOOL which has special routing). */
+export const LOCAL_TOOLS = [
+	RECORD_LINK_TOOL,
+	REFRESH_CACHE_TOOL,
+	LOGOUT_TOOL,
+	STATUS_TOOL,
+	BATCH_EXECUTE_TOOL,
+	SCRIPT_LOGS_TOOL,
+	RUN_PARALLEL_QUERIES_TOOL,
+	GET_PARALLEL_RECORDS_TOOL,
+	GET_PARALLEL_METADATA_TOOL,
+];

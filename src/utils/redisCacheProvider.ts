@@ -98,8 +98,11 @@ export class RedisCacheProvider implements CacheProvider {
 				const batchSize = 500;
 				for (let i = 0; i < keys.length; i += batchSize) {
 					const chunk = keys.slice(i, i + batchSize);
-					if (typeof (client as any).unlink === "function") {
-						await (client as any).unlink(...chunk);
+					const redisClient = client as unknown as {
+						unlink?: (...keys: string[]) => Promise<number>;
+					};
+					if (typeof redisClient.unlink === "function") {
+						await redisClient.unlink(...chunk);
 					} else {
 						await client.del(...chunk);
 					}

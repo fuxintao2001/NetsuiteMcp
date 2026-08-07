@@ -15,7 +15,7 @@ describe("MCP Handler Wires", () => {
 	let mockServer: any;
 	let mockOAuthManager: any;
 	let mockMCPTools: any;
-	let registeredHandlers: Map<string, Function>;
+	let registeredHandlers: Map<string, (...args: any[]) => any>;
 
 	const testRoot = path.join(process.cwd(), ".test-handlers-root");
 
@@ -39,9 +39,11 @@ describe("MCP Handler Wires", () => {
 
 		registeredHandlers = new Map();
 		mockServer = {
-			setRequestHandler: jest.fn((method: string, handler: Function) => {
-				registeredHandlers.set(method, handler);
-			}),
+			setRequestHandler: jest.fn(
+				(method: string, handler: (...args: any[]) => any) => {
+					registeredHandlers.set(method, handler);
+				},
+			),
 		};
 
 		mockOAuthManager = {
@@ -277,6 +279,66 @@ describe("MCP Handler Wires", () => {
 			expect(res.content[0].text).toContain("netsuite-mcp");
 		});
 
+		describe("netsuite_run_parallel_queries, netsuite_get_parallel_records, netsuite_get_parallel_metadata", () => {
+			it("should execute netsuite_run_parallel_queries", async () => {
+				const callFn = registeredHandlers.get("tools/call");
+				mockMCPTools.executeTool.mockResolvedValue({ data: [{ id: 1 }] });
+
+				const res = await callFn?.({
+					params: {
+						name: "netsuite_run_parallel_queries",
+						arguments: { queries: ["SELECT id FROM customer"] },
+					},
+				});
+
+				const parsed = JSON.parse(res.content[0].text);
+				expect(parsed.totalQueries).toBe(1);
+				expect(parsed.successfulQueries).toBe(1);
+			});
+
+			it("should execute netsuite_get_parallel_records", async () => {
+				const callFn = registeredHandlers.get("tools/call");
+				mockMCPTools.executeTool.mockResolvedValue({
+					id: "101",
+					type: "customer",
+				});
+
+				const res = await callFn?.({
+					params: {
+						name: "netsuite_get_parallel_records",
+						arguments: {
+							records: [{ recordType: "customer", recordId: "101" }],
+						},
+					},
+				});
+
+				const parsed = JSON.parse(res.content[0].text);
+				expect(parsed.totalRecords).toBe(1);
+				expect(parsed.successfulRecords).toBe(1);
+			});
+
+			it("should execute netsuite_get_parallel_metadata", async () => {
+				const callFn = registeredHandlers.get("tools/call");
+				mockMCPTools.executeTool.mockResolvedValue({
+					success: true,
+					metadata: { type: "object" },
+				});
+
+				const res = await callFn?.({
+					params: {
+						name: "netsuite_get_parallel_metadata",
+						arguments: {
+							recordTypes: ["customer", "salesorder"],
+						},
+					},
+				});
+
+				const parsed = JSON.parse(res.content[0].text);
+				expect(parsed.totalMetadataRequests).toBe(2);
+				expect(parsed.successfulRequests).toBe(2);
+			});
+		});
+
 		describe("netsuite_batch_execute tool", () => {
 			it("should execute multiple tools in parallel and return partial results", async () => {
 				const callFn = registeredHandlers.get("tools/call");
@@ -414,9 +476,14 @@ describe("MCP Handler Wires", () => {
 					},
 				});
 
-				const sqlArg = mockMCPTools.executeTool.mock.calls[0][1].sqlQuery as string;
-				expect(sqlArg).toContain("INNER JOIN Script AS s ON sn.scripttype = s.id");
-				expect(sqlArg).toContain("INNER JOIN ScriptDeployment AS sd ON sn.scripttype = sd.script");
+				const sqlArg = mockMCPTools.executeTool.mock.calls[0][1]
+					.sqlQuery as string;
+				expect(sqlArg).toContain(
+					"INNER JOIN Script AS s ON sn.scripttype = s.id",
+				);
+				expect(sqlArg).toContain(
+					"INNER JOIN ScriptDeployment AS sd ON sn.scripttype = sd.script",
+				);
 				expect(sqlArg).toContain("s.scriptid = 'customscript_my_ue'");
 				expect(sqlArg).toContain("sn.type = 'ERROR'");
 				expect(sqlArg).toContain("TO_DATE('2026-07-01', 'YYYY-MM-DD')");
