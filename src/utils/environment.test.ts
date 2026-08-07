@@ -14,6 +14,7 @@ describe("Environment Utilities", () => {
 
 		it("should correctly classify sandbox accounts containing -SB", () => {
 			expect(isSandboxAccount("9260916-sb1")).toBe(true);
+			expect(isSandboxAccount("9260916_SB1")).toBe(true);
 			expect(isSandboxAccount("9260916-SB3")).toBe(true);
 		});
 

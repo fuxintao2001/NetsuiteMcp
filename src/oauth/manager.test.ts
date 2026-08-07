@@ -58,7 +58,7 @@ describe("OAuthManager Integration tests", () => {
 			} as any);
 
 			await manager.startAuthFlow({
-				accountId: "123456_SB1",
+				accountId: "9260916-sb1",
 				clientId: "my-client-id",
 			});
 

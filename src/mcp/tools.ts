@@ -12,6 +12,7 @@ import { parseNetSuiteError } from "../utils/errors.js";
 import { httpClient } from "../utils/httpClient.js";
 import { type JsonSchemaProperty, mapFieldType } from "../utils/metadata.js";
 import { ConcurrencyLimiter, retryWithBackoff } from "../utils/resilience.js";
+import { assertValidSuiteQL } from "../utils/suiteqlGuard.js";
 
 /**
  * Extracts table names from a SQL query string (used for cache invalidation).
@@ -124,6 +125,14 @@ export class NetSuiteMCPTools {
 		}
 
 		console.error(`🔧 Executing tool: ${toolName}`);
+
+		if (toolName === "ns_runCustomSuiteQL") {
+			const sqlQuery = (parameters.sqlQuery ||
+				parameters.query ||
+				parameters.sql ||
+				"") as string;
+			assertValidSuiteQL(sqlQuery);
+		}
 
 		let result: unknown;
 		try {

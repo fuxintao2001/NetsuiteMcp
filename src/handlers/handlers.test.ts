@@ -127,7 +127,7 @@ describe("MCP Handler Wires", () => {
 		});
 
 		it("should list all tools when in Sandbox environment", async () => {
-			mockOAuthManager.getAccountId.mockResolvedValue("9260916_SB3");
+			mockOAuthManager.getAccountId.mockResolvedValue("9260916-sb1");
 			const listFn = registeredHandlers.get("tools/list");
 
 			const result = await listFn?.();

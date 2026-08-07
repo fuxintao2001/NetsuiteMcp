@@ -8,8 +8,8 @@ describe("NetSuite UI URL Generation", () => {
 	});
 
 	it("should format host subdomain accurately", () => {
-		const url = generateNetSuiteUrl("123456_SB1", "customer", "789");
-		expect(url).toContain("https://123456-sb1.app.netsuite.com");
+		const url = generateNetSuiteUrl("9260916-sb1", "customer", "789");
+		expect(url).toContain("https://9260916-sb1.app.netsuite.com");
 	});
 
 	it("should resolve standard mapped record types", () => {
