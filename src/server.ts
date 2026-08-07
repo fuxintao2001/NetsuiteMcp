@@ -29,7 +29,7 @@ const ACCOUNT_CONFIGS: Record<string, AccountConfig> = {
 		clientId:
 			process.env.NETSUITE_CLIENT_ID_5848789 ||
 			process.env.NETSUITE_CLIENT_ID ||
-			"",
+			"a1b2d7195f6788a9c751d8107c5b79d9c8f9ac07eccf3ad910b744002597001e",
 		sessionPath:
 			process.env.NETSUITE_SESSION_PATH_5848789 ||
 			path.join(process.env.HOME || "", ".gemini/antigravity/sessions/5848789"),
@@ -40,7 +40,7 @@ const ACCOUNT_CONFIGS: Record<string, AccountConfig> = {
 		clientId:
 			process.env.NETSUITE_CLIENT_ID_5848789_SB1 ||
 			process.env.NETSUITE_CLIENT_ID ||
-			"",
+			"0236ead47a3111e43ef133494c12b55c7a83b4f0ad72cc7c2cb2787af636768a",
 		sessionPath:
 			process.env.NETSUITE_SESSION_PATH_5848789_SB1 ||
 			path.join(
@@ -54,7 +54,7 @@ const ACCOUNT_CONFIGS: Record<string, AccountConfig> = {
 		clientId:
 			process.env.NETSUITE_CLIENT_ID_9260916 ||
 			process.env.NETSUITE_CLIENT_ID ||
-			"",
+			"a464dbc30452bd27cde365f221ebe2b28e5fe2edb5d00880aef4f276dcbe6383",
 		sessionPath:
 			process.env.NETSUITE_SESSION_PATH_9260916 ||
 			path.join(process.env.HOME || "", ".gemini/antigravity/sessions/9260916"),
@@ -65,7 +65,7 @@ const ACCOUNT_CONFIGS: Record<string, AccountConfig> = {
 		clientId:
 			process.env.NETSUITE_CLIENT_ID_9260916_SB1 ||
 			process.env.NETSUITE_CLIENT_ID ||
-			"",
+			"23b3717bc449aa331fc9867222b86f5f8324713abd56076d74f62450de6cf310",
 		sessionPath:
 			process.env.NETSUITE_SESSION_PATH_9260916_SB1 ||
 			path.join(
@@ -79,7 +79,7 @@ const ACCOUNT_CONFIGS: Record<string, AccountConfig> = {
 		clientId:
 			process.env.NETSUITE_CLIENT_ID_9260916_SB3 ||
 			process.env.NETSUITE_CLIENT_ID ||
-			"",
+			"3a651cfac0d8de2d1c93c0a7c53b38e6627a6e55a1ad602bc759f64c95a2d425",
 		sessionPath:
 			process.env.NETSUITE_SESSION_PATH_9260916_SB3 ||
 			path.join(
