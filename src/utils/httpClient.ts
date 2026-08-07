@@ -2,7 +2,7 @@ import http from "node:http";
 import https from "node:https";
 import axios from "axios";
 
-export const httpAgent = new http.Agent({
+const httpAgent = new http.Agent({
 	keepAlive: true,
 	keepAliveMsecs: 1000,
 	maxSockets: 25,
@@ -11,7 +11,7 @@ export const httpAgent = new http.Agent({
 });
 
 // 排除非 https.AgentOptions 支持的 freeSocketTimeout
-export const httpsAgent = new https.Agent({
+const httpsAgent = new https.Agent({
 	keepAlive: true,
 	keepAliveMsecs: 1000,
 	maxSockets: 25,

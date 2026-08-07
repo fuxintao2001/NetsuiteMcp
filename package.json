@@ -48,8 +48,6 @@
   "homepage": "https://github.com/dsvantien/netsuite-mcp-server#readme",
   "license": "MIT",
   "dependencies": {
-    "@modelcontextprotocol/client": "^2.0.0-beta.5",
-    "@modelcontextprotocol/core": "^2.0.0-beta.5",
     "@modelcontextprotocol/express": "^2.0.0-beta.5",
     "@modelcontextprotocol/server": "^2.0.0-beta.5",
     "axios": "^1.6.0",
@@ -63,6 +61,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.5",
+    "@jest/globals": "^30.0.0",
     "@types/express": "^5.0.6",
     "@types/jest": "^30.0.0",
     "@types/node": "^25.9.1",
