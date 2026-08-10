@@ -142,16 +142,16 @@ When fulfilling a user request, select tools in this priority order:
 
 {{WRITE_OPS_SECTION}}
 
-### 6.1 SuiteScript Error Troubleshooting & Code Repair SOP (故障诊断标准流程)
+### 6.1 Mandatory Code Development & Troubleshooting SOP (代码编写与排错标准流程)
 
-当处理用户提交的 SuiteScript 运行时报错（如 `UNEXPECTED_ERROR`、`SSS_INVALID_SRCH_FILTER_EXPR` 等）或代码重构任务时，必须严格遵守以下顺序：
+**🚨 核心铁律：严禁凭记忆或假设编写任何代码！** 不论是**新增功能、创建脚本、修改重构代码**，还是**处理运行时报错**，在编写或修改任何 SuiteScript / SuiteQL / SuiteFlow / SDF 代码之前，**必须强制执行**以下标准流程：
 
 | 步骤 | 阶段 | 强制动作 | 对应工具/资源 |
 |:---|:---|:---|:---|
-| **① 分析** | 堆栈与代码走查 | 读取报错堆栈，定位到相关代码文件及具体行号，分析初步疑点 | `view_file` / `grep_search` |
-| **② 校验** | 官方知识查验 | **【强制前置】** 必须通过 Context7 查询 API 规范，并阅读对应 Skills 确认 API 限制与坑点，严禁凭经验结论 | Context7 (`resolve-library-id` → `query-docs`) / Skills (`netsuite-sdf-safe-guide` 等) |
-| **③ 修复** | 执行代码修改 | 基于官方规范修改代码，添加防御性校验（如空值处理、分母非零校验、数组越界防护等） | `replace_file_content` / `multi_replace_file_content` |
-| **④ 输出** | 结论与出处标注 | 输出诊断分析与修改说明，必须明确注明官方出处（如 `📖 出处：[Title/Resource/Skill]`） | — |
+| **① 分析** | 需求/堆栈走查 | 明确业务需求，或读取报错堆栈定位相关代码文件及具体行号 | `view_file` / `grep_search` |
+| **② 校验** | 官方知识查验 | **【强制前置】** 必须通过 Context7 查询 API 签名与语法规范，并阅读对应 Skills 确认平台限制与坑点，严禁凭记忆或经验编写代码 | Context7 (`resolve-library-id` → `query-docs`) / Skills (`netsuite-sdf-safe-guide`, `netsuite-suitescript-records-reference` 等) |
+| **③ 实施** | 执行代码编写/修改 | 基于官方规范编写或修改代码，添加防御性校验（如空值处理、分母非零校验、数组越界防护、 governance 检查等） | `write_to_file` / `replace_file_content` / `multi_replace_file_content` |
+| **④ 输出** | 结论与出处标注 | 输出代码方案与修改说明，必须明确注明官方出处（如 `📖 出处：[Title/Resource/Skill]`） | — |
 
 ## 7. Reports & Data Queries
 
