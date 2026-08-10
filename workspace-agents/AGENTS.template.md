@@ -142,6 +142,17 @@ When fulfilling a user request, select tools in this priority order:
 
 {{WRITE_OPS_SECTION}}
 
+### 6.1 SuiteScript Error Troubleshooting & Code Repair SOP (故障诊断标准流程)
+
+当处理用户提交的 SuiteScript 运行时报错（如 `UNEXPECTED_ERROR`、`SSS_INVALID_SRCH_FILTER_EXPR` 等）或代码重构任务时，必须严格遵守以下顺序：
+
+| 步骤 | 阶段 | 强制动作 | 对应工具/资源 |
+|:---|:---|:---|:---|
+| **① 分析** | 堆栈与代码走查 | 读取报错堆栈，定位到相关代码文件及具体行号，分析初步疑点 | `view_file` / `grep_search` |
+| **② 校验** | 官方知识查验 | **【强制前置】** 必须通过 Context7 查询 API 规范，并阅读对应 Skills 确认 API 限制与坑点，严禁凭经验结论 | Context7 (`resolve-library-id` → `query-docs`) / Skills (`netsuite-sdf-safe-guide` 等) |
+| **③ 修复** | 执行代码修改 | 基于官方规范修改代码，添加防御性校验（如空值处理、分母非零校验、数组越界防护等） | `replace_file_content` / `multi_replace_file_content` |
+| **④ 输出** | 结论与出处标注 | 输出诊断分析与修改说明，必须明确注明官方出处（如 `📖 出处：[Title/Resource/Skill]`） | — |
+
 ## 7. Reports & Data Queries
 
 1. **Discover:** `ns_listAllReports` → browse available reports and check properties (`has_subsidiary_filter`, `supports_range`, etc.)
