@@ -142,16 +142,16 @@ When fulfilling a user request, select tools in this priority order:
 
 {{WRITE_OPS_SECTION}}
 
-### 6.1 Mandatory Code Development & Troubleshooting SOP (代码编写与排错标准流程)
+### 6.1 Mandatory Code Development & Troubleshooting SOP
 
-**🚨 核心铁律：严禁凭记忆或假设编写任何代码！** 不论是**新增功能、创建脚本、修改重构代码**，还是**处理运行时报错**，在编写或修改任何 SuiteScript / SuiteQL / SuiteFlow / SDF 代码之前，**必须强制执行**以下标准流程：
+**🚨 ABSOLUTE RED LINE: NEVER write code from memory or assumptions!** Whether **developing new features, creating scripts, refactoring existing code**, or **troubleshooting runtime errors**, BEFORE writing or modifying any SuiteScript, SuiteQL, SuiteFlow, or SDF configuration code, the following mandatory workflow MUST be executed:
 
-| 步骤 | 阶段 | 强制动作 | 对应工具/资源 |
+| Step | Phase | Mandatory Action | Primary Tool / Resource |
 |:---|:---|:---|:---|
-| **① 分析** | 需求/堆栈走查 | 明确业务需求，或读取报错堆栈定位相关代码文件及具体行号 | `view_file` / `grep_search` |
-| **② 校验** | 官方知识查验 | **【强制前置】** 必须通过 Context7 查询 API 签名与语法规范，并阅读对应 Skills 确认平台限制与坑点，严禁凭记忆或经验编写代码 | Context7 (`resolve-library-id` → `query-docs`) / Skills (`netsuite-sdf-safe-guide`, `netsuite-suitescript-records-reference` 等) |
-| **③ 实施** | 执行代码编写/修改 | 基于官方规范编写或修改代码，添加防御性校验（如空值处理、分母非零校验、数组越界防护、 governance 检查等） | `write_to_file` / `replace_file_content` / `multi_replace_file_content` |
-| **④ 输出** | 结论与出处标注 | 输出代码方案与修改说明，必须明确注明官方出处（如 `📖 出处：[Title/Resource/Skill]`） | — |
+| **① Analyze** | Requirements / Trace Walkthrough | Clarify business requirements, or inspect error stack trace to locate target code files and line numbers | `view_file` / `grep_search` |
+| **② Verify** | Official Knowledge Retrieval | **【MANDATORY PRE-REQUISITE】** MUST query Context7 for API signatures and syntax specifications, and read relevant Skills to confirm platform limits and pitfalls. NEVER write code from memory or experience | Context7 (`resolve-library-id` → `query-docs`) / Skills (`netsuite-sdf-safe-guide`, `netsuite-suitescript-records-reference`, etc.) |
+| **③ Implement** | Code Execution & Refactoring | Write or modify code based strictly on official specifications; add defensive protections (null checks, non-zero denominator checks, array bounds guards, governance checks, etc.) | `write_to_file` / `replace_file_content` / `multi_replace_file_content` |
+| **④ Output** | Synthesis & Source Citation | Provide code solution and modification summary; MUST explicitly cite official sources (e.g., `📖 出处：[Title/Resource/Skill]`) | — |
 
 ## 7. Reports & Data Queries
 
