@@ -291,29 +291,8 @@ async function handleGetScriptLogs(
 		);
 	}
 
-	// Determine if we need JOINs
-	const needsScriptJoin = !!scriptId;
-	const needsDeploymentJoin = !!deploymentId;
-
-	// Build SELECT
-	let sql = `SELECT sn.date, sn.type, sn.title, sn.detail`;
-	if (needsScriptJoin) {
-		sql += `, s.scriptid AS scriptScriptId, s.name AS scriptName`;
-	} else {
-		sql += `, BUILTIN.DF(sn.scripttype) AS scriptName`;
-	}
-	if (needsDeploymentJoin) {
-		sql += `, sd.scriptid AS deploymentScriptId, sd.title AS deploymentTitle`;
-	}
-
-	// Build FROM with JOINs
-	sql += ` FROM ScriptNote AS sn`;
-	if (needsScriptJoin) {
-		sql += ` INNER JOIN Script AS s ON sn.scripttype = s.id`;
-	}
-	if (needsDeploymentJoin) {
-		sql += ` INNER JOIN ScriptDeployment AS sd ON sn.scripttype = sd.script`;
-	}
+	// Build SELECT with Script info joined for complete visibility
+	let sql = `SELECT sn.date, sn.type, sn.title, sn.detail, s.scriptid AS scriptScriptId, s.name AS scriptName FROM ScriptNote AS sn LEFT JOIN Script AS s ON sn.scripttype = s.id`;
 
 	// Build WHERE clauses
 	const conditions: string[] = [];
@@ -322,6 +301,12 @@ async function handleGetScriptLogs(
 		const escapedScriptId = scriptId.replace(/'/g, "''");
 		conditions.push(`s.scriptid = '${escapedScriptId}'`);
 	}
+	if (deploymentId) {
+		const escapedDeploymentId = deploymentId.replace(/'/g, "''");
+		conditions.push(
+			`sn.scripttype IN (SELECT sd.script FROM ScriptDeployment sd WHERE sd.scriptid = '${escapedDeploymentId}')`,
+		);
+	}
 	if (logType) {
 		conditions.push(`sn.type = '${logType.toUpperCase()}'`);
 	}
@@ -329,19 +314,16 @@ async function handleGetScriptLogs(
 		conditions.push(`sn.date >= TO_DATE('${dateFrom}', 'YYYY-MM-DD')`);
 	}
 	if (dateTo) {
-		conditions.push(`sn.date <= TO_DATE('${dateTo}', 'YYYY-MM-DD')`);
+		// Include the full day of dateTo (up to 23:59:59) by checking < dateTo + 1
+		conditions.push(`sn.date < TO_DATE('${dateTo}', 'YYYY-MM-DD') + 1`);
 	}
 	if (title) {
-		const escapedTitle = title.replace(/'/g, "''").replace(/%/g, "\\%");
-		conditions.push(`sn.title LIKE '%${escapedTitle}%'`);
+		const escapedTitle = title.replace(/'/g, "''");
+		conditions.push(`UPPER(sn.title) LIKE UPPER('%${escapedTitle}%')`);
 	}
 	if (detail) {
-		const escapedDetail = detail.replace(/'/g, "''").replace(/%/g, "\\%");
-		conditions.push(`sn.detail LIKE '%${escapedDetail}%'`);
-	}
-	if (deploymentId) {
-		const escapedDeploymentId = deploymentId.replace(/'/g, "''");
-		conditions.push(`sd.scriptid = '${escapedDeploymentId}'`);
+		const escapedDetail = detail.replace(/'/g, "''");
+		conditions.push(`UPPER(sn.detail) LIKE UPPER('%${escapedDetail}%')`);
 	}
 
 	if (conditions.length > 0) {
@@ -354,6 +336,32 @@ async function handleGetScriptLogs(
 		const result = await mcpTools.executeTool("ns_runCustomSuiteQL", {
 			sqlQuery: sql,
 		});
+
+		// Check if SuiteQL returned a NetSuite-level error JSON payload
+		const parsedResult = unwrapMcpContent(result) as Record<
+			string,
+			unknown
+		> | null;
+
+		if (parsedResult && typeof parsedResult === "object") {
+			if (parsedResult.error || parsedResult.success === false) {
+				const errorMsg = String(
+					parsedResult.error ||
+						parsedResult.message ||
+						JSON.stringify(parsedResult),
+				);
+				if (
+					errorMsg.includes("Record 'ScriptNote' was not found") ||
+					errorMsg.includes("Record 'Script' was not found")
+				) {
+					return textResult(
+						`❌ NetSuite Error: ${errorMsg}\n\n💡 Tip: Accessing script execution logs (ScriptNote table) requires the current NetSuite role to have the 'SuiteScript' (ADMI_CUSTOMSCRIPT) permission with at least 'View' level under Permissions > Setup.`,
+						true,
+					);
+				}
+				return textResult(`❌ Failed to query script logs: ${errorMsg}`, true);
+			}
+		}
 
 		const data = mcpTools.extractDataArray(result);
 

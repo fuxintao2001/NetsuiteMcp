@@ -428,6 +428,8 @@ describe("MCP Handler Wires", () => {
 							type: "ERROR",
 							title: "Test Error",
 							detail: "Something failed",
+							scriptScriptId: "customscript_test",
+							scriptName: "Test Script",
 						},
 					],
 				});
@@ -442,7 +444,9 @@ describe("MCP Handler Wires", () => {
 				expect(mockMCPTools.executeTool).toHaveBeenCalledWith(
 					"ns_runCustomSuiteQL",
 					expect.objectContaining({
-						sqlQuery: expect.stringContaining("FROM ScriptNote AS sn"),
+						sqlQuery: expect.stringContaining(
+							"FROM ScriptNote AS sn LEFT JOIN Script AS s ON sn.scripttype = s.id",
+						),
 					}),
 				);
 
@@ -479,18 +483,17 @@ describe("MCP Handler Wires", () => {
 				const sqlArg = mockMCPTools.executeTool.mock.calls[0][1]
 					.sqlQuery as string;
 				expect(sqlArg).toContain(
-					"INNER JOIN Script AS s ON sn.scripttype = s.id",
-				);
-				expect(sqlArg).toContain(
-					"INNER JOIN ScriptDeployment AS sd ON sn.scripttype = sd.script",
+					"LEFT JOIN Script AS s ON sn.scripttype = s.id",
 				);
 				expect(sqlArg).toContain("s.scriptid = 'customscript_my_ue'");
+				expect(sqlArg).toContain(
+					"sn.scripttype IN (SELECT sd.script FROM ScriptDeployment sd WHERE sd.scriptid = 'customdeploy_my_ue')",
+				);
 				expect(sqlArg).toContain("sn.type = 'ERROR'");
 				expect(sqlArg).toContain("TO_DATE('2026-07-01', 'YYYY-MM-DD')");
-				expect(sqlArg).toContain("TO_DATE('2026-07-31', 'YYYY-MM-DD')");
-				expect(sqlArg).toContain("sn.title LIKE '%timeout%'");
-				expect(sqlArg).toContain("sn.detail LIKE '%exceeded%'");
-				expect(sqlArg).toContain("sd.scriptid = 'customdeploy_my_ue'");
+				expect(sqlArg).toContain("TO_DATE('2026-07-31', 'YYYY-MM-DD') + 1");
+				expect(sqlArg).toContain("UPPER(sn.title) LIKE UPPER('%timeout%')");
+				expect(sqlArg).toContain("UPPER(sn.detail) LIKE UPPER('%exceeded%')");
 				expect(sqlArg).toContain("FETCH FIRST 100 ROWS ONLY");
 			});
 
@@ -536,6 +539,30 @@ describe("MCP Handler Wires", () => {
 
 				const parsed = JSON.parse(res.content[0].text);
 				expect(parsed.query).toContain("FETCH FIRST 200 ROWS ONLY");
+			});
+
+			it("should return error with permission tip when ScriptNote table is not found", async () => {
+				const callFn = registeredHandlers.get("tools/call");
+
+				mockMCPTools.executeTool.mockResolvedValueOnce({
+					content: [
+						{
+							type: "text",
+							text: '{"error":"Error executing SuiteQL query: Search error occurred: Record \'ScriptNote\' was not found."}',
+						},
+					],
+				});
+
+				const res = await callFn?.({
+					params: {
+						name: "netsuite_get_script_logs",
+						arguments: {},
+					},
+				});
+
+				expect(res.isError).toBe(true);
+				expect(res.content[0].text).toContain("ADMI_CUSTOMSCRIPT");
+				expect(res.content[0].text).toContain("SuiteScript");
 			});
 
 			it("should return error when SuiteQL execution fails", async () => {

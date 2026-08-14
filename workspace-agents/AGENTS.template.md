@@ -123,7 +123,10 @@ When fulfilling a user request, select tools in this priority order:
 
 ### Supplementary Rules (not covered in tool descriptions)
 
-- **Script Execution Logs:** Prefer `netsuite_get_script_logs` for convenient filtering. Alternatively, query the `ScriptNote` table directly via SuiteQL (see `netsuite://guides/suiteql` §7 for patterns).
+- **Script Execution Logs:** Prefer `netsuite_get_script_logs` for convenient filtering (`scriptId`, `type`, `dateFrom`, `dateTo`, `title`, `detail`, `deploymentId`, `limit`).
+  - **Prerequisite Permission:** The NetSuite integration role must have the `SuiteScript` (`ADMI_CUSTOMSCRIPT`) permission with at least `View` level under *Permissions > Setup*.
+  - **Script Lookup from File:** When locating logs for a local script file, first match the file name to `Script.scriptid` or `Script.name` in NetSuite, then call `netsuite_get_script_logs` with `scriptId`.
+  - Alternatively, query the `ScriptNote` table directly via SuiteQL (see `netsuite://guides/suiteql` §7 for patterns).
 - **Native Pagination:** For high-volume result sets, prefer `pageSize` + `pageIndex` API parameters over SQL-level `ROWNUM` pagination. This enables efficient iteration through large datasets.
 - **Amount Fields:** `transamount` = local currency, `foreignamount` = foreign currency. Clarify which one the user needs.
 - **Status Fields:** Always use `BUILTIN.DF(status)` to get human-readable display names instead of raw encoded values.
