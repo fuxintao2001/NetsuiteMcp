@@ -156,6 +156,27 @@ When fulfilling a user request, select tools in this priority order:
 | **③ Implement** | Code Execution & Refactoring | Write or modify code based strictly on official specifications; add defensive protections (null checks, non-zero denominator checks, array bounds guards, governance checks, etc.) | `write_to_file` / `replace_file_content` / `multi_replace_file_content` |
 | **④ Output** | Synthesis & Source Citation | Provide code solution and modification summary; MUST explicitly cite official sources (e.g., `📖 出处：[Title/Resource/Skill]`) | — |
 
+### 6.2 SuiteScript N/search & N/query Safe Development Rules
+
+> [!WARNING]
+> **🚨 CRITICAL PITFALL: Record Field IDs ≠ Search Filter/Column IDs!**
+> In NetSuite, field IDs used in `N/record` (`fieldId`, sublist columns) frequently differ from internal column/filter names used in `N/search`. NEVER assume a field ID on a record equals the column name in `search.createColumn` or `search.createFilter`.
+
+| Scenario / Entity | `N/record` Field ID | `N/search` Column / Filter ID | Common Error if Mistaken |
+|:---|:---|:---|:---|
+| **BOM Default / Master Default** | `masterdefault` | `default` (or `isdefault`) on `assemblyItem` join | `An nlobjSearchColumn contains an invalid column: masterdefault` |
+| **Transaction Total Amount** | `total` | `amount` | `Invalid search column: total` |
+| **Line Sequence Number** | `line` | `linesequencenumber` (or `line`) | Wrong line identification / missing sequence |
+| **Item Name / Label** | `item` | `getValue('item')` returns internal ID; `getText('item')` returns label | Numeric ID when text display was expected |
+
+**Mandatory `N/search` & `N/query` Rules:**
+1. **Verify Column/Filter Names First:** Before writing any `search.create`, `search.createColumn`, or `search.createFilter`, check `netsuite://skills/netsuite-suitescript-records-reference` or run exploratory SuiteQL via `ns_runCustomSuiteQL` to confirm exact search column names.
+2. **Transaction Line Filtering (Mainline Disambiguation):**
+   - Querying item sublist lines: MUST include `['mainline', 'is', 'F']` and exclude `taxline`, `shipping`, `cogs` where applicable (`['taxline', 'is', 'F']`, `['shipping', 'is', 'F']`, `['cogs', 'is', 'F']`).
+   - Querying transaction headers: MUST include `['mainline', 'is', 'T']`.
+3. **Modifying Loaded Saved Searches (`search.load`):** When modifying a loaded search, DO NOT blindly push unverified column names. Inspect or reuse existing columns in `Search.columns` (e.g. modify `.sort` on existing column objects like `Search.columns[i].sort = search.Sort.DESC`).
+4. **Prefer `N/query` (SuiteQL) for Complex Queries:** In SuiteScript 2.1, for multi-table JOINs, subqueries, or complex calculations, prefer `N/query.runSuiteQL()` over `N/search`. Test the query with MCP `ns_runCustomSuiteQL` beforehand.
+
 ## 7. Reports & Data Queries
 
 1. **Discover:** `ns_listAllReports` → browse available reports and check properties (`has_subsidiary_filter`, `supports_range`, etc.)
