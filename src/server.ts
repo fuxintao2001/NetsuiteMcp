@@ -275,6 +275,7 @@ class NetSuiteHTTPServer {
 	public async start(port: number = 3000): Promise<void> {
 		try {
 			await this.cacheProvider.connect();
+			cacheService.configure(this.cacheProvider);
 		} catch (err: unknown) {
 			const message = err instanceof Error ? err.message : String(err);
 			console.error(
@@ -289,13 +290,28 @@ class NetSuiteHTTPServer {
 			await fs.mkdir(cfg.sessionPath, { recursive: true });
 
 			// Initialize OAuthManager & start proactive refresh for pre-configured accounts
-			this.getOrCreateOAuthManager(key, cfg, lockProvider);
+			const manager = this.getOrCreateOAuthManager(key, cfg, lockProvider);
 
 			const handler = createMcpHandler(async () => {
 				return this.createServerInstance(key, cfg, lockProvider);
 			});
 
 			this.handlers.set(key, handler);
+
+			// Background prefetch / seeding for authenticated accounts
+			(async () => {
+				try {
+					const isAuth = await manager.hasValidSession();
+					if (isAuth) {
+						const tools = new NetSuiteMCPTools(manager);
+						await tools.fetchCustomRecordMappings();
+						await tools.prefetchCommonMetadata();
+					}
+				} catch (err: unknown) {
+					const msg = err instanceof Error ? err.message : String(err);
+					console.error(`⚠️ Background prefetch failed for ${key}: ${msg}`);
+				}
+			})();
 		}
 
 		// Health check endpoint
@@ -382,6 +398,14 @@ class NetSuiteHTTPServer {
 			}
 		});
 	}
+
+	public async shutdown(): Promise<void> {
+		console.error("🔌 Shutting down NetSuite HTTP Server...");
+		for (const manager of this.oauthManagers.values()) {
+			manager.stopProactiveRefresh();
+		}
+		await this.cacheProvider.disconnect();
+	}
 }
 
 // Start HTTP server if executed directly
@@ -392,6 +416,19 @@ if (
 ) {
 	const port = parseInt(process.env.PORT || "3000", 10);
 	const server = new NetSuiteHTTPServer();
+
+	const shutdown = async () => {
+		try {
+			await server.shutdown();
+		} catch (err) {
+			console.error("Error during shutdown:", err);
+		}
+		process.exit(0);
+	};
+
+	process.on("SIGINT", shutdown);
+	process.on("SIGTERM", shutdown);
+
 	server.start(port).catch((err) => {
 		console.error("Fatal error starting Streamable HTTP Server:", err);
 		process.exit(1);
