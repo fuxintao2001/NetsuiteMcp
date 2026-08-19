@@ -17,6 +17,7 @@
 - **Single Source of Truth:** All technical conclusions MUST be based on official NetSuite documentation (`help.netsuite.com`), official SuiteCloud Agent Skills (`netsuite://skills/*`), or Context7 API documentation queries. Cite sources clearly: `📖 出处：[Title/Resource/Skill]`.
 - **Zero Hallucination:** If official documentation, skills, or API schemas do not explicitly cover the answer, reply verbatim: "📭 官方文档/技能库未涉及此内容". NO speculation, NO assumptions.
 - **Data Driven:** When dealing with actual business data, MUST invoke the corresponding environment's MCP tools. NEVER fabricate data.
+- **Scope:** This is the canonical verification mandate for the entire document. §6.1 and §10 reference this section rather than restating it.
 
 ## 2. Environment Isolation (MCP)
 
@@ -36,19 +37,22 @@ When fulfilling a user request, select tools in this priority order:
 | Priority | Approach | When to Use | Primary Tool |
 |:---|:---|:---|:---|
 | **P1** | Reports | Financial/functional reporting needs | `ns_runReport` |
-| **P2** | Saved Searches & Smart Selection | Saved search data OR natural language entity lookup | `ns_runSavedSearch` / `ns_selector_app` |
+| **P2** | Saved Searches | Saved search already covers the data need | `ns_runSavedSearch` |
 | **P3** | Record Operations | CRUD on specific records by type + ID | `ns_getRecord` / `ns_createRecord` / `ns_updateRecord` |
 | **P4** | SuiteQL | Ad-hoc queries, cross-table analysis, data not available via reports | `ns_runCustomSuiteQL` (Last Resort) |
 
-**Decision flow:**
-1. Can the answer come from a standard report? → `ns_listAllReports` → `ns_runReport`
-2. Is there an existing Saved Search? → `ns_listSavedSearches` → `ns_runSavedSearch`
-3. Need to interactively find/select an entity by name? → `ns_selector_app`
-4. Need a specific record by ID? → `ns_getRecordTypeMetadata` → `ns_getRecord`
-5. Need domain guidance or best practices? → `ns_prompt_library_app`
-6. None of the above? → SuiteQL (follow §5 protocol strictly)
+> Smart Assist tools (`ns_selector_app`, `ns_prompt_library_app`) are cross-cutting helpers, not a priority tier of their own — invoke them at any point above to resolve an ambiguous entity name or pull domain guidance before continuing.
 
-**Performance Tip:** When multiple independent queries, records, or metadata lookups are needed, ALWAYS prefer `netsuite_batch_execute` to run tasks concurrently in parallel and minimize round-trip network delays.
+**Decision flow:**
+1. Can the answer come from a standard report? → `ns_listAllReports` → `ns_runReport` (P1)
+2. Is there an existing Saved Search? → `ns_listSavedSearches` → `ns_runSavedSearch` (P2)
+3. Need to resolve an entity by name first (e.g. "which customer is 'Acme'?")? → `ns_selector_app`, then continue with P1–P4
+4. Need a specific record by ID? → `ns_getRecordTypeMetadata` → `ns_getRecord` (P3)
+5. Need domain guidance before choosing an approach? → `ns_prompt_library_app`
+6. None of the above? → SuiteQL (P4, Last Resort — follow §5 protocol strictly)
+
+> [!IMPORTANT]
+> **Parallelize by default:** Before issuing 2+ independent tool calls in the same turn (queries, record reads, metadata lookups), batch them via `netsuite_batch_execute` instead of calling them serially. Serial calls for independent operations are a workflow defect, not a safe default — only fall back to sequential calls when a later call's input depends on an earlier call's output.
 
 ## 4. MCP Tools Quick Reference
 
@@ -69,13 +73,15 @@ When fulfilling a user request, select tools in this priority order:
 | `netsuite_get_record_link` | Generate NetSuite UI deep link |
 {{WRITE_TOOLS_TABLE}}
 
-### Report Tools
+### Report & Saved Search Tools
 
 | Tool | Purpose |
 |:---|:---|
 | `ns_listAllReports` | Discover available reports with properties |
 | `ns_runReport` | Execute a report |
 | `ns_report_filters_app` | **🔄 Interactive:** collect report filter params from user |
+| `ns_listSavedSearches` | Discover available saved searches |
+| `ns_runSavedSearch` | Execute a saved search |
 
 ### Context Tools
 
@@ -104,6 +110,7 @@ When fulfilling a user request, select tools in this priority order:
 | `netsuite_status` | Check auth state, token expiry, cache stats, environment type |
 | `netsuite_refresh_cache` | Clear caches (optional: specific `tableName`) |
 | `netsuite_logout` | Clear authentication session |
+| `netsuite_authenticate` | Force re-authentication (used by the §8 401 recovery flow) |
 
 ## 5. SuiteQL Protocol
 
@@ -150,12 +157,15 @@ When fulfilling a user request, select tools in this priority order:
 
 ### 6.1 Mandatory Code Development & Troubleshooting SOP
 
-**🚨 ABSOLUTE RED LINE: NEVER write code from memory or assumptions!** Whether **developing new features, creating scripts, refactoring existing code**, or **troubleshooting runtime errors**, BEFORE writing or modifying any SuiteScript, SuiteQL, SuiteFlow, or SDF configuration code, the following mandatory workflow MUST be executed:
+> [!WARNING]
+> **🚨 ABSOLUTE RED LINE: NEVER write code from memory or assumptions!**
+
+Whether **developing new features, creating scripts, refactoring existing code**, or **troubleshooting runtime errors**, BEFORE writing or modifying any SuiteScript, SuiteQL, SuiteFlow, or SDF configuration code, the following mandatory workflow MUST be executed:
 
 | Step | Phase | Mandatory Action | Primary Tool / Resource |
 |:---|:---|:---|:---|
 | **① Analyze** | Requirements / Trace Walkthrough | Clarify business requirements, or inspect error stack trace to locate target code files and line numbers | `view_file` / `grep_search` |
-| **② Verify** | Official Knowledge Retrieval | **【MANDATORY PRE-REQUISITE】** MUST query Context7 for API signatures and syntax specifications, and read relevant Skills to confirm platform limits and pitfalls. NEVER write code from memory or experience | Context7 (`resolve-library-id` → `query-docs`) / Skills (`netsuite-sdf-safe-guide`, `netsuite-suitescript-records-reference`, etc.) |
+| **② Verify** | Official Knowledge Retrieval | **【MANDATORY PRE-REQUISITE】** Per §1 Knowledge Red Lines: query Context7 for API signatures/syntax, and read relevant Skills for platform limits and known pitfalls | Context7 (`resolve-library-id` → `query-docs`) / Skills (`netsuite-sdf-safe-guide`, `netsuite-suitescript-records-reference`, etc.) |
 | **③ Implement** | Code Execution & Refactoring | Write or modify code based strictly on official specifications; add defensive protections (null checks, non-zero denominator checks, array bounds guards, governance checks, etc.) | `write_to_file` / `replace_file_content` / `multi_replace_file_content` |
 | **④ Output** | Synthesis & Source Citation | Provide code solution and modification summary; MUST explicitly cite official sources (e.g., `📖 出处：[Title/Resource/Skill]`) | — |
 
@@ -183,7 +193,7 @@ When fulfilling a user request, select tools in this priority order:
    ```
 
 3. **`record.submitFields` Best Practice & Limits:**
-   - **Best Practice:** When updating only body fields, prefer `record.submitFields()` over `record.load()` + `record.save()`. It cuts Governance cost by 66% (Tx: 10 vs 30 units) and avoids loading full sublists.
+   - **Best Practice:** When updating only body fields, prefer `record.submitFields()` over `record.load()` + `record.save()`. Governance cost (📖 出处：NetSuite Applications Suite — N/record Module Governance Table): transaction records 10 vs 30 units (load 10 + save 20 — a 66% cut), custom records 2 vs 4 units, other non-transaction records 5 vs 10 units. Also avoids loading full sublists.
    - **Limits:** `record.submitFields` CANNOT update sublists or subrecords. It also cannot update calculated/read-only fields (e.g. `total`, `status`).
 
 4. **Data Type Fidelity (Checkbox & Lists):**
@@ -248,7 +258,7 @@ When fulfilling a user request, select tools in this priority order:
 
 ## 10. API Validation (Context7)
 
-Before writing SuiteScript/SuiteQL/SuiteFlow code, MUST verify API signatures via Context7: `resolve-library-id` → `query-docs`. NEVER call APIs from memory.
+Context7 verification is mandatory for all code-writing tasks — see §1 (Knowledge Red Lines) and §6.1 Step ②. Quick reference: `resolve-library-id` → `query-docs`.
 
 ## 11. Output Standards
 
