@@ -66,7 +66,7 @@ export function validateSuiteQL(sqlQuery: string): SuiteQLValidationResult {
 		return {
 			valid: false,
 			reason:
-				"SuiteQL query contains multiple statements separated by semicolons. Only single read-only queries are allowed per invocation (or use `netsuite_run_parallel_queries` for batch queries).",
+				"SuiteQL query contains multiple statements separated by semicolons. Only single read-only queries are allowed per invocation (or use `netsuite_batch_execute` for batch queries).",
 		};
 	}
 

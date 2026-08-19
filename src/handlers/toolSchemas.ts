@@ -94,25 +94,25 @@ export const STATUS_TOOL = {
 export const BATCH_EXECUTE_TOOL = {
 	name: "netsuite_batch_execute",
 	description:
-		"Execute multiple NetSuite MCP tools in parallel. Supports up to 10 sub-tasks. Useful for optimization by minimizing round-trip API delays.",
+		"Execute multiple NetSuite tools in parallel (max 10 tasks, concurrency 5). Dramatically reduces latency for batch operations. Supports any tool including 'ns_runCustomSuiteQL', 'ns_getRecord', 'ns_getRecordTypeMetadata', 'ns_getSuiteQLMetadata', 'netsuite_get_script_logs', and 'netsuite_get_record_link'.",
 	inputSchema: {
 		type: "object" as const,
 		properties: {
 			tasks: {
 				type: "array",
 				description:
-					"An array of tasks to execute in parallel. Maximum 10 tasks.",
+					"Array of tasks to execute in parallel (maximum 10 tasks).",
 				items: {
 					type: "object",
 					properties: {
 						toolName: {
 							type: "string",
 							description:
-								"The name of the tool to execute (e.g. ns_getRecord, ns_runCustomSuiteQL).",
+								"The name of the tool to execute (e.g. 'ns_runCustomSuiteQL', 'ns_getRecord', 'ns_getRecordTypeMetadata', 'ns_getSuiteQLMetadata', 'netsuite_get_script_logs', 'netsuite_get_record_link').",
 						},
 						arguments: {
 							type: "object",
-							description: "Arguments to pass to the tool.",
+							description: "Arguments dictionary for the specified tool.",
 						},
 					},
 					required: ["toolName"],
@@ -221,93 +221,6 @@ export const METADATA_RULES_SUFFIX = `
 - If a subsequent ns_runCustomSuiteQL query fails, re-call this tool to self-heal and inspect field definitions.
 - For custom records (customrecord_*), this returns both system and custom field definitions.`;
 
-/**
- * SuiteQL rules hint to append to `netsuite_run_parallel_queries`.
- */
-export const PARALLEL_QUERIES_RULES_SUFFIX = `
-
-⚠️ MANDATORY FOR PARALLEL QUERIES:
-Every SuiteQL query in the input array MUST follow the SuiteQL Protocol:
-- Explicit column selection (NO 'SELECT *').
-- Use 'FETCH FIRST N ROWS ONLY' or 'ROWNUM <= N' (NO 'LIMIT'/'OFFSET').
-- Use TO_DATE('YYYY-MM-DD', 'YYYY-MM-DD') for dates and BUILTIN.DF(field) for foreign key labels.
-- Primary key is 'id'. Call ns_getSuiteQLMetadata first if unsure of field names.`;
-
-export const RUN_PARALLEL_QUERIES_TOOL = {
-	name: "netsuite_run_parallel_queries",
-	description:
-		"Run multiple SuiteQL queries concurrently in parallel (up to 5 concurrent queries). Returns structured individual results." +
-		PARALLEL_QUERIES_RULES_SUFFIX,
-	inputSchema: {
-		type: "object" as const,
-		properties: {
-			queries: {
-				type: "array",
-				description: "Array of SuiteQL query strings to execute in parallel.",
-				items: { type: "string" },
-			},
-		},
-		required: ["queries"],
-	},
-};
-
-export const GET_PARALLEL_RECORDS_TOOL = {
-	name: "netsuite_get_parallel_records",
-	description:
-		"Fetch multiple NetSuite records concurrently in parallel. Minimizes network round-trip overhead.",
-	inputSchema: {
-		type: "object" as const,
-		properties: {
-			records: {
-				type: "array",
-				description: "Array of record requests to fetch in parallel.",
-				items: {
-					type: "object",
-					properties: {
-						recordType: {
-							type: "string",
-							description: "NetSuite record type (e.g. customer, salesorder).",
-						},
-						recordId: {
-							type: "string",
-							description: "Internal ID of the record.",
-						},
-						fields: {
-							type: "string",
-							description:
-								"Optional comma-separated list of field IDs to retrieve.",
-						},
-					},
-					required: ["recordType", "recordId"],
-				},
-			},
-		},
-		required: ["records"],
-	},
-};
-
-export const GET_PARALLEL_METADATA_TOOL = {
-	name: "netsuite_get_parallel_metadata",
-	description:
-		"Fetch metadata for multiple NetSuite record types concurrently in parallel.",
-	inputSchema: {
-		type: "object" as const,
-		properties: {
-			recordTypes: {
-				type: "array",
-				description: "Array of NetSuite record type strings.",
-				items: { type: "string" },
-			},
-			type: {
-				type: "string",
-				description: "Metadata type: 'record' or 'suiteql'. Default: 'record'.",
-				enum: ["record", "suiteql"],
-			},
-		},
-		required: ["recordTypes"],
-	},
-};
-
 /** All locally-handled tools (excluding AUTH_TOOL which has special routing). */
 export const LOCAL_TOOLS = [
 	RECORD_LINK_TOOL,
@@ -316,7 +229,4 @@ export const LOCAL_TOOLS = [
 	STATUS_TOOL,
 	BATCH_EXECUTE_TOOL,
 	SCRIPT_LOGS_TOOL,
-	RUN_PARALLEL_QUERIES_TOOL,
-	GET_PARALLEL_RECORDS_TOOL,
-	GET_PARALLEL_METADATA_TOOL,
 ];

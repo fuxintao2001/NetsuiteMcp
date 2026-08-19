@@ -201,7 +201,8 @@ MCP Client (Claude Code, Cursor, Gemini, etc.)
 │  │ - logout               │  │
 │  │ - refresh_cache        │  │
 │  │ - get_record_link      │  │
-│  │ - run_parallel_queries │  │
+│  │ - get_script_logs      │  │
+│  │ - batch_execute        │  │
 │  └────────────────────────┘  │
 └──────────────────────────────┘
        │
@@ -255,8 +256,8 @@ netsuite-mcp-server/
 | `netsuite_logout` | Clear authentication session |
 | `netsuite_refresh_cache` | Force clear local + NetSuite REST session cache |
 | `netsuite_get_record_link` | Generate a clickable NetSuite UI link for a record |
-| `netsuite_batch_execute` | Execute multiple NetSuite MCP tools in parallel (up to 10 tasks) |
-| `netsuite_run_parallel_queries` | Execute up to 5 SuiteQL queries concurrently (highly recommended for independent queries) |
+| `netsuite_get_script_logs` | Query NetSuite Script Execution Logs with flexible filters |
+| `netsuite_batch_execute` | Execute multiple NetSuite tools concurrently in parallel (up to 10 tasks) |
 | `netsuite_status` | Show diagnostic information (auth state, token expiry, environment, cache stats) |
 
 ### NetSuite Proxied Tools (`ns_` prefix)

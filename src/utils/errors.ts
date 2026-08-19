@@ -111,7 +111,7 @@ function getActionableAdvice(code: string, message: string): string {
 		let advice = "\n💡 [Troubleshooting Advice - Concurrency]:";
 		advice += "\n  - You have exceeded NetSuite's concurrent request limit.";
 		advice +=
-			"\n  - Recommended: For multiple independent SuiteQL queries, use `netsuite_run_parallel_queries` to run them concurrently (up to 5).";
+			"\n  - Recommended: For multiple independent operations/queries, use `netsuite_batch_execute` to run them concurrently in parallel (up to 10 tasks, concurrency 5).";
 		advice +=
 			"\n  - Otherwise, reduce the frequency of your requests or add retries.";
 		return advice;
@@ -216,7 +216,7 @@ export function parseNetSuiteError(error: unknown): Error {
 		let advice = "";
 		if (status === 429) {
 			advice =
-				"\n💡 [Troubleshooting Advice - Concurrency]:\n  - You have exceeded NetSuite's concurrent request limit.\n  - Recommended: Use `netsuite_run_parallel_queries` or reduce request frequency.";
+				"\n💡 [Troubleshooting Advice - Concurrency]:\n  - You have exceeded NetSuite's concurrent request limit.\n  - Recommended: Use `netsuite_batch_execute` or reduce request frequency.";
 		} else if (status === 403) {
 			advice =
 				"\n💡 [Troubleshooting Advice - Permissions]:\n  - Access denied. Verify authentication status and permissions.";

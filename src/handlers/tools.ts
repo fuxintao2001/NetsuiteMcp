@@ -106,159 +106,6 @@ async function handleGetRecordLink(
 	return textResult(responseText);
 }
 
-async function handleRunParallelQueries(
-	args: Record<string, unknown>,
-	mcpTools: NetSuiteMCPTools,
-): Promise<ToolResponse> {
-	const queries = args.queries as string[] | undefined;
-	if (!Array.isArray(queries) || queries.length === 0) {
-		return textResult(
-			"❌ Invalid arguments: queries must be a non-empty array.",
-			true,
-		);
-	}
-
-	const batchResult = await processParallelBatch(
-		queries,
-		async (sqlQuery) => {
-			const result = await mcpTools.executeTool("ns_runCustomSuiteQL", {
-				sqlQuery,
-			});
-			return typeof result === "string" ? await asyncJsonParse(result) : result;
-		},
-		5,
-	);
-
-	return textResult(
-		JSON.stringify(
-			{
-				totalQueries: batchResult.total,
-				successfulQueries: batchResult.successful,
-				failedQueries: batchResult.failed,
-				totalDurationMs: batchResult.totalDurationMs,
-				individualResults: batchResult.individualResults.map((r, i) => ({
-					index: r.index,
-					success: r.success,
-					durationMs: r.durationMs,
-					query: queries[i],
-					...(r.success ? { result: r.result } : { error: r.error }),
-				})),
-			},
-			null,
-			2,
-		),
-	);
-}
-
-interface RecordToFetch {
-	recordType: string;
-	recordId: string;
-	fields?: string;
-}
-
-async function handleGetParallelRecords(
-	args: Record<string, unknown>,
-	mcpTools: NetSuiteMCPTools,
-): Promise<ToolResponse> {
-	const records = args.records as RecordToFetch[] | undefined;
-	if (!Array.isArray(records) || records.length === 0) {
-		return textResult(
-			"❌ Invalid arguments: records must be a non-empty array.",
-			true,
-		);
-	}
-
-	const batchResult = await processParallelBatch(
-		records,
-		async (item) => {
-			if (!item) throw new Error("Invalid record item");
-			const result = await mcpTools.executeTool("ns_getRecord", {
-				recordType: item.recordType,
-				recordId: item.recordId,
-				fields: item.fields,
-			});
-			const parsedResult =
-				typeof result === "string" ? await asyncJsonParse(result) : result;
-			return cleanRecordPayload(parsedResult);
-		},
-		5,
-	);
-
-	return textResult(
-		JSON.stringify(
-			{
-				totalRecords: batchResult.total,
-				successfulRecords: batchResult.successful,
-				failedRecords: batchResult.failed,
-				totalDurationMs: batchResult.totalDurationMs,
-				individualResults: batchResult.individualResults.map((r, i) => ({
-					index: r.index,
-					success: r.success,
-					durationMs: r.durationMs,
-					recordType: records[i]?.recordType ?? "",
-					recordId: records[i]?.recordId ?? "",
-					...(r.success ? { result: r.result } : { error: r.error }),
-				})),
-			},
-			null,
-			2,
-		),
-	);
-}
-
-async function handleGetParallelMetadata(
-	args: Record<string, unknown>,
-	mcpTools: NetSuiteMCPTools,
-): Promise<ToolResponse> {
-	const recordTypes = args.recordTypes as string[] | undefined;
-	const metaType = (args.type || "record") as "record" | "suiteql";
-
-	if (!Array.isArray(recordTypes) || recordTypes.length === 0) {
-		return textResult(
-			"❌ Invalid arguments: recordTypes must be a non-empty array.",
-			true,
-		);
-	}
-
-	const toolName =
-		metaType === "suiteql"
-			? "ns_getSuiteQLMetadata"
-			: "ns_getRecordTypeMetadata";
-
-	const batchResult = await processParallelBatch(
-		recordTypes,
-		async (recordType) => {
-			if (!recordType) throw new Error("Invalid record type");
-			const result = await mcpTools.executeTool(toolName, { recordType });
-			const parsedResult =
-				typeof result === "string" ? await asyncJsonParse(result) : result;
-			return formatMetadataToCompactMarkdown(parsedResult);
-		},
-		5,
-	);
-
-	return textResult(
-		JSON.stringify(
-			{
-				totalMetadataRequests: batchResult.total,
-				type: metaType,
-				successfulRequests: batchResult.successful,
-				failedRequests: batchResult.failed,
-				totalDurationMs: batchResult.totalDurationMs,
-				individualResults: batchResult.individualResults.map((r, i) => ({
-					index: r.index,
-					success: r.success,
-					durationMs: r.durationMs,
-					recordType: recordTypes[i] ?? "",
-					...(r.success ? { result: r.result } : { error: r.error }),
-				})),
-			},
-			null,
-			2,
-		),
-	);
-}
-
 async function handleGetScriptLogs(
 	args: Record<string, unknown>,
 	mcpTools: NetSuiteMCPTools,
@@ -410,18 +257,11 @@ async function handleBatchExecute(
 	const accountId = await oauthManager.getAccountId();
 	const isSandbox = accountId ? isSandboxAccount(accountId) : false;
 
-	const startTime = Date.now();
-	const results: Array<Record<string, unknown>> = new Array(tasks.length);
-
-	await Promise.all(
-		tasks.map(async (task, index) => {
+	const batchResult = await processParallelBatch(
+		tasks,
+		async (task) => {
 			if (!task || typeof task.toolName !== "string") {
-				results[index] = {
-					index,
-					success: false,
-					error: "Invalid task: missing or invalid toolName",
-				};
-				return;
+				throw new Error("Invalid task: missing or invalid toolName");
 			}
 
 			const { toolName, arguments: toolArgs = {} } = task;
@@ -435,82 +275,97 @@ async function handleBatchExecute(
 				safeArgs.tableName = safeArgs.tableName.toLowerCase().trim();
 			}
 
-			const queryStart = Date.now();
+			// Enforce production write-protection guardrail
+			if (
+				(toolName === "ns_createRecord" || toolName === "ns_updateRecord") &&
+				!isSandbox
+			) {
+				throw new Error(
+					`Write operations are disabled in production environments: ${toolName}`,
+				);
+			}
 
-			try {
-				// Enforce the same production write-protection guardrail
-				if (
-					(toolName === "ns_createRecord" || toolName === "ns_updateRecord") &&
-					!isSandbox
-				) {
-					results[index] = {
-						index,
-						toolName,
-						success: false,
-						durationMs: Date.now() - queryStart,
-						error: `Write operations are disabled in production environments: ${toolName}`,
-					};
-					return;
-				}
-
-				let result = await mcpTools.executeTool(toolName, safeArgs);
-
-				// Run hydration if metadata tool
-				if (
-					toolName === "ns_getRecordTypeMetadata" ||
-					toolName === "ns_getSuiteQLMetadata"
-				) {
-					const recordTypeRaw = safeArgs.recordType || safeArgs.tableName;
-					result = await hydrateMetadataIfNeeded(
-						toolName,
-						recordTypeRaw,
-						result || null,
-						mcpTools,
-						resolveCustomRecordRectype,
+			// Support local tools inside batch
+			if (toolName === "netsuite_get_record_link") {
+				const linkRes = await handleGetRecordLink(
+					safeArgs,
+					oauthManager,
+					resolveCustomRecordRectype,
+				);
+				return linkRes.content[0]?.type === "text"
+					? linkRes.content[0].text
+					: linkRes;
+			}
+			if (toolName === "netsuite_get_script_logs") {
+				const logsRes = await handleGetScriptLogs(safeArgs, mcpTools);
+				if (logsRes.isError) {
+					throw new Error(
+						logsRes.content[0]?.type === "text"
+							? logsRes.content[0].text
+							: "Failed to get script logs",
 					);
 				}
-
-				const parsedResult =
-					typeof result === "string" ? await asyncJsonParse(result) : result;
-
-				// Clean/slim the results
-				let finalResult = parsedResult;
-				if (toolName === "ns_getRecord") {
-					finalResult = cleanRecordPayload(parsedResult);
-				} else if (
-					toolName === "ns_getRecordTypeMetadata" ||
-					toolName === "ns_getSuiteQLMetadata"
-				) {
-					finalResult = formatMetadataToCompactMarkdown(parsedResult);
-				}
-
-				results[index] = {
-					index,
-					toolName,
-					success: true,
-					durationMs: Date.now() - queryStart,
-					result: finalResult,
-				};
-			} catch (err: unknown) {
-				results[index] = {
-					index,
-					toolName,
-					success: false,
-					durationMs: Date.now() - queryStart,
-					error: err instanceof Error ? err.message : String(err),
-				};
+				const text =
+					logsRes.content[0]?.type === "text" ? logsRes.content[0].text : "";
+				return await asyncJsonParse(text);
 			}
-		}),
+			if (toolName === "netsuite_refresh_cache") {
+				const refreshRes = await deps.handleCacheRefresh(safeArgs);
+				return refreshRes.content[0]?.type === "text"
+					? refreshRes.content[0].text
+					: refreshRes;
+			}
+
+			let result = await mcpTools.executeTool(toolName, safeArgs);
+
+			// Run hydration if metadata tool
+			if (
+				toolName === "ns_getRecordTypeMetadata" ||
+				toolName === "ns_getSuiteQLMetadata"
+			) {
+				const recordTypeRaw = safeArgs.recordType || safeArgs.tableName;
+				result = await hydrateMetadataIfNeeded(
+					toolName,
+					recordTypeRaw,
+					result ?? null,
+					mcpTools,
+					resolveCustomRecordRectype,
+				);
+			}
+
+			const parsedResult =
+				typeof result === "string" ? await asyncJsonParse(result) : result;
+
+			// Clean/slim the results
+			if (toolName === "ns_getRecord") {
+				return cleanRecordPayload(parsedResult);
+			}
+			if (
+				toolName === "ns_getRecordTypeMetadata" ||
+				toolName === "ns_getSuiteQLMetadata"
+			) {
+				return formatMetadataToCompactMarkdown(parsedResult);
+			}
+
+			return parsedResult;
+		},
+		5,
 	);
 
 	return textResult(
 		JSON.stringify(
 			{
-				totalTasks: tasks.length,
-				successfulTasks: results.filter((r) => r.success).length,
-				failedTasks: results.filter((r) => !r.success).length,
-				totalDurationMs: Date.now() - startTime,
-				individualResults: results,
+				totalTasks: batchResult.total,
+				successfulTasks: batchResult.successful,
+				failedTasks: batchResult.failed,
+				totalDurationMs: batchResult.totalDurationMs,
+				individualResults: batchResult.individualResults.map((r, i) => ({
+					index: r.index,
+					toolName: tasks[i]?.toolName,
+					success: r.success,
+					durationMs: r.durationMs,
+					...(r.success ? { result: r.result } : { error: r.error }),
+				})),
 			},
 			null,
 			2,
@@ -751,15 +606,6 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
 					oauthManager,
 					resolveCustomRecordRectype,
 				);
-			}
-			if (name === "netsuite_run_parallel_queries") {
-				return await handleRunParallelQueries(safeArgs, mcpTools);
-			}
-			if (name === "netsuite_get_parallel_records") {
-				return await handleGetParallelRecords(safeArgs, mcpTools);
-			}
-			if (name === "netsuite_get_parallel_metadata") {
-				return await handleGetParallelMetadata(safeArgs, mcpTools);
 			}
 			if (name === "netsuite_batch_execute") {
 				return await handleBatchExecute(safeArgs, deps);

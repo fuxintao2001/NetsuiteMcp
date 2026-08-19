@@ -279,66 +279,6 @@ describe("MCP Handler Wires", () => {
 			expect(res.content[0].text).toContain("netsuite-mcp");
 		});
 
-		describe("netsuite_run_parallel_queries, netsuite_get_parallel_records, netsuite_get_parallel_metadata", () => {
-			it("should execute netsuite_run_parallel_queries", async () => {
-				const callFn = registeredHandlers.get("tools/call");
-				mockMCPTools.executeTool.mockResolvedValue({ data: [{ id: 1 }] });
-
-				const res = await callFn?.({
-					params: {
-						name: "netsuite_run_parallel_queries",
-						arguments: { queries: ["SELECT id FROM customer"] },
-					},
-				});
-
-				const parsed = JSON.parse(res.content[0].text);
-				expect(parsed.totalQueries).toBe(1);
-				expect(parsed.successfulQueries).toBe(1);
-			});
-
-			it("should execute netsuite_get_parallel_records", async () => {
-				const callFn = registeredHandlers.get("tools/call");
-				mockMCPTools.executeTool.mockResolvedValue({
-					id: "101",
-					type: "customer",
-				});
-
-				const res = await callFn?.({
-					params: {
-						name: "netsuite_get_parallel_records",
-						arguments: {
-							records: [{ recordType: "customer", recordId: "101" }],
-						},
-					},
-				});
-
-				const parsed = JSON.parse(res.content[0].text);
-				expect(parsed.totalRecords).toBe(1);
-				expect(parsed.successfulRecords).toBe(1);
-			});
-
-			it("should execute netsuite_get_parallel_metadata", async () => {
-				const callFn = registeredHandlers.get("tools/call");
-				mockMCPTools.executeTool.mockResolvedValue({
-					success: true,
-					metadata: { type: "object" },
-				});
-
-				const res = await callFn?.({
-					params: {
-						name: "netsuite_get_parallel_metadata",
-						arguments: {
-							recordTypes: ["customer", "salesorder"],
-						},
-					},
-				});
-
-				const parsed = JSON.parse(res.content[0].text);
-				expect(parsed.totalMetadataRequests).toBe(2);
-				expect(parsed.successfulRequests).toBe(2);
-			});
-		});
-
 		describe("netsuite_batch_execute tool", () => {
 			it("should execute multiple tools in parallel and return partial results", async () => {
 				const callFn = registeredHandlers.get("tools/call");
@@ -371,6 +311,58 @@ describe("MCP Handler Wires", () => {
 				expect(parsed.failedTasks).toBe(1);
 				expect(parsed.individualResults[0].success).toBe(true);
 				expect(parsed.individualResults[1].success).toBe(false);
+			});
+
+			it("should execute parallel SuiteQL queries via batch", async () => {
+				const callFn = registeredHandlers.get("tools/call");
+				mockMCPTools.executeTool
+					.mockResolvedValueOnce({ data: [{ id: 1 }] })
+					.mockResolvedValueOnce({ data: [{ id: 2 }] });
+
+				const res = await callFn?.({
+					params: {
+						name: "netsuite_batch_execute",
+						arguments: {
+							tasks: [
+								{
+									toolName: "ns_runCustomSuiteQL",
+									arguments: { sqlQuery: "SELECT id FROM customer" },
+								},
+								{
+									toolName: "ns_runCustomSuiteQL",
+									arguments: { sqlQuery: "SELECT id FROM transaction" },
+								},
+							],
+						},
+					},
+				});
+
+				const parsed = JSON.parse(res.content[0].text);
+				expect(parsed.totalTasks).toBe(2);
+				expect(parsed.successfulTasks).toBe(2);
+			});
+
+			it("should execute local tools like netsuite_get_record_link within batch", async () => {
+				const callFn = registeredHandlers.get("tools/call");
+
+				const res = await callFn?.({
+					params: {
+						name: "netsuite_batch_execute",
+						arguments: {
+							tasks: [
+								{
+									toolName: "netsuite_get_record_link",
+									arguments: { recordType: "customer", recordId: "101" },
+								},
+							],
+						},
+					},
+				});
+
+				const parsed = JSON.parse(res.content[0].text);
+				expect(parsed.totalTasks).toBe(1);
+				expect(parsed.successfulTasks).toBe(1);
+				expect(parsed.individualResults[0].result).toContain("123456_SB1");
 			});
 
 			it("should fail only write tasks in production", async () => {

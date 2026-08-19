@@ -48,7 +48,7 @@ When fulfilling a user request, select tools in this priority order:
 5. Need domain guidance or best practices? → `ns_prompt_library_app`
 6. None of the above? → SuiteQL (follow §5 protocol strictly)
 
-**Performance Tip:** When multiple independent queries/records/metadata are needed, ALWAYS prefer the dedicated parallel tools (`netsuite_run_parallel_queries`, `netsuite_get_parallel_records`, `netsuite_get_parallel_metadata`) or `netsuite_batch_execute` to minimize round-trip network delays.
+**Performance Tip:** When multiple independent queries, records, or metadata lookups are needed, ALWAYS prefer `netsuite_batch_execute` to run tasks concurrently in parallel and minimize round-trip network delays.
 
 ## 4. MCP Tools Quick Reference
 
@@ -58,7 +58,6 @@ When fulfilling a user request, select tools in this priority order:
 |:---|:---|
 | `ns_runCustomSuiteQL` | Execute SuiteQL query (requires `ROWNUM` limit and explicit columns) |
 | `ns_getSuiteQLMetadata` | Get table schema — **MUST call before any SuiteQL query** |
-| `netsuite_run_parallel_queries` | Execute multiple SuiteQL queries concurrently in parallel (up to 5 concurrent) |
 | `netsuite_get_script_logs` | Query script execution logs (ScriptNote table) with optional filters |
 
 ### Record Tools
@@ -66,9 +65,7 @@ When fulfilling a user request, select tools in this priority order:
 | Tool | Purpose |
 |:---|:---|
 | `ns_getRecord` | Read a record by type + ID |
-| `netsuite_get_parallel_records` | Fetch multiple NetSuite records concurrently in parallel |
 | `ns_getRecordTypeMetadata` | Get record type schema and field constraints |
-| `netsuite_get_parallel_metadata` | Fetch metadata for multiple NetSuite record types concurrently in parallel |
 | `netsuite_get_record_link` | Generate NetSuite UI deep link |
 {{WRITE_TOOLS_TABLE}}
 
@@ -103,7 +100,7 @@ When fulfilling a user request, select tools in this priority order:
 
 | Tool | Purpose |
 |:---|:---|
-| `netsuite_batch_execute` | Execute multiple heterogeneous NetSuite MCP tools in parallel (max 10 tasks) |
+| `netsuite_batch_execute` | Execute multiple NetSuite tools in parallel (up to 10 tasks, concurrency 5) |
 | `netsuite_status` | Check auth state, token expiry, cache stats, environment type |
 | `netsuite_refresh_cache` | Clear caches (optional: specific `tableName`) |
 | `netsuite_logout` | Clear authentication session |
@@ -122,7 +119,7 @@ When fulfilling a user request, select tools in this priority order:
 | ① Schema | Query target table schema — **NEVER guess field names** | `ns_getSuiteQLMetadata` |
 | ② Build | Write query per schema; add `ROWNUM <= 1000` or `FETCH FIRST N ROWS ONLY` | — |
 | ③ Test | Validate with `WHERE ROWNUM <= 5` before full execution | `ns_runCustomSuiteQL` |
-| ④ Execute | Run final query | `ns_runCustomSuiteQL` / `netsuite_run_parallel_queries` |
+| ④ Execute | Run final query | `ns_runCustomSuiteQL` / `netsuite_batch_execute` |
 
 ### Supplementary Rules & Self-Healing SOP
 
