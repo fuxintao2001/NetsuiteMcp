@@ -23,6 +23,9 @@ import {
 import { generateNetSuiteUrl } from "../utils/netsuiteUrls.js";
 import {
 	AUTH_TOOL,
+	BatchExecuteArgsSchema,
+	GetRecordLinkArgsSchema,
+	GetScriptLogsArgsSchema,
 	LOCAL_TOOLS,
 	LOGOUT_TOOL,
 	METADATA_RULES_SUFFIX,
@@ -72,15 +75,28 @@ async function handleGetRecordLink(
 	oauthManager: OAuthManager,
 	resolveRectype: (type: string) => number | null | Promise<number | null>,
 ): Promise<ToolResponse> {
+	const parsed = GetRecordLinkArgsSchema.safeParse(args);
+	if (!parsed.success) {
+		return textResult(
+			`❌ Invalid arguments: ${parsed.error.issues[0]?.message}`,
+			true,
+		);
+	}
+	const {
+		recordId,
+		recordType,
+		accountId: targetAccId,
+		rectype: explicitRectype,
+	} = parsed.data;
+
 	const currentAccountId = await oauthManager.getAccountId();
-	const targetAccountId = (args.accountId as string) || currentAccountId;
+	const targetAccountId = targetAccId || currentAccountId;
 
 	if (!targetAccountId) {
 		return textResult("❌ Account ID not found.", true);
 	}
 
-	let rectype = args.rectype as number | string | undefined;
-	const recordType = args.recordType as string | undefined;
+	let rectype = explicitRectype;
 	let hasMappingWarning = false;
 	if (
 		!rectype &&
@@ -96,7 +112,7 @@ async function handleGetRecordLink(
 	const url = generateNetSuiteUrl(
 		targetAccountId,
 		recordType,
-		args.recordId as string,
+		recordId,
 		rectype,
 	);
 	let responseText = `🔗 **NetSuite UI Link (${targetAccountId.toUpperCase()}):**\n${url}`;
@@ -110,33 +126,20 @@ async function handleGetScriptLogs(
 	args: Record<string, unknown>,
 	mcpTools: NetSuiteMCPTools,
 ): Promise<ToolResponse> {
-	const scriptId = args.scriptId as string | undefined;
-	const logType = args.type as string | undefined;
-	const dateFrom = args.dateFrom as string | undefined;
-	const dateTo = args.dateTo as string | undefined;
-	const title = args.title as string | undefined;
-	const detail = args.detail as string | undefined;
-	const deploymentId = args.deploymentId as string | undefined;
-	const rawLimit = args.limit as number | undefined;
-	const limit = Math.min(Math.max(rawLimit || 50, 1), 200);
-
-	// Validate date formats if provided
-	const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
-	if (dateFrom && !dateRegex.test(dateFrom)) {
-		return textResult("❌ Invalid dateFrom format. Use YYYY-MM-DD.", true);
+	const parsed = GetScriptLogsArgsSchema.safeParse(args);
+	if (!parsed.success) {
+		return textResult(`❌ ${parsed.error.issues[0]?.message}`, true);
 	}
-	if (dateTo && !dateRegex.test(dateTo)) {
-		return textResult("❌ Invalid dateTo format. Use YYYY-MM-DD.", true);
-	}
-
-	// Validate log type if provided
-	const validTypes = ["DEBUG", "AUDIT", "ERROR", "EMERGENCY"];
-	if (logType && !validTypes.includes(logType.toUpperCase())) {
-		return textResult(
-			`❌ Invalid log type '${logType}'. Must be one of: ${validTypes.join(", ")}.`,
-			true,
-		);
-	}
+	const {
+		scriptId,
+		type: logType,
+		dateFrom,
+		dateTo,
+		title,
+		detail,
+		deploymentId,
+		limit,
+	} = parsed.data;
 
 	// Build SELECT with Script info joined for complete visibility
 	let sql = `SELECT sn.date, sn.type, sn.title, sn.detail, s.scriptid AS scriptScriptId, s.name AS scriptName FROM ScriptNote AS sn LEFT JOIN Script AS s ON sn.scripttype = s.id`;
@@ -229,30 +232,19 @@ async function handleGetScriptLogs(
 	}
 }
 
-interface BatchTask {
-	toolName: string;
-	arguments?: Record<string, unknown>;
-}
-
 async function handleBatchExecute(
 	args: Record<string, unknown>,
 	deps: ToolHandlerDeps,
 ): Promise<ToolResponse> {
+	const parsed = BatchExecuteArgsSchema.safeParse(args);
+	if (!parsed.success) {
+		return textResult(
+			`❌ Invalid arguments: ${parsed.error.issues[0]?.message}`,
+			true,
+		);
+	}
+	const { tasks } = parsed.data;
 	const { mcpTools, oauthManager, resolveCustomRecordRectype } = deps;
-	const tasks = args.tasks as BatchTask[] | undefined;
-	if (!Array.isArray(tasks) || tasks.length === 0) {
-		return textResult(
-			"❌ Invalid arguments: tasks must be a non-empty array.",
-			true,
-		);
-	}
-
-	if (tasks.length > 10) {
-		return textResult(
-			"❌ Invalid arguments: tasks array exceeds maximum limit of 10.",
-			true,
-		);
-	}
 
 	const accountId = await oauthManager.getAccountId();
 	const isSandbox = accountId ? isSandboxAccount(accountId) : false;

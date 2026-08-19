@@ -1,13 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import {
-	afterEach,
-	beforeEach,
-	describe,
-	expect,
-	it,
-	jest,
-} from "@jest/globals";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { httpClient } from "../utils/httpClient.js";
 import { CallbackServer } from "./callbackServer.js";
 import { OAuthManager } from "./manager.js";
@@ -22,22 +15,22 @@ describe("OAuthManager Integration tests", () => {
 	let httpPostSpy: any;
 
 	beforeEach(async () => {
-		jest.clearAllMocks();
+		vi.clearAllMocks();
 		await fs.rm(testStoragePath, { recursive: true, force: true });
 
 		manager = new OAuthManager({ storagePath: testStoragePath });
 
 		// Mock CallbackServer.prototype.start
-		startSpy = jest.spyOn(CallbackServer.prototype, "start");
+		startSpy = vi.spyOn(CallbackServer.prototype, "start");
 
 		// Mock httpClient.post
-		httpPostSpy = jest.spyOn(httpClient, "post");
+		httpPostSpy = vi.spyOn(httpClient, "post");
 	});
 
 	afterEach(async () => {
 		manager.stopProactiveRefresh();
 		await fs.rm(testStoragePath, { recursive: true, force: true });
-		jest.restoreAllMocks();
+		vi.restoreAllMocks();
 	});
 
 	describe("startAuthFlow", () => {

@@ -1,11 +1,4 @@
-import {
-	afterEach,
-	beforeEach,
-	describe,
-	expect,
-	it,
-	jest,
-} from "@jest/globals";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { httpClient } from "../utils/httpClient.js";
 import {
 	exchangeCodeForTokens,
@@ -18,11 +11,11 @@ describe("TokenExchange", () => {
 	let postSpy: any;
 
 	beforeEach(() => {
-		postSpy = jest.spyOn(httpClient, "post");
+		postSpy = vi.spyOn(httpClient, "post");
 	});
 
 	afterEach(() => {
-		jest.restoreAllMocks();
+		vi.restoreAllMocks();
 	});
 
 	describe("shouldRefreshToken", () => {

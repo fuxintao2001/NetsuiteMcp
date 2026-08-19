@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, jest } from "@jest/globals";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { CacheService } from "./cache.js";
 import { RedisCacheProvider } from "./redisCacheProvider.js";
 
@@ -8,15 +8,15 @@ describe("CacheService with RedisCacheProvider (DI Mock)", () => {
 	let cache: CacheService;
 
 	beforeEach(() => {
-		jest.clearAllMocks();
+		vi.clearAllMocks();
 
 		mockRedisInstance = {
-			connect: jest.fn().mockResolvedValue(undefined),
-			quit: jest.fn().mockResolvedValue(undefined),
-			get: jest.fn(),
-			set: jest.fn(),
-			del: jest.fn(),
-			scan: jest.fn(),
+			connect: vi.fn().mockResolvedValue(undefined),
+			quit: vi.fn().mockResolvedValue(undefined),
+			get: vi.fn(),
+			set: vi.fn(),
+			del: vi.fn(),
+			scan: vi.fn(),
 		};
 
 		provider = new RedisCacheProvider(

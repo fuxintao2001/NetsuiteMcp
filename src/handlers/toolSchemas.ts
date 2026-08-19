@@ -1,14 +1,146 @@
+import { z } from "zod";
+
 // ---------------------------------------------------------------------------
-// MCP Tool Schema definitions (local tools)
+// Zod Schemas & Inferred Types
 // ---------------------------------------------------------------------------
 
-/**
- * Static schema definitions for locally-handled MCP tools.
- *
- * These tools are handled entirely within the MCP server and are NOT proxied
- * to the NetSuite MCP REST API. They use the `netsuite_` prefix to
- * distinguish them from `ns_`-prefixed proxied tools.
- */
+export const AuthenticateArgsSchema = z.object({
+	accountId: z
+		.string()
+		.trim()
+		.optional()
+		.describe(
+			"NetSuite Account ID (e.g. 1234567 or 1234567_SB1). Falls back to NETSUITE_ACCOUNT_ID env var.",
+		),
+	clientId: z
+		.string()
+		.trim()
+		.optional()
+		.describe(
+			"OAuth 2.0 Client ID from NetSuite integration record. Falls back to NETSUITE_CLIENT_ID env var.",
+		),
+});
+export type AuthenticateArgs = z.infer<typeof AuthenticateArgsSchema>;
+
+export const GetRecordLinkArgsSchema = z.object({
+	recordId: z
+		.string()
+		.trim()
+		.min(1, "recordId is required")
+		.describe("Internal ID of the NetSuite record."),
+	recordType: z
+		.string()
+		.trim()
+		.toLowerCase()
+		.optional()
+		.describe("Record type (e.g. salesorder, customer, customrecord_xxx)."),
+	accountId: z
+		.string()
+		.trim()
+		.optional()
+		.describe(
+			"Override account ID (defaults to current authenticated account).",
+		),
+	rectype: z
+		.number()
+		.int()
+		.optional()
+		.describe("Numeric custom record type ID. Auto-resolved if omitted."),
+});
+export type GetRecordLinkArgs = z.infer<typeof GetRecordLinkArgsSchema>;
+
+export const RefreshCacheArgsSchema = z.object({
+	tableName: z
+		.string()
+		.trim()
+		.toLowerCase()
+		.optional()
+		.describe(
+			"Optional: Specific NetSuite table or record type to clear from cache (e.g. customer, salesorder, customrecord_xxx).",
+		),
+});
+export type RefreshCacheArgs = z.infer<typeof RefreshCacheArgsSchema>;
+
+export const BatchTaskSchema = z.object({
+	toolName: z
+		.string()
+		.trim()
+		.min(1, "toolName is required")
+		.describe("The name of the tool to execute."),
+	arguments: z
+		.record(z.string(), z.unknown())
+		.optional()
+		.describe("Arguments dictionary for the specified tool."),
+});
+export type BatchTask = z.infer<typeof BatchTaskSchema>;
+
+export const BatchExecuteArgsSchema = z.object({
+	tasks: z
+		.array(BatchTaskSchema)
+		.min(1, "tasks must be a non-empty array")
+		.max(10, "tasks array exceeds maximum limit of 10")
+		.describe("Array of tasks to execute in parallel (maximum 10 tasks)."),
+});
+export type BatchExecuteArgs = z.infer<typeof BatchExecuteArgsSchema>;
+
+export const GetScriptLogsArgsSchema = z.object({
+	scriptId: z
+		.string()
+		.trim()
+		.optional()
+		.describe(
+			"Filter by script's Script ID (e.g. customscript_my_ue). Matches against Script.scriptid.",
+		),
+	type: z
+		.enum(["DEBUG", "AUDIT", "ERROR", "EMERGENCY"], {
+			error: () => ({
+				message:
+					"Invalid log type. Must be one of: DEBUG, AUDIT, ERROR, EMERGENCY.",
+			}),
+		})
+		.optional()
+		.describe("Filter by log level: DEBUG, AUDIT, ERROR, or EMERGENCY."),
+	dateFrom: z
+		.string()
+		.regex(/^\d{4}-\d{2}-\d{2}$/, "Invalid dateFrom format. Use YYYY-MM-DD.")
+		.optional()
+		.describe("Start date filter in YYYY-MM-DD format (inclusive)."),
+	dateTo: z
+		.string()
+		.regex(/^\d{4}-\d{2}-\d{2}$/, "Invalid dateTo format. Use YYYY-MM-DD.")
+		.optional()
+		.describe("End date filter in YYYY-MM-DD format (inclusive)."),
+	title: z
+		.string()
+		.trim()
+		.optional()
+		.describe("Filter by log title keyword (LIKE fuzzy match)."),
+	detail: z
+		.string()
+		.trim()
+		.optional()
+		.describe("Filter by log detail/message keyword (LIKE fuzzy match)."),
+	deploymentId: z
+		.string()
+		.trim()
+		.optional()
+		.describe(
+			"Filter by deployment Script ID (e.g. customdeploy_my_ue). Matches against ScriptDeployment.scriptid.",
+		),
+	limit: z
+		.number()
+		.int()
+		.optional()
+		.transform((v) => (v !== undefined ? Math.min(Math.max(v, 1), 200) : 50))
+		.describe(
+			"Maximum number of log entries to return. Default: 50, Max: 200.",
+		),
+});
+export type GetScriptLogsArgs = z.infer<typeof GetScriptLogsArgsSchema>;
+
+// ---------------------------------------------------------------------------
+// Static Tool Schema Definitions (local tools)
+// ---------------------------------------------------------------------------
 
 export const AUTH_TOOL = {
 	name: "netsuite_authenticate",

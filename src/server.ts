@@ -1,11 +1,9 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import {
-	localhostHostValidation,
-	localhostOriginValidation,
-} from "@modelcontextprotocol/express";
+import { type ServerType, serve } from "@hono/node-server";
 import { createMcpHandler, Server } from "@modelcontextprotocol/server";
-import express, { type Request, type Response } from "express";
+import type { Context } from "hono";
+import { Hono } from "hono";
 import { registerResourceHandlers } from "./handlers/resources.js";
 import { registerToolHandlers } from "./handlers/tools.js";
 import { NetSuiteMCPTools } from "./mcp/tools.js";
@@ -95,89 +93,85 @@ const ACCOUNT_CONFIGS: Record<string, AccountConfig> = {
 	},
 };
 
-/**
- * Convert Express req to a bodiless Web Standard Request.
- *
- * The request body is NOT included here — it is passed separately via
- * handler.fetch()'s `parsedBody` option. This avoids the Undici
- * "Response body object should not be disturbed or locked" TypeError
- * that occurs when express.json() or any other body-reading middleware
- * has already consumed the IncomingMessage stream.
- */
-function createWebRequest(req: Request): globalThis.Request {
-	const protocol = req.protocol || "http";
-	const host = req.get("host") || "localhost:3000";
-	const fullUrl = `${protocol}://${host}${req.originalUrl || req.url}`;
-
-	const headers = new globalThis.Headers();
-	for (const [key, value] of Object.entries(req.headers)) {
-		if (value !== undefined) {
-			if (Array.isArray(value)) {
-				value.forEach((v) => {
-					headers.append(key, v);
-				});
-			} else {
-				headers.set(key, value);
-			}
-		}
-	}
-
-	// Never pass a body — handler.fetch() receives it via parsedBody instead
-	return new globalThis.Request(fullUrl, {
-		method: req.method,
-		headers,
-	});
-}
-
-/** Pipe Web Standard Response to Express res */
-async function sendWebResponse(
-	webRes: globalThis.Response,
-	expressRes: Response,
-): Promise<void> {
-	expressRes.status(webRes.status);
-	webRes.headers.forEach((value, key) => {
-		expressRes.setHeader(key, value);
-	});
-
-	if (webRes.body) {
-		const reader = webRes.body.getReader();
-		expressRes.on("close", () => {
-			reader.cancel().catch(() => {});
-		});
-
-		try {
-			while (true) {
-				const { done, value } = await reader.read();
-				if (done) break;
-				if (value) {
-					expressRes.write(value);
-				}
-			}
-		} catch (_err) {
-			// Ignored stream error
-		}
-	}
-	expressRes.end();
-}
-
 class NetSuiteHTTPServer {
-	private app: ReturnType<typeof express>;
+	public app: Hono;
+	private serverInstance: ServerType | null = null;
 	private cacheProvider: RedisCacheProvider;
 	private handlers: Map<string, ReturnType<typeof createMcpHandler>> =
 		new Map();
 	private oauthManagers: Map<string, OAuthManager> = new Map();
 
+	private lockProvider: RedisLockProvider | null = null;
+
 	constructor() {
 		this.cacheProvider = new RedisCacheProvider();
+		this.app = new Hono();
+		this.setupRoutes();
+	}
 
-		// Use a plain Express app instead of createMcpExpressApp() to avoid the
-		// built-in express.json() body parser consuming the request stream before
-		// we can pass the body to handler.fetch(). We add express.json() ourselves
-		// so that req.body is available, then pass it as parsedBody to handler.fetch().
-		this.app = express();
-		this.app.use(express.json({ limit: "10mb" }));
-		this.app.use(localhostHostValidation());
-		this.app.use(localhostOriginValidation());
+	private setupRoutes(): void {
+		// Health check endpoint
+		this.app.get("/health", (c: Context) => {
+			return c.json({
+				status: "ok",
+				accounts: Object.keys(ACCOUNT_CONFIGS),
+				redis: this.lockProvider ? "connected" : "disconnected",
+			});
+		});
+
+		const handleMcpRoute = async (c: Context) => {
+			const accountKey = c.req.param("accountId");
+
+			if (!accountKey) {
+				return c.json({ error: "Missing accountId parameter" }, 400);
+			}
+
+			let handler = this.handlers.get(accountKey);
+
+			// Dynamic fallback for unconfigured account or lazy initialization
+			if (!handler) {
+				const configured = ACCOUNT_CONFIGS[accountKey];
+				const envAccountId =
+					configured?.accountId ||
+					process.env.NETSUITE_ACCOUNT_ID ||
+					accountKey;
+				const clientId =
+					configured?.clientId ||
+					process.env.NETSUITE_CLIENT_ID ||
+					"default_client_id";
+				const sessionPath =
+					configured?.sessionPath ||
+					process.env.NETSUITE_SESSION_PATH ||
+					path.join(
+						process.env.HOME || "",
+						`.gemini/antigravity/sessions/${accountKey}`,
+					);
+				const callbackPort =
+					configured?.callbackPort ||
+					parseInt(process.env.OAUTH_CALLBACK_PORT || "8080", 10);
+
+				await fs.mkdir(sessionPath, { recursive: true });
+				const cfg: AccountConfig = {
+					accountId: envAccountId,
+					clientId,
+					sessionPath,
+					callbackPort,
+				};
+
+				handler = createMcpHandler(async () => {
+					return this.createServerInstance(accountKey, cfg, this.lockProvider);
+				});
+
+				this.handlers.set(accountKey, handler);
+			}
+
+			// c.req.raw is a native Web Standard Request object
+			return handler.fetch(c.req.raw);
+		};
+
+		// Explicitly route paths for MCP Hono handler
+		this.app.all("/mcp/:accountId", handleMcpRoute);
+		this.app.all("/mcp/:accountId/*", handleMcpRoute);
 	}
 
 	private getOrCreateOAuthManager(
@@ -283,17 +277,17 @@ class NetSuiteHTTPServer {
 			);
 		}
 
-		const lockProvider = this.cacheProvider.createLockProvider();
+		this.lockProvider = this.cacheProvider.createLockProvider();
 
 		// Pre-create McpHandlers and OAuthManagers for all configured accounts
 		for (const [key, cfg] of Object.entries(ACCOUNT_CONFIGS)) {
 			await fs.mkdir(cfg.sessionPath, { recursive: true });
 
 			// Initialize OAuthManager & start proactive refresh for pre-configured accounts
-			const manager = this.getOrCreateOAuthManager(key, cfg, lockProvider);
+			const manager = this.getOrCreateOAuthManager(key, cfg, this.lockProvider);
 
 			const handler = createMcpHandler(async () => {
-				return this.createServerInstance(key, cfg, lockProvider);
+				return this.createServerInstance(key, cfg, this.lockProvider);
 			});
 
 			this.handlers.set(key, handler);
@@ -314,93 +308,28 @@ class NetSuiteHTTPServer {
 			})();
 		}
 
-		// Health check endpoint
-		this.app.get("/health", (_req: Request, res: Response) => {
-			res.json({
-				status: "ok",
-				accounts: Object.keys(ACCOUNT_CONFIGS),
-				redis: lockProvider ? "connected" : "disconnected",
-			});
-		});
-
-		const handleMcpRoute = async (req: Request, res: Response) => {
-			const rawAccountId = req.params.accountId;
-			const accountKey = Array.isArray(rawAccountId)
-				? rawAccountId[0]
-				: rawAccountId;
-
-			if (!accountKey) {
-				res.status(400).json({ error: "Missing accountId parameter" });
-				return;
-			}
-
-			let handler = this.handlers.get(accountKey);
-
-			// Dynamic fallback for unconfigured account
-			if (!handler) {
-				const envAccountId = process.env.NETSUITE_ACCOUNT_ID || accountKey;
-				const clientId = process.env.NETSUITE_CLIENT_ID || "default_client_id";
-				const sessionPath =
-					process.env.NETSUITE_SESSION_PATH ||
-					path.join(
-						process.env.HOME || "",
-						`.gemini/antigravity/sessions/${accountKey}`,
-					);
-				const callbackPort = parseInt(
-					process.env.OAUTH_CALLBACK_PORT || "8080",
-					10,
+		this.serverInstance = serve(
+			{
+				fetch: this.app.fetch,
+				port,
+			},
+			() => {
+				console.error(
+					`🚀 NetSuite MCP Streamable HTTP Server (Hono) running on http://localhost:${port}`,
 				);
-
-				await fs.mkdir(sessionPath, { recursive: true });
-				const cfg: AccountConfig = {
-					accountId: envAccountId,
-					clientId,
-					sessionPath,
-					callbackPort,
-				};
-
-				handler = createMcpHandler(async () => {
-					return this.createServerInstance(accountKey, cfg, lockProvider);
-				});
-
-				this.handlers.set(accountKey, handler);
-			}
-
-			const webReq = createWebRequest(req);
-			// Pass Express's already-parsed body as parsedBody to handler.fetch().
-			// This avoids handler.fetch() trying to read the body from the Request
-			// object (whose underlying stream was already consumed by express.json()).
-			const fetchOptions: Record<string, unknown> = {};
-			if (
-				req.body &&
-				typeof req.body === "object" &&
-				Object.keys(req.body as object).length > 0
-			) {
-				fetchOptions.parsedBody = req.body;
-			}
-			const webRes = await handler.fetch(webReq, fetchOptions);
-			await sendWebResponse(webRes, res);
-		};
-
-		// Explicitly route paths for MCP Express handler
-		this.app.get("/mcp/:accountId", handleMcpRoute);
-		this.app.post("/mcp/:accountId", handleMcpRoute);
-		this.app.get("/mcp/:accountId/sse", handleMcpRoute);
-		this.app.post("/mcp/:accountId/messages", handleMcpRoute);
-
-		this.app.listen(port, () => {
-			console.error(
-				`🚀 NetSuite MCP Streamable HTTP Server running on http://localhost:${port}`,
-			);
-			console.error(`📡 Active endpoints:`);
-			for (const key of Object.keys(ACCOUNT_CONFIGS)) {
-				console.error(`   - http://localhost:${port}/mcp/${key}/sse`);
-			}
-		});
+				console.error(`📡 Active endpoints:`);
+				for (const key of Object.keys(ACCOUNT_CONFIGS)) {
+					console.error(`   - http://localhost:${port}/mcp/${key}/sse`);
+				}
+			},
+		);
 	}
 
 	public async shutdown(): Promise<void> {
 		console.error("🔌 Shutting down NetSuite HTTP Server...");
+		if (this.serverInstance) {
+			this.serverInstance.close();
+		}
 		for (const manager of this.oauthManagers.values()) {
 			manager.stopProactiveRefresh();
 		}

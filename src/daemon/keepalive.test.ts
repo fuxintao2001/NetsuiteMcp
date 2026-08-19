@@ -1,14 +1,7 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import {
-	afterEach,
-	beforeEach,
-	describe,
-	expect,
-	it,
-	jest,
-} from "@jest/globals";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { runKeepAlive } from "./keepalive.js";
 
 // Simple unit tests for keepalive daemon logic using temporary session files
@@ -58,7 +51,7 @@ describe("Token Keepalive Daemon", () => {
 		await fs.writeFile(sessionFile, JSON.stringify(sessionData));
 
 		// Run keepalive (should skip)
-		const consoleErrorSpy = jest
+		const consoleErrorSpy = vi
 			.spyOn(console, "error")
 			.mockImplementation(() => {});
 		await runKeepAlive();
@@ -86,7 +79,7 @@ describe("Token Keepalive Daemon", () => {
 		const sessionFile = path.join(accountDir, "session.json");
 		await fs.writeFile(sessionFile, JSON.stringify(sessionData));
 
-		const consoleErrorSpy = jest
+		const consoleErrorSpy = vi
 			.spyOn(console, "error")
 			.mockImplementation(() => {});
 		await runKeepAlive();

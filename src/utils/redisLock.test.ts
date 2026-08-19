@@ -1,13 +1,6 @@
-import {
-	afterEach,
-	beforeEach,
-	describe,
-	expect,
-	it,
-	jest,
-} from "@jest/globals";
 import type { Redis } from "ioredis";
 import Redlock from "redlock";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { RedisLockProvider } from "./redisLock.js";
 
 describe("RedisLockProvider", () => {
@@ -20,13 +13,13 @@ describe("RedisLockProvider", () => {
 	});
 
 	afterEach(() => {
-		jest.clearAllMocks();
-		jest.restoreAllMocks();
+		vi.clearAllMocks();
+		vi.restoreAllMocks();
 	});
 
 	it("should acquire a lock and return a non-null lock object", async () => {
-		const mockLock = { release: jest.fn() };
-		const acquireSpy = jest
+		const mockLock = { release: vi.fn() };
+		const acquireSpy = vi
 			.spyOn(Redlock.prototype, "acquire")
 			.mockResolvedValue(mockLock as any);
 
@@ -37,9 +30,9 @@ describe("RedisLockProvider", () => {
 	});
 
 	it("should return null when acquire fails", async () => {
-		jest
-			.spyOn(Redlock.prototype, "acquire")
-			.mockRejectedValue(new Error("Lock failed"));
+		vi.spyOn(Redlock.prototype, "acquire").mockRejectedValue(
+			new Error("Lock failed"),
+		);
 
 		const lock = await lockProvider.acquire("my-resource", 1000);
 
@@ -47,7 +40,7 @@ describe("RedisLockProvider", () => {
 	});
 
 	it("should return true on release success", async () => {
-		const mockLock = { release: jest.fn().mockResolvedValue(undefined) };
+		const mockLock = { release: vi.fn().mockResolvedValue(undefined) };
 
 		const result = await lockProvider.release("my-resource", mockLock as any);
 
@@ -57,7 +50,7 @@ describe("RedisLockProvider", () => {
 
 	it("should return false on release failure", async () => {
 		const mockLock = {
-			release: jest.fn().mockRejectedValue(new Error("Release failed")),
+			release: vi.fn().mockRejectedValue(new Error("Release failed")),
 		};
 
 		const result = await lockProvider.release("my-resource", mockLock as any);

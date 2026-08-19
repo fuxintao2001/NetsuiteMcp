@@ -1,11 +1,4 @@
-import {
-	afterEach,
-	beforeEach,
-	describe,
-	expect,
-	it,
-	jest,
-} from "@jest/globals";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cacheService } from "../utils/cache.js";
 import { httpClient } from "../utils/httpClient.js";
 import { NetSuiteMCPTools } from "./tools.js";
@@ -16,15 +9,15 @@ describe("NetSuiteMCPTools", () => {
 	let httpPostSpy: any;
 
 	beforeEach(() => {
-		jest.clearAllMocks();
+		vi.clearAllMocks();
 
 		mockOAuthManager = {
-			getAccountId: (jest.fn() as any).mockResolvedValue("test-acc"),
-			ensureValidToken: (jest.fn() as any).mockResolvedValue("token-111"),
-			forceRefreshToken: (jest.fn() as any).mockResolvedValue("token-222"),
+			getAccountId: (vi.fn() as any).mockResolvedValue("test-acc"),
+			ensureValidToken: (vi.fn() as any).mockResolvedValue("token-111"),
+			forceRefreshToken: (vi.fn() as any).mockResolvedValue("token-222"),
 		};
 
-		httpPostSpy = jest.spyOn(httpClient, "post").mockResolvedValue({
+		httpPostSpy = vi.spyOn(httpClient, "post").mockResolvedValue({
 			data: {
 				result: {
 					tools: [],
@@ -36,13 +29,13 @@ describe("NetSuiteMCPTools", () => {
 	});
 
 	afterEach(() => {
-		jest.restoreAllMocks();
+		vi.restoreAllMocks();
 	});
 
 	describe("fetchTools", () => {
 		it("should return cached tools if present", async () => {
 			const mockTools = [{ name: "ns_getRecord", description: "desc" }];
-			jest.spyOn(cacheService, "get").mockResolvedValue(mockTools);
+			vi.spyOn(cacheService, "get").mockResolvedValue(mockTools);
 
 			const result = await client.fetchTools();
 			expect(result).toEqual(mockTools);
@@ -50,8 +43,8 @@ describe("NetSuiteMCPTools", () => {
 		});
 
 		it("should fetch tools from JSON-RPC and write to cache if empty", async () => {
-			jest.spyOn(cacheService, "get").mockResolvedValue(null);
-			const cacheSetSpy = jest
+			vi.spyOn(cacheService, "get").mockResolvedValue(null);
+			const cacheSetSpy = vi
 				.spyOn(cacheService, "set")
 				.mockResolvedValue(undefined);
 
@@ -78,7 +71,7 @@ describe("NetSuiteMCPTools", () => {
 	describe("executeTool", () => {
 		it("should return cached metadata for metadata tools", async () => {
 			const cached = { success: true, metadata: {} };
-			jest.spyOn(cacheService, "get").mockResolvedValue(cached);
+			vi.spyOn(cacheService, "get").mockResolvedValue(cached);
 
 			const result = await client.executeTool("ns_getRecordTypeMetadata", {
 				recordType: "customer",
@@ -91,8 +84,8 @@ describe("NetSuiteMCPTools", () => {
 		});
 
 		it("should execute API call and cache metadata on success", async () => {
-			jest.spyOn(cacheService, "get").mockResolvedValue(null);
-			const cacheSetSpy = jest
+			vi.spyOn(cacheService, "get").mockResolvedValue(null);
+			const cacheSetSpy = vi
 				.spyOn(cacheService, "set")
 				.mockResolvedValue(undefined);
 
@@ -115,8 +108,8 @@ describe("NetSuiteMCPTools", () => {
 		});
 
 		it("should invalidate cache for related tables on SuiteQL error (self-heal)", async () => {
-			jest.spyOn(cacheService, "get").mockResolvedValue(null);
-			const cacheDelSpy = jest
+			vi.spyOn(cacheService, "get").mockResolvedValue(null);
+			const cacheDelSpy = vi
 				.spyOn(cacheService, "delete")
 				.mockResolvedValue(undefined);
 
@@ -147,7 +140,7 @@ describe("NetSuiteMCPTools", () => {
 		});
 
 		it("should retry once on 401 unauthorized errors with a forced refresh token", async () => {
-			jest.spyOn(cacheService, "get").mockResolvedValue(null);
+			vi.spyOn(cacheService, "get").mockResolvedValue(null);
 
 			const err401 = new Error("Unauthorized");
 			Object.assign(err401, { response: { status: 401 } });
@@ -170,7 +163,7 @@ describe("NetSuiteMCPTools", () => {
 		});
 
 		it("should retry on transient HTTP 502 and 504 errors", async () => {
-			jest.spyOn(cacheService, "get").mockResolvedValue(null);
+			vi.spyOn(cacheService, "get").mockResolvedValue(null);
 
 			const err502 = new Error("Bad Gateway");
 			Object.assign(err502, { response: { status: 502 } });

@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { describe, expect, it } from "@jest/globals";
+import { describe, expect, it } from "vitest";
 import { base64URLEncode, generatePKCE } from "./pkce.js";
 
 describe("PKCE Utilities", () => {

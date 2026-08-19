@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, jest } from "@jest/globals";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { installGlobalErrorHandlers } from "./globalErrorHandlers.js";
 
 describe("Global Error Handlers", () => {
@@ -11,19 +11,19 @@ describe("Global Error Handlers", () => {
 		eventListeners = {};
 		stdinListeners = {};
 		mockProcess = {
-			on: jest.fn((event: string, listener: (...args: unknown[]) => void) => {
+			on: vi.fn((event: string, listener: (...args: unknown[]) => void) => {
 				eventListeners[event] = listener;
 			}),
 			stdin: {
-				on: jest.fn((event: string, listener: (...args: unknown[]) => void) => {
+				on: vi.fn((event: string, listener: (...args: unknown[]) => void) => {
 					stdinListeners[event] = listener;
 				}),
 			},
-			exit: jest.fn(),
+			exit: vi.fn(),
 			exitCode: undefined,
 		};
 		mockLogger = {
-			error: jest.fn(),
+			error: vi.fn(),
 		};
 	});
 

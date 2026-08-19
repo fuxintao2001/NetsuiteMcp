@@ -12,25 +12,11 @@ import { parseNetSuiteError } from "../utils/errors.js";
 import { httpClient } from "../utils/httpClient.js";
 import { type JsonSchemaProperty, mapFieldType } from "../utils/metadata.js";
 import { ConcurrencyLimiter, retryWithBackoff } from "../utils/resilience.js";
-import { assertValidSuiteQL } from "../utils/suiteqlGuard.js";
-
-/**
- * Extracts table names from a SQL query string (used for cache invalidation).
- */
-function extractTableNames(sqlQuery: string): string[] {
-	const normalized = sqlQuery.toLowerCase();
-	const tables = new Set<string>();
-	const regex = /\b(?:from|join)\s+([a-zA-Z0-9_-]+)\b/g;
-	let match = regex.exec(normalized);
-	while (match !== null) {
-		const tableName = match[1];
-		if (tableName !== undefined) {
-			tables.add(tableName);
-		}
-		match = regex.exec(normalized);
-	}
-	return Array.from(tables);
-}
+import {
+	assertValidSuiteQL,
+	ensureSuiteQLPagination,
+	extractReferencedTables,
+} from "../utils/suiteqlGuard.js";
 
 interface RecordFieldInfo {
 	internalId?: string;
@@ -128,11 +114,13 @@ export class NetSuiteMCPTools {
 		console.error(`🔧 Executing tool: ${toolName}`);
 
 		if (toolName === "ns_runCustomSuiteQL") {
-			const sqlQuery = (parameters.sqlQuery ||
+			let sqlQuery = (parameters.sqlQuery ||
 				parameters.query ||
 				parameters.sql ||
 				"") as string;
 			assertValidSuiteQL(sqlQuery);
+			sqlQuery = ensureSuiteQLPagination(sqlQuery, 100);
+			parameters.sqlQuery = sqlQuery;
 		}
 
 		let result: unknown;
@@ -147,7 +135,7 @@ export class NetSuiteMCPTools {
 				const sqlQuery = (parameters.sqlQuery ||
 					parameters.query ||
 					"") as string;
-				const tableNames = extractTableNames(sqlQuery);
+				const tableNames = extractReferencedTables(sqlQuery);
 				for (const table of tableNames) {
 					try {
 						await cacheService.delete(

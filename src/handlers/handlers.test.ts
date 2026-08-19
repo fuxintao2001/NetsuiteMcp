@@ -1,13 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import {
-	afterEach,
-	beforeEach,
-	describe,
-	expect,
-	it,
-	jest,
-} from "@jest/globals";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { registerResourceHandlers } from "./resources.js";
 import { registerToolHandlers } from "./tools.js";
 
@@ -20,7 +13,7 @@ describe("MCP Handler Wires", () => {
 	const testRoot = path.join(process.cwd(), ".test-handlers-root");
 
 	beforeEach(async () => {
-		jest.clearAllMocks();
+		vi.clearAllMocks();
 		await fs.rm(testRoot, { recursive: true, force: true });
 		await fs.mkdir(
 			path.join(
@@ -39,7 +32,7 @@ describe("MCP Handler Wires", () => {
 
 		registeredHandlers = new Map();
 		mockServer = {
-			setRequestHandler: jest.fn(
+			setRequestHandler: vi.fn(
 				(method: string, handler: (...args: any[]) => any) => {
 					registeredHandlers.set(method, handler);
 				},
@@ -47,22 +40,22 @@ describe("MCP Handler Wires", () => {
 		};
 
 		mockOAuthManager = {
-			getAccountId: (jest.fn() as any).mockResolvedValue("123456_SB1"),
-			hasValidSession: (jest.fn() as any).mockResolvedValue(true),
-			getSessionInfo: (jest.fn() as any).mockResolvedValue({
+			getAccountId: (vi.fn() as any).mockResolvedValue("123456_SB1"),
+			hasValidSession: (vi.fn() as any).mockResolvedValue(true),
+			getSessionInfo: (vi.fn() as any).mockResolvedValue({
 				authenticated: true,
 				accountId: "123456_SB1",
 			}),
 		};
 
 		mockMCPTools = {
-			fetchTools: (jest.fn() as any).mockResolvedValue([
+			fetchTools: (vi.fn() as any).mockResolvedValue([
 				{ name: "ns_getRecord", description: "Fetch NetSuite records" },
 				{ name: "ns_createRecord", description: "Create NetSuite records" },
 				{ name: "ns_updateRecord", description: "Update NetSuite records" },
 				{ name: "ns_runCustomSuiteQL", description: "Run SuiteQL queries" },
 			]),
-			executeTool: (jest.fn() as any).mockImplementation(
+			executeTool: (vi.fn() as any).mockImplementation(
 				(name: string, args: any) => {
 					if (name === "ns_runCustomSuiteQL" && args.customRecordMappings) {
 						if (
@@ -100,13 +93,13 @@ describe("MCP Handler Wires", () => {
 		let refreshCb: any;
 
 		beforeEach(() => {
-			authCb = (jest.fn() as any).mockResolvedValue({
+			authCb = (vi.fn() as any).mockResolvedValue({
 				content: [{ type: "text", text: "Authentication process initiated" }],
 			});
-			logoutCb = (jest.fn() as any).mockResolvedValue({
+			logoutCb = (vi.fn() as any).mockResolvedValue({
 				content: [{ type: "text", text: "Logged out successfully" }],
 			});
-			refreshCb = jest.fn();
+			refreshCb = vi.fn();
 
 			registerToolHandlers({
 				server: mockServer,

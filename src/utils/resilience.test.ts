@@ -1,11 +1,4 @@
-import {
-	afterEach,
-	beforeEach,
-	describe,
-	expect,
-	it,
-	jest,
-} from "@jest/globals";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	ConcurrencyLimiter,
 	getRetryAfterMs,
@@ -16,17 +9,17 @@ import {
 describe("Resilience Utilities", () => {
 	describe("retryWithBackoff", () => {
 		it("should resolve immediately if function succeeds first time", async () => {
-			const fn = jest.fn<() => Promise<string>>().mockResolvedValue("success");
+			const fn = vi.fn<() => Promise<string>>().mockResolvedValue("success");
 			const result = await retryWithBackoff(fn, () => true, { retries: 3 });
 			expect(result).toBe("success");
 			expect(fn).toHaveBeenCalledTimes(1);
 		});
 
 		it("should retry up to limit and throw on final failure", async () => {
-			const fn = jest
+			const fn = vi
 				.fn<() => Promise<string>>()
 				.mockRejectedValue(new Error("failure"));
-			const isRetryable = jest
+			const isRetryable = vi
 				.fn<(error: unknown) => boolean>()
 				.mockReturnValue(true);
 
@@ -59,10 +52,10 @@ describe("Resilience Utilities", () => {
 					},
 				},
 			};
-			jest.useFakeTimers();
-			jest.setSystemTime(new Date("Wed, 21 Oct 2026 07:27:50 GMT"));
+			vi.useFakeTimers();
+			vi.setSystemTime(new Date("Wed, 21 Oct 2026 07:27:50 GMT"));
 			expect(getRetryAfterMs(errorMixedCase)).toBe(10000);
-			jest.useRealTimers();
+			vi.useRealTimers();
 		});
 	});
 
@@ -108,29 +101,29 @@ describe("Resilience Utilities", () => {
 
 	describe("TokenRefreshScheduler", () => {
 		let mockTarget: {
-			hasValidSession: jest.Mock<() => Promise<boolean>>;
-			ensureValidToken: jest.Mock<() => Promise<string>>;
-			forceRefreshToken: jest.Mock<() => Promise<string>>;
-			tryAutoRecover: jest.Mock<() => Promise<void>>;
-			touchHeartbeat: jest.Mock<() => Promise<void>>;
+			hasValidSession: vi.Mock<() => Promise<boolean>>;
+			ensureValidToken: vi.Mock<() => Promise<string>>;
+			forceRefreshToken: vi.Mock<() => Promise<string>>;
+			tryAutoRecover: vi.Mock<() => Promise<void>>;
+			touchHeartbeat: vi.Mock<() => Promise<void>>;
 		};
 		let scheduler: TokenRefreshScheduler;
 
 		beforeEach(() => {
 			mockTarget = {
-				hasValidSession: jest
+				hasValidSession: vi
 					.fn<() => Promise<boolean>>()
 					.mockResolvedValue(true),
-				ensureValidToken: jest
+				ensureValidToken: vi
 					.fn<() => Promise<string>>()
 					.mockResolvedValue("token"),
-				forceRefreshToken: jest
+				forceRefreshToken: vi
 					.fn<() => Promise<string>>()
 					.mockResolvedValue("new-token"),
-				tryAutoRecover: jest
+				tryAutoRecover: vi
 					.fn<() => Promise<void>>()
 					.mockResolvedValue(undefined),
-				touchHeartbeat: jest
+				touchHeartbeat: vi
 					.fn<() => Promise<void>>()
 					.mockResolvedValue(undefined),
 			};
