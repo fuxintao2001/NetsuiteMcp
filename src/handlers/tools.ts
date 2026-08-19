@@ -97,16 +97,17 @@ async function handleGetRecordLink(
 	}
 
 	let rectype = explicitRectype;
-	let hasMappingWarning = false;
-	if (
-		!rectype &&
-		recordType &&
-		recordType.toLowerCase().startsWith("customrecord")
-	) {
+	const isCustomRecord = recordType?.toLowerCase().startsWith("customrecord");
+
+	if (!rectype && recordType && isCustomRecord) {
 		rectype = (await resolveRectype(recordType)) ?? undefined;
-		if (!rectype) {
-			hasMappingWarning = true;
-		}
+	}
+
+	// Detect if recordId might be a document number (tranid) instead of internal numeric ID
+	const isNumericId = /^\d+$/.test(recordId.trim());
+	let idWarning = "";
+	if (!isNumericId) {
+		idWarning = `\n\n⚠️ **Warning:** The provided recordId ('${recordId}') appears to be a document number (tranid) rather than a numeric internal ID. NetSuite UI links require the numeric internal ID (e.g. '123456'). If this link fails to open the record, query its internal ID first via SuiteQL (e.g. \`SELECT id FROM transaction WHERE tranid = '${recordId}'\`).`;
 	}
 
 	const url = generateNetSuiteUrl(
@@ -115,9 +116,23 @@ async function handleGetRecordLink(
 		recordId,
 		rectype,
 	);
+
+	if (!url) {
+		if (isCustomRecord && !rectype) {
+			return textResult(
+				`❌ Failed to generate NetSuite UI Link for custom record '${recordType}': NetSuite custom record URLs strictly require the numeric custom record type ID (rectype). Automatic resolution via SuiteQL failed (ensure your NetSuite integration role has 'Custom Record Types' permission under Permissions > Setup, or provide the numeric 'rectype' parameter explicitly).`,
+				true,
+			);
+		}
+		return textResult(
+			"❌ Failed to generate NetSuite UI Link: invalid or missing parameters.",
+			true,
+		);
+	}
+
 	let responseText = `🔗 **NetSuite UI Link (${targetAccountId.toUpperCase()}):**\n${url}`;
-	if (hasMappingWarning) {
-		responseText += `\n\n⚠️ **Note:** Could not auto-resolve numeric record type ID for custom record '${recordType}'. The generated link uses the string ID, which might not load correctly unless you explicitly provide the numeric 'rectype' parameter or grant your NetSuite integration role the "Custom Record Types" setup permission.`;
+	if (idWarning) {
+		responseText += idWarning;
 	}
 	return textResult(responseText);
 }
@@ -430,16 +445,10 @@ async function appendRecordLink(
 	if (!currentAccountId) return responseText;
 
 	let rectype = args.rectype as number | string | undefined;
-	let hasMappingWarning = false;
-	if (
-		!rectype &&
-		recordType &&
-		recordType.toLowerCase().startsWith("customrecord")
-	) {
+	const isCustomRecord = recordType?.toLowerCase().startsWith("customrecord");
+
+	if (!rectype && recordType && isCustomRecord) {
 		rectype = (await resolveRectype(recordType)) ?? undefined;
-		if (!rectype) {
-			hasMappingWarning = true;
-		}
 	}
 
 	const url = generateNetSuiteUrl(
@@ -450,9 +459,8 @@ async function appendRecordLink(
 	);
 	if (url) {
 		responseText += `\n\n🔗 **NetSuite UI Link (Current Environment):**\n${url}`;
-		if (hasMappingWarning) {
-			responseText += `\n\n⚠️ **Note:** Could not auto-resolve numeric record type ID for custom record '${recordType}'. The generated link uses the string ID, which might not load correctly unless you explicitly provide the numeric 'rectype' parameter or grant your NetSuite integration role the "Custom Record Types" setup permission.`;
-		}
+	} else if (isCustomRecord && !rectype) {
+		responseText += `\n\n⚠️ **Note:** Could not auto-resolve numeric record type ID for custom record '${recordType}'. UI deep link omitted (ensure your NetSuite integration role has 'Custom Record Types' permission under Permissions > Setup).`;
 	}
 	return responseText;
 }

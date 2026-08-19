@@ -5,6 +5,8 @@ describe("NetSuite UI URL Generation", () => {
 	it("should return null if accountId or recordId is missing", () => {
 		expect(generateNetSuiteUrl(undefined, "customer", "123")).toBeNull();
 		expect(generateNetSuiteUrl("123456", "customer", undefined)).toBeNull();
+		expect(generateNetSuiteUrl("123456", "customer", "")).toBeNull();
+		expect(generateNetSuiteUrl("123456", "customer", "   ")).toBeNull();
 	});
 
 	it("should format host subdomain accurately", () => {
@@ -22,18 +24,33 @@ describe("NetSuite UI URL Generation", () => {
 		expect(invUrl).toBe(
 			"https://123456.app.netsuite.com/app/accounting/transactions/custinvc.nl?id=200",
 		);
+
+		const periodUrl = generateNetSuiteUrl("123456", "accountingperiod", "350");
+		expect(periodUrl).toBe(
+			"https://123456.app.netsuite.com/app/accounting/other/period.nl?id=350",
+		);
+
+		const currencyUrl = generateNetSuiteUrl("123456", "currency", "1");
+		expect(currencyUrl).toBe(
+			"https://123456.app.netsuite.com/app/common/other/currency.nl?id=1",
+		);
+
+		const scriptUrl = generateNetSuiteUrl("123456", "script", "99");
+		expect(scriptUrl).toBe(
+			"https://123456.app.netsuite.com/app/common/scripting/script.nl?id=99",
+		);
 	});
 
-	it("should handle custom records using rectype parameter", () => {
-		const customTextUrl = generateNetSuiteUrl(
+	it("should handle custom records requiring numeric rectype parameter", () => {
+		// Custom records without numeric rectype return null to prevent broken NetSuite UI URLs
+		const customWithoutRectype = generateNetSuiteUrl(
 			"123456",
 			"customrecord_my_script",
 			"500",
 		);
-		expect(customTextUrl).toBe(
-			"https://123456.app.netsuite.com/app/common/custom/custrecordentry.nl?rectype=customrecord_my_script&id=500",
-		);
+		expect(customWithoutRectype).toBeNull();
 
+		// Custom records with numeric rectype (number or numeric string) succeed
 		const customNumericUrl = generateNetSuiteUrl(
 			"123456",
 			"customrecord_type",
@@ -41,6 +58,16 @@ describe("NetSuite UI URL Generation", () => {
 			105,
 		);
 		expect(customNumericUrl).toBe(
+			"https://123456.app.netsuite.com/app/common/custom/custrecordentry.nl?rectype=105&id=500",
+		);
+
+		const customStringNumericUrl = generateNetSuiteUrl(
+			"123456",
+			"customrecord_type",
+			"500",
+			"105",
+		);
+		expect(customStringNumericUrl).toBe(
 			"https://123456.app.netsuite.com/app/common/custom/custrecordentry.nl?rectype=105&id=500",
 		);
 	});
