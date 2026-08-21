@@ -21,7 +21,7 @@ These official Oracle NetSuite skills are loaded from the global configuration (
 | `netsuite-owasp-secure-coding` | OWASP Top 10 for SuiteScript — injection, encoding, CSP, API hardening |
 | `netsuite-sdf-project-documentation` | SDF project documentation generation (README, architecture diagrams, runbooks) |
 | `netsuite-sdf-roles-and-permissions` | SDF role/permission XML configuration and validation |
-| `netsuite-sdf-safe-guide` | SDF SAFE Guide — 12 principles, 14 script types, governance, security, 139+ pitfalls |
+| `netsuite-sdf-safe-guide` | SDF SAFE Guide — 12 principles, 14 script types, governance, security, 140+ pitfalls |
 | `netsuite-suitescript-learning` | Interactive SuiteScript learning system (6 modes + SAFE Guide integration) |
 | `netsuite-suitescript-records-reference` | SuiteScript record/field reference (272 record types) |
 | `netsuite-suitescript-upgrade` | SuiteScript 1.0 → 2.1 migration (125+ API mappings, 34 object conversions) |

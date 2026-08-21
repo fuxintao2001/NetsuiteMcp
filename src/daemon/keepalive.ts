@@ -68,11 +68,11 @@ function formatNetSuiteAccountHost(accountId: string): string {
  */
 async function checkNetworkReadiness(timeoutMs = 5000): Promise<boolean> {
 	try {
-		await lookup("suitetalk.api.netsuite.com");
+		await lookup("system.netsuite.com");
 		return await new Promise<boolean>((resolve) => {
 			const req = https.request(
 				{
-					hostname: "suitetalk.api.netsuite.com",
+					hostname: "system.netsuite.com",
 					port: 443,
 					method: "HEAD",
 					timeout: timeoutMs,

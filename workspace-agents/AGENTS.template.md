@@ -139,7 +139,7 @@ When fulfilling a user request, select tools in this priority order:
 - **Script Execution Logs:** Prefer `netsuite_get_script_logs` for convenient filtering (`scriptId`, `type`, `dateFrom`, `dateTo`, `title`, `detail`, `deploymentId`, `limit`).
   - **Prerequisite Permission:** The NetSuite integration role must have the `SuiteScript` (`ADMI_CUSTOMSCRIPT`) permission with at least `View` level under *Permissions > Setup*.
 - **Native Pagination:** For high-volume result sets, prefer `pageSize` + `pageIndex` API parameters over SQL-level `ROWNUM` pagination.
-- **Amount Fields:** `transamount` = local currency, `foreignamount` = foreign currency. Clarify which one the user needs.
+- **Amount Fields:** `amount` (or `netamount`) = base/subsidiary currency equivalent, `foreignamount` = foreign/transaction currency. Clarify which one the user needs.
 - **Status Fields:** Always use `BUILTIN.DF(status)` to get human-readable display names instead of raw encoded values.
 - **Multi-Subsidiary Queries:** Before pulling financial data, explicitly clarify if user wants consolidated or subsidiary-specific results.
 
@@ -166,7 +166,7 @@ Whether **developing new features, creating scripts, refactoring existing code**
 |:---|:---|:---|:---|
 | **① Analyze** | Requirements / Trace Walkthrough | Clarify business requirements, or inspect error stack trace to locate target code files and line numbers | `view_file` / `grep_search` |
 | **② Verify** | Official Knowledge Retrieval | **【MANDATORY PRE-REQUISITE】** Per §1 Knowledge Red Lines: query Context7 for API signatures/syntax, and read relevant Skills for platform limits and known pitfalls | Context7 (`resolve-library-id` → `query-docs`) / Skills (`netsuite-sdf-safe-guide`, `netsuite-suitescript-records-reference`, etc.) |
-| **③ Implement** | Code Execution & Refactoring | Write or modify code based strictly on official specifications; add defensive protections (null checks, non-zero denominator checks, array bounds guards, governance checks, etc.) | `write_to_file` / `replace_file_content` / `multi_replace_file_content` |
+| **③ Implement** | Code Execution & Refactoring | Write or modify code based strictly on official specifications; add defensive protections (null checks, non-zero denominator checks, array bounds guards, governance checks, etc.) | `write_to_file` / `replace_file_content` |
 | **④ Output** | Synthesis & Source Citation | Provide code solution and modification summary; MUST explicitly cite official sources (e.g., `📖 出处：[Title/Resource/Skill]`) | — |
 
 ### 6.2 SuiteScript 2.1 Critical Development Rules & Pitfalls
@@ -193,7 +193,7 @@ Whether **developing new features, creating scripts, refactoring existing code**
    ```
 
 3. **`record.submitFields` Best Practice & Limits:**
-   - **Best Practice:** When updating only body fields, prefer `record.submitFields()` over `record.load()` + `record.save()`. Governance cost (📖 出处：NetSuite Applications Suite — N/record Module Governance Table): transaction records 10 vs 30 units (load 10 + save 20 — a 66% cut), custom records 2 vs 4 units, other non-transaction records 5 vs 10 units. Also avoids loading full sublists.
+   - **Best Practice:** When updating only body fields, prefer `record.submitFields()` over `record.load()` + `record.save()`. Governance cost (📖 出处：NetSuite Applications Suite — N/record Module Governance Table): transaction records 10 vs 30 units (load 10 + save 20 — a 66.7% cut), custom records 2 vs 6 units (load 2 + save 4), other non-transaction records 5 vs 15 units (load 5 + save 10). Also avoids loading full sublists.
    - **Limits:** `record.submitFields` CANNOT update sublists or subrecords. It also cannot update calculated/read-only fields (e.g. `total`, `status`).
 
 4. **Data Type Fidelity (Checkbox & Lists):**
@@ -246,7 +246,7 @@ Whether **developing new features, creating scripts, refactoring existing code**
 | Skill | Domain | MUST Read When |
 |:---|:---|:---|
 | `netsuite-suitescript-records-reference` | Record/field reference (272 types) | Writing SuiteScript with record ops |
-| `netsuite-sdf-safe-guide` | SAFE Guide — 12 principles, 139+ pitfalls | Writing any SuiteScript or SDF config |
+| `netsuite-sdf-safe-guide` | SAFE Guide — 12 principles, 140+ pitfalls | Writing any SuiteScript or SDF config |
 | `netsuite-owasp-secure-coding` | OWASP Top 10 for SuiteScript | Writing RESTlets, Suitelets, Client Scripts |
 | `netsuite-finance-analyst` | Financial analysis & reporting | Financial analysis tasks |
 | `netsuite-ai-connector-instructions` | AI Connector guardrails & setup | AI Connector configuration |

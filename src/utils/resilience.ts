@@ -90,9 +90,6 @@ export class TokenRefreshScheduler {
 	 */
 	private async tick(): Promise<void> {
 		try {
-			// Touch heartbeat to signal that this session is actively managed by a running MCP server
-			await this.target.touchHeartbeat?.().catch(() => {});
-
 			// Detect sleep/wake: if elapsed time >> intervalMs, system likely just woke up
 			const now = Date.now();
 			const elapsed = now - this.lastTickTime;
@@ -113,7 +110,9 @@ export class TokenRefreshScheduler {
 					"🔄 [TokenRefreshScheduler] No valid session. Attempting auto-recovery...",
 				);
 				await this.target.tryAutoRecover(1);
-				await this.target.touchHeartbeat?.().catch(() => {});
+				if (await this.target.hasValidSession()) {
+					await this.target.touchHeartbeat?.().catch(() => {});
+				}
 				return;
 			}
 
