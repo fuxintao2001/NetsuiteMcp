@@ -699,7 +699,9 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
 					parsedRecordResult.error ||
 					parsedRecordResult.message ||
 					JSON.stringify(parsedRecordResult);
-				return textResult(`❌ NetSuite Error: ${errorMsg}`, true);
+				const guidance =
+					"\n\n💡 [Self-Healing Action]: Call `ns_getRecordTypeMetadata` to check schema constraints and valid field IDs.";
+				return textResult(`❌ NetSuite Error: ${errorMsg}${guidance}`, true);
 			}
 
 			if (
@@ -736,7 +738,19 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
 			}
 			// All other errors: return as tool-level error response
 			const message = error instanceof Error ? error.message : String(error);
-			return textResult(`❌ Error: ${message}`, true);
+			let guidance = "";
+			if (name === "ns_runCustomSuiteQL") {
+				guidance =
+					"\n\n💡 [Self-Healing Action]: 1) Call `ns_getSuiteQLMetadata` for referenced tables to verify exact column names and case-sensitivity. 2) Revise your SuiteQL query and retry (Retry up to 3 times before asking the user).";
+			} else if (
+				name === "ns_getRecord" ||
+				name === "ns_createRecord" ||
+				name === "ns_updateRecord"
+			) {
+				guidance =
+					"\n\n💡 [Self-Healing Action]: Call `ns_getRecordTypeMetadata` to check schema constraints and valid field IDs.";
+			}
+			return textResult(`❌ Error: ${message}${guidance}`, true);
 		}
 	});
 }
