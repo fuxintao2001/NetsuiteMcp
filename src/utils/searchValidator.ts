@@ -199,6 +199,146 @@ export const suiteScriptSearchValidator = {
 
 		return { valid: true };
 	},
+
+	/**
+	 * Validate search summary aggregation types (SUM, COUNT, GROUP, MAX, MIN, AVG).
+	 */
+	validateSummaryType(summaryValue: string): SearchValidationResult {
+		const trimmed = summaryValue.trim().toUpperCase();
+		const validSummaries = new Set([
+			"SUM",
+			"COUNT",
+			"GROUP",
+			"MAX",
+			"MIN",
+			"AVG",
+		]);
+		if (validSummaries.has(trimmed)) {
+			return { valid: true };
+		}
+		const correctionMap: Record<string, string> = {
+			TOTAL: "SUM",
+			SUMMATION: "SUM",
+			ADD: "SUM",
+			COUNT_DISTINCT: "COUNT",
+			AVERAGE: "AVG",
+			MAXIMUM: "MAX",
+			MINIMUM: "MIN",
+		};
+		const suggestion = correctionMap[trimmed]
+			? `建议修正为标准枚举 'search.Summary.${correctionMap[trimmed]}' (${correctionMap[trimmed]})`
+			: "支持的汇总类型包括: SUM, COUNT, GROUP, MAX, MIN, AVG";
+		return {
+			valid: false,
+			error: `SSS_INVALID_SRCH_SUMMARY: 汇总类型 '${summaryValue}' 非法`,
+			suggestion,
+		};
+	},
+
+	/**
+	 * Validate search formula column names (formulatext, formulanumeric, formulacurrency, etc.).
+	 */
+	validateFormulaField(formulaField: string): SearchValidationResult {
+		const trimmed = formulaField.toLowerCase().trim();
+		const validFormulas = new Set([
+			"formulatext",
+			"formulanumeric",
+			"formulacurrency",
+			"formuladate",
+			"formuladatetime",
+			"formulapercent",
+		]);
+		if (validFormulas.has(trimmed)) {
+			return { valid: true };
+		}
+		const typoMap: Record<string, string> = {
+			formula_text: "formulatext",
+			textformula: "formulatext",
+			formula_currency: "formulacurrency",
+			currencyformula: "formulacurrency",
+			formula_numeric: "formulanumeric",
+			numberformula: "formulanumeric",
+			numericformula: "formulanumeric",
+		};
+		const suggestion = typoMap[trimmed]
+			? `建议修正为标准公式字段名 '${typoMap[trimmed]}'`
+			: "公式字段名格式应为: formulatext, formulanumeric, formulacurrency, formuladate 等";
+		return {
+			valid: false,
+			error: `SSS_INVALID_SRCH_FORMULA: 公式列名 '${formulaField}' 非法`,
+			suggestion,
+		};
+	},
+
+	/**
+	 * Validate record type string casing (must be lowercase, not camelCase or PascalCase).
+	 */
+	validateRecordTypeString(recordTypeStr: string): SearchValidationResult {
+		const trimmed = recordTypeStr.trim();
+		// If it has uppercase letters and is not all caps enum
+		if (/[A-Z]/.test(trimmed) && trimmed !== trimmed.toUpperCase()) {
+			const lower = trimmed.toLowerCase();
+			return {
+				valid: false,
+				error: `INVALID_RECORD_TYPE_CASING: 记录类型字符串 '${recordTypeStr}' 包含大写字符`,
+				suggestion: `SuiteScript 记录类型字符串必须全部小写，请使用 '${lower}' (或使用常量 search.Type / record.Type)`,
+			};
+		}
+		return { valid: true };
+	},
+
+	/**
+	 * Validate sublist field IDs (e.g. quantity vs qty, rate vs unitprice).
+	 */
+	validateSublistField(
+		_recordType: string,
+		sublistId: string,
+		fieldId: string,
+	): SearchValidationResult {
+		const sublist = sublistId.toLowerCase().trim();
+		const field = fieldId.toLowerCase().trim();
+
+		// Common sublist field hallucination corrections
+		const commonSublistMistakes: Record<string, string> = {
+			qty: "quantity",
+			unitprice: "rate",
+			unit_price: "rate",
+			pricelevel: "price",
+			price_level: "price",
+			tax_code: "taxcode",
+			line_id: "line",
+			item_id: "item",
+		};
+
+		if (commonSublistMistakes[field]) {
+			return {
+				valid: false,
+				error: `SSS_INVALID_SUBLIST_FIELD: 子列表 '${sublist}' 中的字段 '${fieldId}' 非法`,
+				suggestion: `建议修正为官方标准子列表字段 '${commonSublistMistakes[field]}'`,
+			};
+		}
+
+		return { valid: true };
+	},
+
+	/**
+	 * Validate boolean conjunctions in search filter expressions (AND, OR, NOT).
+	 */
+	validateFilterConnector(connector: string): SearchValidationResult {
+		const trimmed = connector.trim();
+		const validConnectors = new Set(["AND", "OR", "NOT"]);
+		if (validConnectors.has(trimmed)) {
+			return { valid: true };
+		}
+		if (["and", "or", "not", "&&", "||"].includes(trimmed.toLowerCase())) {
+			return {
+				valid: false,
+				error: `SSS_INVALID_SRCH_FILTER_EXPR: 过滤连接符 '${connector}' 格式错误`,
+				suggestion: `SuiteScript 过滤连接符必须是大写字符串 'AND' 或 'OR' 或 'NOT'`,
+			};
+		}
+		return { valid: true };
+	},
 };
 
 export const SuiteScriptSearchValidator = suiteScriptSearchValidator;

@@ -1,156 +1,8 @@
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import { SuiteScriptSearchValidator } from '../src/utils/searchValidator.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const recordsJsonPath = '/Users/fuxintao/.gemini/config/skills/netsuite-suitescript-records-reference/references/records.json';
-
-interface SearchFieldCheck {
-  recordType: string;
-  fieldId: string;
-  isFilter?: boolean;
-}
-
-interface ValidationResult {
-  valid: boolean;
-  error?: string;
-  suggestion?: string;
-}
-
-class SuiteScriptSearchValidator {
-  private recordsData: any = null;
-
-  constructor() {
-    if (fs.existsSync(recordsJsonPath)) {
-      try {
-        const raw = fs.readFileSync(recordsJsonPath, 'utf-8');
-        this.recordsData = JSON.parse(raw).records;
-      } catch (err) {
-        console.warn('⚠️ 无法加载 records.json，使用内置核心字典');
-      }
-    }
-  }
-
-  /**
-   * 验证 search.create 中的 column 或 filter 字段是否存在于官方元数据中
-   */
-  public validateField(recordType: string, fieldId: string, isFilter = false): ValidationResult {
-    const recType = recordType.toLowerCase().trim();
-    const field = fieldId.toLowerCase().trim();
-
-    // 自定义字段 custbody_/custcol_/custrecord_/custentity_ 直接放行
-    if (/^cust(body|col|record|entity|item|event)_/i.test(field)) {
-      return { valid: true };
-    }
-
-    if (!this.recordsData || !this.recordsData[recType]) {
-      return { valid: true }; // 未知记录类型跳过
-    }
-
-    const rec = this.recordsData[recType];
-    const listToCheck = isFilter 
-      ? (rec.searchFilters || []).map((f: any) => f.internalId.toLowerCase())
-      : (rec.searchColumns || []).map((c: any) => c.internalId.toLowerCase());
-
-    // 备选全字段列表
-    const allFields = (rec.fields || []).map((f: any) => f.internalId.toLowerCase());
-
-    const exists = listToCheck.includes(field) || allFields.includes(field) || field === 'internalid' || field === 'id';
-
-    if (!exists) {
-      // 常见 LLM 幻觉字段自动纠错映射
-      const commonCorrections: Record<string, string> = {
-        'customerid': 'entityid',
-        'customername': 'companyname',
-        'totalrevenue': 'balance',
-        'createddate': 'datecreated',
-        'salesorderid': 'tranid',
-        'orderamount': 'total',
-        'orderdate': 'trandate',
-        'statusname': 'status',
-        'itemid': 'item'
-      };
-
-      const suggestion = commonCorrections[field] 
-        ? `建议修正为官方标准字段 '${commonCorrections[field]}'` 
-        : `请查阅 netsuite-suitescript-records-reference 中的 ${recType} 字段列表`;
-
-      return {
-        valid: false,
-        error: `SSS_INVALID_SRCH_${isFilter ? 'FILTER' : 'COL'}: 字段 '${fieldId}' 不存在于 ${recordType} 官方元数据定义中`,
-        suggestion
-      };
-    }
-
-    return { valid: true };
-  }
-
-  /**
-   * 验证 search.create 中的交易类型短代码
-   */
-  public validateTransactionTypeFilter(typeValue: string): ValidationResult {
-    const validCodes = [
-      'SalesOrd', 'CustInvc', 'PurchOrd', 'VendBill', 'Journal',
-      'CustCred', 'ItemRcpt', 'ItemShip', 'CashSale', 'VendPymt',
-      'CustPymt', 'Estimate', 'RtnAuth', 'Check', 'Deposit', 'Transfer'
-    ];
-
-    const invalidUiNames: Record<string, string> = {
-      'sales order': 'SalesOrd',
-      'invoice': 'CustInvc',
-      'purchase order': 'PurchOrd',
-      'vendor bill': 'VendBill',
-      'journal entry': 'Journal',
-      'credit memo': 'CustCred'
-    };
-
-    const val = typeValue.trim();
-    if (validCodes.includes(val)) {
-      return { valid: true };
-    }
-
-    const corrected = invalidUiNames[val.toLowerCase()];
-    return {
-      valid: false,
-      error: `SSS_INVALID_SRCH_FILTER: 交易类型过滤值 '${typeValue}' 非法 (严禁使用 UI 文本)`,
-      suggestion: corrected ? `必须使用 NetSuite 官方短代码 '${corrected}'` : '请使用标准 Shortcode'
-    };
-  }
-
-  /**
-   * 检测 SuiteScript 1.0 与 2.1 API 混用
-   */
-  public checkLegacyApiMixing(codeString: string): ValidationResult {
-    const legacyPatterns = [
-      { pattern: /\bnlapi\w+\b/g, name: 'nlapi* (SuiteScript 1.0 函数)' },
-      { pattern: /\bnew\s+nlobjSearchFilter\b/g, name: 'nlobjSearchFilter (SuiteScript 1.0 对象)' },
-      { pattern: /\bnew\s+nlobjSearchColumn\b/g, name: 'nlobjSearchColumn (SuiteScript 1.0 对象)' }
-    ];
-
-    for (const { pattern, name } of legacyPatterns) {
-      if (pattern.test(codeString)) {
-        return {
-          valid: false,
-          error: `API 混用漏洞: 检测到 2.1 脚本中引用了 ${name}`,
-          suggestion: '必须统一使用 SuiteScript 2.1 N/search 模块 (search.create / search.createColumn)'
-        };
-      }
-    }
-
-    return { valid: true };
-  }
-}
-
-// ---------------------------------------------------------------------------
-// 执行测试用例
-// ---------------------------------------------------------------------------
-
-console.log('='.repeat(75));
-console.log('🧪 SuiteScript 2.1 search.create 字段幻觉与防偷懒专项实测 Benchmark');
-console.log('='.repeat(75) + '\n');
-
-const validator = new SuiteScriptSearchValidator();
+console.log('='.repeat(80));
+console.log('🧪 SuiteScript 2.1 search.create 全场景字段幻觉与防偷懒深度压测 Benchmark');
+console.log('='.repeat(80) + '\n');
 
 const testCases = [
   {
@@ -159,7 +11,7 @@ const testCases = [
       const hallucinatedFields = ['customerId', 'customerName', 'totalRevenue'];
       const errors: string[] = [];
       for (const f of hallucinatedFields) {
-        const res = validator.validateField('customer', f, false);
+        const res = SuiteScriptSearchValidator.validateField('customer', f, false);
         if (!res.valid) errors.push(`${f} ➔ ${res.suggestion}`);
       }
       return {
@@ -174,7 +26,7 @@ const testCases = [
     name: '用例 2 [Customer 官方标准字段]: 使用 entityid / companyname / email / balance',
     run: () => {
       const validFields = ['entityid', 'companyname', 'email', 'balance', 'datecreated'];
-      const allValid = validFields.every(f => validator.validateField('customer', f, false).valid);
+      const allValid = validFields.every(f => SuiteScriptSearchValidator.validateField('customer', f, false).valid);
       return {
         passed: allValid,
         message: allValid 
@@ -186,7 +38,7 @@ const testCases = [
   {
     name: '用例 3 [Transaction 过滤值偷懒]: 使用 UI 显示名 "Sales Order" 代替短代码',
     run: () => {
-      const res = validator.validateTransactionTypeFilter('Sales Order');
+      const res = SuiteScriptSearchValidator.validateTransactionType('Sales Order');
       return {
         passed: !res.valid,
         message: !res.valid 
@@ -199,7 +51,7 @@ const testCases = [
     name: '用例 4 [Transaction 官方短代码]: 使用 SalesOrd / CustInvc / PurchOrd',
     run: () => {
       const validCodes = ['SalesOrd', 'CustInvc', 'PurchOrd'];
-      const allValid = validCodes.every(c => validator.validateTransactionTypeFilter(c).valid);
+      const allValid = validCodes.every(c => SuiteScriptSearchValidator.validateTransactionType(c).valid);
       return {
         passed: allValid,
         message: allValid 
@@ -212,7 +64,7 @@ const testCases = [
     name: '用例 5 [自定义字段规范放行]: custbody_approval_status / custentity_tax_id',
     run: () => {
       const customFields = ['custbody_approval_status', 'custentity_tax_id', 'custcol_discount_code'];
-      const allValid = customFields.every(f => validator.validateField('salesorder', f, false).valid);
+      const allValid = customFields.every(f => SuiteScriptSearchValidator.validateField('salesorder', f, false).valid);
       return {
         passed: allValid,
         message: allValid 
@@ -230,7 +82,7 @@ const testCases = [
           filters: [new nlobjSearchFilter('email', null, 'is', 'test@test.com')]
         });
       `;
-      const res = validator.checkLegacyApiMixing(badCode);
+      const res = SuiteScriptSearchValidator.checkLegacyApiMixing(badCode);
       return {
         passed: !res.valid,
         message: !res.valid 
@@ -259,12 +111,84 @@ const testCases = [
           };
         });
       `;
-      const res = validator.checkLegacyApiMixing(goodCode);
+      const res = SuiteScriptSearchValidator.checkLegacyApiMixing(goodCode);
       return {
         passed: res.valid,
         message: res.valid 
           ? '✅ 标准 SuiteScript 2.1 代码检测完全合规'
           : '❌ 纯净代码被误判'
+      };
+    }
+  },
+  {
+    name: '用例 8 [搜索汇总类型偷懒]: 使用非法汇总名称 TOTAL / SUMMATION',
+    run: () => {
+      const res1 = SuiteScriptSearchValidator.validateSummaryType('TOTAL');
+      const res2 = SuiteScriptSearchValidator.validateSummaryType('SUM');
+      const passed = !res1.valid && res2.valid;
+      return {
+        passed,
+        message: passed 
+          ? `✅ 成功拦截非法汇总 TOTAL 并提示: ${res1.suggestion}`
+          : '❌ 汇总校验失败'
+      };
+    }
+  },
+  {
+    name: '用例 9 [公式列名拼写错误]: 使用 formula_currency / textformula 错误命名',
+    run: () => {
+      const res1 = SuiteScriptSearchValidator.validateFormulaField('formula_currency');
+      const res2 = SuiteScriptSearchValidator.validateFormulaField('formulacurrency');
+      const passed = !res1.valid && res2.valid;
+      return {
+        passed,
+        message: passed 
+          ? `✅ 成功拦截 formula_currency 并修正为: ${res1.suggestion}`
+          : '❌ 公式字段名校验失败'
+      };
+    }
+  },
+  {
+    name: '用例 10 [记录类型大小写错误]: 传入驼峰命名 salesOrder / PurchaseOrder',
+    run: () => {
+      const res1 = SuiteScriptSearchValidator.validateRecordTypeString('salesOrder');
+      const res2 = SuiteScriptSearchValidator.validateRecordTypeString('salesorder');
+      const passed = !res1.valid && res2.valid;
+      return {
+        passed,
+        message: passed 
+          ? `✅ 成功拦截驼峰大小写并提示: ${res1.suggestion}`
+          : '❌ 记录类型大小写校验失败'
+      };
+    }
+  },
+  {
+    name: '用例 11 [子列表字段缩写偷懒]: 在 item 子列表中使用 qty / unitprice',
+    run: () => {
+      const res1 = SuiteScriptSearchValidator.validateSublistField('salesorder', 'item', 'qty');
+      const res2 = SuiteScriptSearchValidator.validateSublistField('salesorder', 'item', 'unitprice');
+      const res3 = SuiteScriptSearchValidator.validateSublistField('salesorder', 'item', 'quantity');
+      const passed = !res1.valid && !res2.valid && res3.valid;
+      return {
+        passed,
+        message: passed 
+          ? `✅ 成功拦截缩写 qty (建议: quantity) 和 unitprice (建议: rate)`
+          : '❌ 子列表字段校验失败'
+      };
+    }
+  },
+  {
+    name: '用例 12 [过滤连接符格式错误]: 在 Filter 表达式中使用小写 "and" 或 "&&"',
+    run: () => {
+      const res1 = SuiteScriptSearchValidator.validateFilterConnector('and');
+      const res2 = SuiteScriptSearchValidator.validateFilterConnector('&&');
+      const res3 = SuiteScriptSearchValidator.validateFilterConnector('AND');
+      const passed = !res1.valid && !res2.valid && res3.valid;
+      return {
+        passed,
+        message: passed 
+          ? `✅ 成功拦截小写 and 与符号 &&，强制要求大写 'AND' / 'OR'`
+          : '❌ 过滤连接符校验失败'
       };
     }
   }
@@ -276,12 +200,12 @@ for (let i = 0; i < testCases.length; i++) {
   const res = tc.run();
   console.log(`[${i + 1}] ${tc.name}`);
   console.log(`   ${res.message}`);
-  console.log('-'.repeat(75));
+  console.log('-'.repeat(80));
   if (res.passed) passedCount++;
 }
 
 const score = Math.round((passedCount / testCases.length) * 100);
-console.log(`\n📈 SuiteScript search.create 专项压测统计:`);
+console.log(`\n📈 SuiteScript search.create 全场景专项压测统计:`);
 console.log(`   总测试项: ${testCases.length}`);
 console.log(`   通过项: ${passedCount}`);
 console.log(`   未通过项: ${testCases.length - passedCount}`);
