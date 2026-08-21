@@ -116,3 +116,116 @@ export function formatMetadataToCompactMarkdown(schema: unknown): string {
 	}
 	return output;
 }
+
+/**
+ * Formats SuiteQL query result rows into a compact Markdown table to drastically reduce token usage.
+ */
+export function formatSuiteQLToCompactMarkdown(result: unknown): string {
+	if (!result) return "No results returned.";
+
+	let dataRows: Array<Record<string, unknown>> = [];
+	let totalResults: number | undefined;
+
+	// Direct array
+	if (Array.isArray(result)) {
+		dataRows = result as Array<Record<string, unknown>>;
+	} else if (typeof result === "object" && result !== null) {
+		const resObj = result as Record<string, unknown>;
+
+		// Check if it's already an error payload
+		if (resObj.error || resObj.success === false) {
+			return typeof result === "string"
+				? result
+				: JSON.stringify(result, null, 2);
+		}
+
+		if (Array.isArray(resObj.data)) {
+			dataRows = resObj.data as Array<Record<string, unknown>>;
+			totalResults =
+				typeof resObj.totalResults === "number"
+					? resObj.totalResults
+					: undefined;
+		} else if (Array.isArray(resObj.records)) {
+			dataRows = resObj.records as Array<Record<string, unknown>>;
+		} else if (Array.isArray(resObj.items)) {
+			dataRows = resObj.items as Array<Record<string, unknown>>;
+		} else if (Array.isArray(resObj.content)) {
+			// Handle MCP content wrapper
+			const first = resObj.content[0] as { text?: string } | undefined;
+			if (first?.text && typeof first.text === "string") {
+				try {
+					const parsed = JSON.parse(first.text);
+					return formatSuiteQLToCompactMarkdown(parsed);
+				} catch {
+					return first.text;
+				}
+			}
+		} else {
+			// Single object record row
+			const keys = Object.keys(resObj).filter(
+				(k) =>
+					k !== "links" &&
+					k !== "method" &&
+					k !== "totalResults" &&
+					k !== "numberOfPages",
+			);
+			if (keys.length > 0) {
+				dataRows = [resObj];
+			}
+		}
+	} else if (typeof result === "string") {
+		try {
+			const parsed = JSON.parse(result);
+			return formatSuiteQLToCompactMarkdown(parsed);
+		} catch {
+			return result;
+		}
+	}
+
+	if (!dataRows || dataRows.length === 0) {
+		return "No rows returned.";
+	}
+
+	// Extract unique headers while preserving order
+	const headers: string[] = [];
+	const headerSet = new Set<string>();
+	for (const row of dataRows) {
+		if (typeof row === "object" && row !== null) {
+			for (const key of Object.keys(row)) {
+				if (key === "links") continue;
+				if (!headerSet.has(key)) {
+					headerSet.add(key);
+					headers.push(key);
+				}
+			}
+		}
+	}
+
+	if (headers.length === 0) {
+		return "No rows returned.";
+	}
+
+	let output = "";
+	if (totalResults !== undefined && totalResults !== dataRows.length) {
+		output += `*Total Results: ${totalResults} (Showing ${dataRows.length} rows)*\n\n`;
+	}
+
+	output += `| ${headers.join(" | ")} |\n`;
+	output += `| ${headers.map(() => "---").join(" | ")} |\n`;
+
+	for (const row of dataRows) {
+		const rowValues = headers.map((header) => {
+			const val = row[header];
+			if (val === null || val === undefined || val === "") {
+				return "-";
+			}
+			if (typeof val === "object") {
+				return JSON.stringify(val).replace(/\|/g, "\\|").replace(/\n/g, " ");
+			}
+			return String(val).replace(/\|/g, "\\|").replace(/\n/g, " ");
+		});
+		output += `| ${rowValues.join(" | ")} |\n`;
+	}
+
+	return output.trim();
+}

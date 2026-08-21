@@ -24,7 +24,7 @@ interface RecordTypeDef {
 const COMMON_HALLUCINATION_MAP: Record<string, string> = {
 	customerid: "entityid",
 	customername: "companyname",
-	totalrevenue: "balance",
+	customerbalance: "balance",
 	createddate: "datecreated",
 	salesorderid: "tranid",
 	orderamount: "total",

@@ -150,6 +150,30 @@ export function ensureSuiteQLPagination(
 }
 
 /**
+ * Detects whether a SuiteQL query contains any wildcard column projection (* or alias.*),
+ * while correctly ignoring COUNT(*) aggregate functions and arithmetic multiplication (a * b).
+ */
+export function hasWildcardSelection(maskedSql: string): boolean {
+	const selectBlocks = maskedSql.match(
+		/(?:^|\s|\()SELECT\s+(?:DISTINCT\s+)?([\s\S]+?)\s+FROM\b/gi,
+	);
+	if (!selectBlocks) return false;
+
+	for (const block of selectBlocks) {
+		const projMatch =
+			/(?:^|\s|\()SELECT\s+(?:DISTINCT\s+)?([\s\S]+?)\s+FROM\b/i.exec(block);
+		if (!projMatch?.[1]) continue;
+		const projection = projMatch[1];
+
+		// Check for standalone * or alias.* not enclosed as a function parameter (e.g. not COUNT(*))
+		if (/(?:^|\s|,)(?:\w+\.)?\*\s*(?:,|$)/.test(projection.trim())) {
+			return true;
+		}
+	}
+	return false;
+}
+
+/**
  * Validates a SuiteQL query string for security compliance.
  */
 export function validateSuiteQL(sqlQuery: string): SuiteQLValidationResult {
@@ -204,16 +228,12 @@ export function validateSuiteQL(sqlQuery: string): SuiteQLValidationResult {
 		};
 	}
 
-	// Check for 'SELECT *' or 'SELECT alias.*' (Gate 2 Syntax Mandate)
-	if (
-		/(?:^|\s)SELECT\s+(?:DISTINCT\s+)?(?:\w+\.)?\*\s+(?:FROM\b|,)/i.test(
-			maskedSql,
-		)
-	) {
+	// Check for 'SELECT *' or 'SELECT alias.*' (Gate 2 Syntax Mandate) across all projection positions
+	if (hasWildcardSelection(maskedSql)) {
 		return {
 			valid: false,
 			reason:
-				"SuiteQL query contains 'SELECT *'. Explicitly specify each required column name to optimize performance, prevent governance timeouts, and avoid invalid field errors.",
+				"SuiteQL query contains 'SELECT *' or wildcard projection (e.g. 'table.*'). Explicitly specify each required column name to optimize performance, prevent governance timeouts, and avoid invalid field errors.",
 		};
 	}
 

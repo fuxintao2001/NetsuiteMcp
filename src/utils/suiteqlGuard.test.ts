@@ -108,6 +108,35 @@ describe("suiteqlGuard", () => {
 			expect(res.reason).toContain("contains 'SELECT *'");
 		});
 
+		it("should reject alias wildcards in any position (SELECT c.*, t.* or SELECT id, t.*)", () => {
+			const res1 = validateSuiteQL(
+				"SELECT c.*, t.* FROM customer c JOIN transaction t ON c.id = t.entity",
+			);
+			expect(res1.valid).toBe(false);
+			expect(res1.reason).toContain("wildcard projection");
+
+			const res2 = validateSuiteQL("SELECT id, t.* FROM transaction t");
+			expect(res2.valid).toBe(false);
+			expect(res2.reason).toContain("wildcard projection");
+		});
+
+		it("should allow valid COUNT(*) aggregate and arithmetic multiplication without false positives", () => {
+			const countRes = validateSuiteQL(
+				"SELECT COUNT(*) AS total FROM customer",
+			);
+			expect(countRes.valid).toBe(true);
+
+			const multiCountRes = validateSuiteQL(
+				"SELECT id, COUNT(*) FROM customer GROUP BY id",
+			);
+			expect(multiCountRes.valid).toBe(true);
+
+			const arithRes = validateSuiteQL(
+				"SELECT a.id, a.quantity * a.rate AS total FROM transactionline a",
+			);
+			expect(arithRes.valid).toBe(true);
+		});
+
 		it("should reject queries with MySQL/Postgres LIMIT (Gate 2 Syntax Mandate)", () => {
 			const res = validateSuiteQL("SELECT id FROM customer LIMIT 10");
 			expect(res.valid).toBe(false);

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
 	cleanRecordPayload,
 	formatMetadataToCompactMarkdown,
+	formatSuiteQLToCompactMarkdown,
 } from "./contextSlimmer.js";
 
 describe("Context Slimmer", () => {
@@ -86,6 +87,61 @@ describe("Context Slimmer", () => {
 				"plain string",
 			);
 			expect(formatMetadataToCompactMarkdown(null)).toBe("null");
+		});
+	});
+
+	describe("formatSuiteQLToCompactMarkdown", () => {
+		it("should format a standard SuiteQL result array into a Markdown table", () => {
+			const suiteqlResult = {
+				totalResults: 2,
+				numberOfPages: 1,
+				data: [
+					{ id: "101", tranid: "SO1001", trandate: "2025-01-01", amount: 5000 },
+					{ id: "102", tranid: "SO1002", trandate: "2025-01-02", amount: 3200 },
+				],
+			};
+
+			const markdown = formatSuiteQLToCompactMarkdown(suiteqlResult);
+			expect(markdown).toContain("| id | tranid | trandate | amount |");
+			expect(markdown).toContain("| 101 | SO1001 | 2025-01-01 | 5000 |");
+			expect(markdown).toContain("| 102 | SO1002 | 2025-01-02 | 3200 |");
+		});
+
+		it("should escape pipe characters and newlines in column values", () => {
+			const data = [
+				{
+					id: "1",
+					memo: "Contract | Phase 1\nNotes here",
+					status: null,
+				},
+			];
+
+			const markdown = formatSuiteQLToCompactMarkdown(data);
+			expect(markdown).toContain("| id | memo | status |");
+			expect(markdown).toContain("Contract \\| Phase 1 Notes here");
+			expect(markdown).toContain(" - |");
+		});
+
+		it("should handle empty results gracefully", () => {
+			expect(formatSuiteQLToCompactMarkdown([])).toBe("No rows returned.");
+			expect(formatSuiteQLToCompactMarkdown({ data: [] })).toBe(
+				"No rows returned.",
+			);
+			expect(formatSuiteQLToCompactMarkdown(null)).toBe("No results returned.");
+		});
+
+		it("should display total results notice when paginated", () => {
+			const paginatedResult = {
+				totalResults: 150,
+				data: [
+					{ id: "1", name: "Row 1" },
+					{ id: "2", name: "Row 2" },
+				],
+			};
+
+			const markdown = formatSuiteQLToCompactMarkdown(paginatedResult);
+			expect(markdown).toContain("*Total Results: 150 (Showing 2 rows)*");
+			expect(markdown).toContain("| 1 | Row 1 |");
 		});
 	});
 });

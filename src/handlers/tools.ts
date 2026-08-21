@@ -11,6 +11,7 @@ import { cacheService } from "../utils/cache.js";
 import {
 	cleanRecordPayload,
 	formatMetadataToCompactMarkdown,
+	formatSuiteQLToCompactMarkdown,
 } from "../utils/contextSlimmer.js";
 import { buildEnvSuffix, isSandboxAccount } from "../utils/environment.js";
 import { asyncJsonParse } from "../utils/json.js";
@@ -352,6 +353,9 @@ async function handleBatchExecute(
 				toolName === "ns_getSuiteQLMetadata"
 			) {
 				return formatMetadataToCompactMarkdown(parsedResult);
+			}
+			if (toolName === "ns_runCustomSuiteQL") {
+				return formatSuiteQLToCompactMarkdown(parsedResult);
 			}
 
 			return parsedResult;
@@ -702,6 +706,10 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
 				const guidance =
 					"\n\n💡 [Self-Healing Action]: Call `ns_getRecordTypeMetadata` to check schema constraints and valid field IDs.";
 				return textResult(`❌ NetSuite Error: ${errorMsg}${guidance}`, true);
+			}
+
+			if (name === "ns_runCustomSuiteQL") {
+				return textResult(formatSuiteQLToCompactMarkdown(result));
 			}
 
 			if (
