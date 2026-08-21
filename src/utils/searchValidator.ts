@@ -77,8 +77,10 @@ const TRANSACTION_SHORTCODE_MAP: Record<string, string> = {
 	"vendor prepayment application": "VPrepApp",
 
 	// Inventory & Manufacturing
-	"transfer order": "Transfer",
+	"transfer order": "TrnfrOrd",
+	transferorder: "TrnfrOrd",
 	"inventory transfer": "InvTrnfr",
+	inventorytransfer: "InvTrnfr",
 	"inventory adjustment": "InvAdjst",
 	"inventory count": "InvCount",
 	"inventory cost revaluation": "InvReval",
@@ -98,6 +100,9 @@ const TRANSACTION_SHORTCODE_MAP: Record<string, string> = {
 	"ownership transfer": "OwnTrnsf",
 
 	// Financial, Banking & General Ledger
+	"bank transfer": "Transfer",
+	banktransfer: "Transfer",
+	transfer: "Transfer",
 	"journal entry": "Journal",
 	journal: "Journal",
 	"intercompany journal entry": "InterCompJrn",

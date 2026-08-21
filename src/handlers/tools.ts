@@ -777,6 +777,26 @@ async function hydrateMetadataIfNeeded(
 		return originalResult;
 	}
 
+	// If originalResult already contains valid property definitions, return directly
+	const parsedOriginal = unwrapMcpContent(originalResult) as Record<
+		string,
+		unknown
+	> | null;
+	if (parsedOriginal && typeof parsedOriginal === "object") {
+		const meta = (parsedOriginal.metadata || parsedOriginal) as Record<
+			string,
+			unknown
+		>;
+		if (
+			meta &&
+			typeof meta.properties === "object" &&
+			meta.properties !== null &&
+			Object.keys(meta.properties).length > 0
+		) {
+			return originalResult;
+		}
+	}
+
 	try {
 		const rawRectype = await resolveRectype(recordType);
 		if (!rawRectype) {
@@ -785,9 +805,6 @@ async function hydrateMetadataIfNeeded(
 
 		const rectype = sanitizeIntegerId(rawRectype);
 
-		console.error(
-			`🔍 Hydrating custom record metadata for ${recordType} (rectype: ${rectype})...`,
-		);
 		const qFields = await mcpTools.executeTool("ns_runCustomSuiteQL", {
 			sqlQuery: `SELECT Name, ScriptID, FieldType, IsMandatory FROM CustomField WHERE RecordType = ${rectype}`,
 		});
@@ -827,11 +844,6 @@ async function hydrateMetadataIfNeeded(
 		}
 
 		let originalProperties: Record<string, JsonSchemaProperty> = {};
-		const parsedOriginal = unwrapMcpContent(originalResult) as Record<
-			string,
-			unknown
-		> | null;
-
 		if (parsedOriginal && typeof parsedOriginal === "object") {
 			const meta = (parsedOriginal.metadata || parsedOriginal) as Record<
 				string,
@@ -867,9 +879,8 @@ async function hydrateMetadataIfNeeded(
 				},
 			],
 		};
-	} catch (err: unknown) {
-		const msg = err instanceof Error ? err.message : String(err);
-		console.error(`⚠️ Failed to hydrate custom record metadata: ${msg}`);
+	} catch {
+		// Custom field hydration is a best-effort enhancement — fall back gracefully to original metadata
 		return originalResult;
 	}
 }

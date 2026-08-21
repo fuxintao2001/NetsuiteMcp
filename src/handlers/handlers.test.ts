@@ -16,17 +16,11 @@ describe("MCP Handler Wires", () => {
 		vi.clearAllMocks();
 		await fs.rm(testRoot, { recursive: true, force: true });
 		await fs.mkdir(
-			path.join(
-				testRoot,
-				"skills/netsuite-ai-connector-instructions/references",
-			),
+			path.join(testRoot, "skills/netsuite-ai-connector-instructions"),
 			{ recursive: true },
 		);
 		await fs.writeFile(
-			path.join(
-				testRoot,
-				"skills/netsuite-ai-connector-instructions/references/SUITEQL_GUIDE.md",
-			),
+			path.join(testRoot, "skills/netsuite-ai-connector-instructions/SKILL.md"),
 			"# SuiteQL Guidelines",
 		);
 

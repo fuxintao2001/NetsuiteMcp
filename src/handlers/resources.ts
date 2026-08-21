@@ -59,9 +59,8 @@ function parseFrontmatter(content: string): {
 /**
  * Register MCP Resource handlers on the server.
  *
- * Exposes static reference documents (e.g. SUITEQL_GUIDE.md) and downloaded
- * SuiteCloud Agent Skills as MCP Resources so that AI agents can discover
- * and read them via the standard MCP protocol.
+ * Exposes reference documents and downloaded SuiteCloud Agent Skills as MCP
+ * Resources so that AI agents can discover and read them via the standard MCP protocol.
  */
 export function registerResourceHandlers(
 	server: Server,
@@ -118,8 +117,7 @@ export function registerResourceHandlers(
 			const filePath = join(
 				skillsDir,
 				"netsuite-ai-connector-instructions",
-				"references",
-				"SUITEQL_GUIDE.md",
+				"SKILL.md",
 			);
 			try {
 				const content = await fs.readFile(filePath, "utf-8");

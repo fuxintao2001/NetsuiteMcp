@@ -24,8 +24,8 @@ Before executing ANY action or returning ANY response, you MUST satisfy these no
    - **Transaction Type Shortcodes (`WHERE type = '...'`):**
      - *Sales/AR:* `SalesOrd`, `CustInvc`, `CashSale`, `Estimate`, `Opprtnty`, `CustPymt`, `CustDep`, `DepAppl`, `CustCred`, `CustRfnd`, `RtnAuth`, `ItemShip`
      - *Purchases/AP:* `PurchOrd`, `PurchReq`, `PurchCon`, `ItemRcpt`, `VendBill`, `VendPymt`, `VendCred`, `VendAuth`, `VPrep`, `VPrepApp`
-     - *Inventory/Mfg:* `Transfer`, `InvTrnfr`, `InvAdjst`, `InvCount`, `InvReval`, `Build`, `Unbuild`, `WorkOrd`, `WOClose`, `WOCompl`, `WOIssue`, `BinTrnfr`
-     - *Financial/Other:* `Journal`, `InterCompJrn`, `AdvInterCompJrn`, `StatJrn`, `PEJrnl`, `Check`, `Deposit`, `CardChrg`, `TaxPymt`, `Paycheck`, `ExpRept`, `Custom`
+     - *Inventory/Mfg:* `TrnfrOrd` (Transfer Order), `InvTrnfr`, `InvAdjst`, `InvCount`, `InvReval`, `Build`, `Unbuild`, `WorkOrd`, `WOClose`, `WOCompl`, `WOIssue`, `BinTrnfr`
+     - *Financial/Other:* `Journal`, `InterCompJrn`, `AdvInterCompJrn`, `StatJrn`, `PEJrnl`, `Check`, `Deposit`, `CardChrg`, `TaxPymt`, `Paycheck`, `ExpRept`, `Transfer` (Bank Transfer), `Custom`
 3. **Automatic Self-Healing Loop (Max 3 retries):**
    Upon query error or unexpected empty result:
    `Parse Error` ➔ `Call ns_getSuiteQLMetadata` ➔ `Correct SQL` ➔ `Re-run`. Escalate to user ONLY after 3 automated attempts.
