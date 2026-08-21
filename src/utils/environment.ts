@@ -50,16 +50,19 @@ export function buildEnvSuffix(accountId: string | null): string {
  * 3. The global config directory `~/.gemini/config/skills`
  * 4. Fallback to local `projectRoot/skills`.
  */
-export function getSkillsDir(projectRoot: string): string {
+export function getSkillsDir(projectRoot?: string): string {
 	if (process.env.NETSUITE_SKILLS_PATH) {
 		return process.env.NETSUITE_SKILLS_PATH;
 	}
-	if (process.env.NODE_ENV === "test") {
+	if (process.env.NODE_ENV === "test" && projectRoot) {
 		return path.join(projectRoot, "skills");
 	}
 	const globalPath = path.join(os.homedir(), ".gemini", "config", "skills");
 	if (fs.existsSync(globalPath)) {
 		return globalPath;
 	}
-	return path.join(projectRoot, "skills");
+	if (projectRoot) {
+		return path.join(projectRoot, "skills");
+	}
+	return globalPath;
 }
