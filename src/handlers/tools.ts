@@ -248,6 +248,19 @@ async function handleGetScriptLogs(
 	}
 }
 
+/** Normalize standard parameters (recordType, tableName). */
+function normalizeStandardArgs(
+	args: Record<string, unknown>,
+): Record<string, unknown> {
+	if (typeof args.recordType === "string") {
+		args.recordType = args.recordType.toLowerCase().trim();
+	}
+	if (typeof args.tableName === "string") {
+		args.tableName = args.tableName.toLowerCase().trim();
+	}
+	return args;
+}
+
 async function handleBatchExecute(
 	args: Record<string, unknown>,
 	deps: ToolHandlerDeps,
@@ -273,15 +286,9 @@ async function handleBatchExecute(
 			}
 
 			const { toolName, arguments: toolArgs = {} } = task;
-			const safeArgs = (toolArgs || {}) as Record<string, unknown>;
-
-			// Normalize parameters
-			if (safeArgs.recordType && typeof safeArgs.recordType === "string") {
-				safeArgs.recordType = safeArgs.recordType.toLowerCase().trim();
-			}
-			if (safeArgs.tableName && typeof safeArgs.tableName === "string") {
-				safeArgs.tableName = safeArgs.tableName.toLowerCase().trim();
-			}
+			const safeArgs = normalizeStandardArgs(
+				(toolArgs || {}) as Record<string, unknown>,
+			);
 
 			// Enforce production write-protection guardrail
 			if (
@@ -569,15 +576,9 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
 	// --- Call Tool ---
 	server.setRequestHandler("tools/call", async (request) => {
 		const { name, arguments: args } = request.params;
-		const safeArgs = (args || {}) as Record<string, unknown>;
-
-		// Normalize recordType/tableName parameters to lowercase for case-sensitive NetSuite REST API
-		if (safeArgs.recordType && typeof safeArgs.recordType === "string") {
-			safeArgs.recordType = safeArgs.recordType.toLowerCase().trim();
-		}
-		if (safeArgs.tableName && typeof safeArgs.tableName === "string") {
-			safeArgs.tableName = safeArgs.tableName.toLowerCase().trim();
-		}
+		const safeArgs = normalizeStandardArgs(
+			(args || {}) as Record<string, unknown>,
+		);
 
 		try {
 			// --- Tools that do NOT require authentication ---
@@ -650,7 +651,7 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
 				name === "ns_getRecordTypeMetadata" ||
 				name === "ns_getSuiteQLMetadata"
 			) {
-				const recordTypeRaw = safeArgs.recordType || safeArgs.tableName;
+				const recordTypeRaw = safeArgs.recordType;
 				const hydratedResult = await hydrateMetadataIfNeeded(
 					name,
 					recordTypeRaw,

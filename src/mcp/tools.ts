@@ -103,12 +103,12 @@ export class NetSuiteMCPTools {
 
 		// --- Cache check & schema reconnaissance tracking for metadata tools ---
 		if (this.isMetadataTool(toolName)) {
-			const targetTable = (parameters.tableName ||
-				parameters.table ||
-				parameters.recordType ||
-				parameters.type ||
-				parameters.recordtype) as string;
+			const targetTable =
+				typeof parameters.recordType === "string"
+					? parameters.recordType.toLowerCase().trim()
+					: undefined;
 			if (targetTable) {
+				parameters.recordType = targetTable;
 				SchemaReconnaissanceTracker.record(targetTable);
 			}
 			if (accountId) {
@@ -624,9 +624,11 @@ export class NetSuiteMCPTools {
 		toolName: string,
 		params: Record<string, unknown>,
 	): string {
-		const recordTypeRaw = params.recordType ?? params.tableName ?? "all";
+		const recordTypeRaw = params.recordType ?? "all";
 		const recordType =
-			typeof recordTypeRaw === "string" ? recordTypeRaw.toLowerCase() : "all";
+			typeof recordTypeRaw === "string"
+				? recordTypeRaw.toLowerCase().trim()
+				: "all";
 		return `${toolName}_${recordType}`;
 	}
 
