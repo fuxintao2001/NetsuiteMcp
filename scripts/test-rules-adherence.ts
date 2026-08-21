@@ -9,46 +9,87 @@ interface TestCase {
 }
 
 console.log('='.repeat(70));
-console.log('🧪 NetSuite MCP & AGENTS.md 规则遵从与防偷懒可用性实测 Benchmark');
+console.log('🧪 NetSuite MCP & AGENTS.md 深度防偷懒与边界条件压测 Benchmark');
 console.log('='.repeat(70) + '\n');
 
 const testCases: TestCase[] = [
   {
-    name: 'Gate 2 偷懒: Agent 直接使用 SELECT * 查询',
-    gate: 'GATE 2 (Syntax Mandate: NO SELECT *)',
+    name: 'Gate 2 偷懒: 直接使用 SELECT *',
+    gate: 'GATE 2 (Syntax Mandate)',
     ruleInTemplate: '❌ NO SELECT * (explicit columns only)',
     testAction: () => {
       const sql = 'SELECT * FROM transaction';
       const res = validateSuiteQL(sql);
-      const blockedByRuntime = !res.valid;
+      const blocked = !res.valid;
       return {
-        passed: blockedByRuntime,
-        blockedByRuntime,
-        message: blockedByRuntime 
-          ? `✅ 服务端成功硬拦截: "${res.reason}"` 
-          : '❌ 漏洞：Prompt 禁止了 SELECT *，但 MCP 运行时放行了该查询（偷懒未被拦截）'
+        passed: blocked,
+        blockedByRuntime: blocked,
+        message: blocked ? `✅ 成功硬拦截: "${res.reason}"` : '❌ 漏洞：放行了 SELECT *'
       };
     }
   },
   {
-    name: 'Gate 2 偷懒: Agent 使用 MySQL 习惯的 LIMIT 语法',
-    gate: 'GATE 2 (Syntax Mandate: NO LIMIT/OFFSET)',
+    name: 'Gate 2 变体偷懒: 使用 SELECT t.* 表别名通配符',
+    gate: 'GATE 2 (Syntax Mandate)',
+    ruleInTemplate: '❌ NO SELECT * (explicit columns only)',
+    testAction: () => {
+      const sql = 'SELECT t.* FROM transaction t';
+      const res = validateSuiteQL(sql);
+      const blocked = !res.valid;
+      return {
+        passed: blocked,
+        blockedByRuntime: blocked,
+        message: blocked ? `✅ 成功硬拦截别名通配符: "${res.reason}"` : '❌ 漏洞：放行了 SELECT t.*'
+      };
+    }
+  },
+  {
+    name: 'Gate 2 变体偷懒: 使用 SELECT DISTINCT * 通配符',
+    gate: 'GATE 2 (Syntax Mandate)',
+    ruleInTemplate: '❌ NO SELECT * (explicit columns only)',
+    testAction: () => {
+      const sql = 'SELECT DISTINCT * FROM customer';
+      const res = validateSuiteQL(sql);
+      const blocked = !res.valid;
+      return {
+        passed: blocked,
+        blockedByRuntime: blocked,
+        message: blocked ? `✅ 成功硬拦截 DISTINCT *: "${res.reason}"` : '❌ 漏洞：放行了 DISTINCT *'
+      };
+    }
+  },
+  {
+    name: 'Gate 2 偷懒: 使用 MySQL 风格 LIMIT 10 OFFSET 5',
+    gate: 'GATE 2 (Syntax Mandate)',
     ruleInTemplate: '❌ NO LIMIT/OFFSET → MUST use ROWNUM <= N or FETCH FIRST N ROWS ONLY',
     testAction: () => {
-      const sql = 'SELECT id, entity FROM transaction LIMIT 10';
+      const sql = 'SELECT id, entity FROM transaction LIMIT 10 OFFSET 5';
       const res = validateSuiteQL(sql);
-      const blockedByRuntime = !res.valid;
+      const blocked = !res.valid;
       return {
-        passed: blockedByRuntime,
-        blockedByRuntime,
-        message: blockedByRuntime
-          ? `✅ 服务端成功硬拦截: "${res.reason}"`
-          : '❌ 漏洞：允许了包含 LIMIT 的 SQL 传入'
+        passed: blocked,
+        blockedByRuntime: blocked,
+        message: blocked ? `✅ 成功硬拦截 LIMIT/OFFSET: "${res.reason}"` : '❌ 漏洞：允许了 LIMIT/OFFSET'
       };
     }
   },
   {
-    name: 'Gate 2 偷懒: Agent 忘记写分页子句',
+    name: '边界防护: 字符串内部包含 "SELECT *" 或 "LIMIT" 不应误杀 (Zero False Positive)',
+    gate: 'SAFETY & ACCURACY',
+    ruleInTemplate: 'Precise string literal masking',
+    testAction: () => {
+      const sql = "SELECT id, name FROM customer WHERE memo = 'SELECT * FROM test' AND terms = 'LIMIT 10'";
+      const res = validateSuiteQL(sql);
+      const passed = res.valid;
+      return {
+        passed,
+        blockedByRuntime: false,
+        message: passed ? '✅ 字符串字面量精准遮罩，合法业务查询未发生误杀' : `❌ 误杀错误: ${res.reason}`
+      };
+    }
+  },
+  {
+    name: 'Gate 2 偷懒: Agent 忘记写分页子句自动保底补齐',
     gate: 'GATE 2 (Pagination Safety)',
     ruleInTemplate: 'MUST use ROWNUM <= N or FETCH FIRST N ROWS ONLY',
     testAction: () => {
@@ -58,16 +99,29 @@ const testCases: TestCase[] = [
       return {
         passed: hasPagination,
         blockedByRuntime: true,
-        message: hasPagination
-          ? `✅ 运行时成功兜底补充分页: "${paginated}"`
-          : '❌ 漏洞：未自动补充分页'
+        message: hasPagination ? `✅ 成功兜底补充分页: "${paginated}"` : '❌ 漏洞：未自动补充分页'
       };
     }
   },
   {
-    name: 'Gate 2 偷懒: Agent 元数据嗅探状态跟踪（Schema Reconnaissance）',
+    name: 'Gate 2 规范: 合法 SuiteQL 查询（BUILTIN.DF + TO_DATE + ROWNUM）完全放行',
+    gate: 'GATE 2 (Compliant Syntax)',
+    ruleInTemplate: 'Use BUILTIN.DF, TO_DATE, and ROWNUM',
+    testAction: () => {
+      const sql = "SELECT id, tranid, BUILTIN.DF(entity) AS customer_name FROM transaction WHERE trandate >= TO_DATE('2025-01-01', 'YYYY-MM-DD') AND ROWNUM <= 50";
+      const res = validateSuiteQL(sql);
+      const passed = res.valid && res.hasPagination === true;
+      return {
+        passed,
+        blockedByRuntime: false,
+        message: passed ? '✅ 官方规范 SuiteQL 查询 100% 顺畅执行' : `❌ 合规查询被误拦截: ${res.reason}`
+      };
+    }
+  },
+  {
+    name: 'Gate 2 探查: 元数据嗅探状态跟踪与会话注册',
     gate: 'GATE 2 (Schema Check First)',
-    ruleInTemplate: 'MUST call ns_getSuiteQLMetadata BEFORE generating any custom SuiteQL',
+    ruleInTemplate: 'MUST call ns_getSuiteQLMetadata BEFORE generating custom SuiteQL',
     testAction: () => {
       SchemaReconnaissanceTracker.clear();
       const before = SchemaReconnaissanceTracker.has('transaction');
@@ -77,9 +131,7 @@ const testCases: TestCase[] = [
       return {
         passed,
         blockedByRuntime: true,
-        message: passed
-          ? `✅ SchemaReconnaissanceTracker 已集成到 executeTool，可精准追踪已探查表（${SchemaReconnaissanceTracker.getConsultedTables().join(', ')}）`
-          : '❌ 状态跟踪失败'
+        message: passed ? `✅ 成功注册探查表记录（${SchemaReconnaissanceTracker.getConsultedTables().join(', ')}）` : '❌ 状态跟踪失败'
       };
     }
   },
@@ -95,9 +147,7 @@ const testCases: TestCase[] = [
       return {
         passed,
         blockedByRuntime: true,
-        message: passed
-          ? '✅ 生产环境 (5848789, 9260916) 写操作已被代码级强制禁用，Sandbox (9260916-sb1) 正常开放'
-          : '❌ 环境判断异常'
+        message: passed ? '✅ 生产环境 (5848789, 9260916) 写操作已被代码级强制禁用，Sandbox 正常开放' : '❌ 环境判断异常'
       };
     }
   },
@@ -113,9 +163,7 @@ const testCases: TestCase[] = [
       return {
         passed,
         blockedByRuntime: true,
-        message: passed
-          ? '✅ SQL 注入与破坏性语句（DROP/注释/多语句）100% 成功硬拦截'
-          : '❌ 安全规则被绕过'
+        message: passed ? '✅ SQL 注入与破坏性语句（DROP/注释/多语句）100% 成功硬拦截' : '❌ 安全规则被绕过'
       };
     }
   }
@@ -129,14 +177,13 @@ for (let i = 0; i < testCases.length; i++) {
   console.log(`   🏷️  规则来源: ${tc.gate}`);
   console.log(`   📝 模板要求: ${tc.ruleInTemplate}`);
   console.log(`   📊 实测结果: ${result.message}`);
-  console.log(`   🛡️ 运行时拦截状态: ${result.blockedByRuntime ? '硬拦截有效' : '无硬拦截 (纯靠 LLM 自觉)'}`);
   console.log('-'.repeat(70));
   if (result.passed) passedCount++;
 }
 
 const score = Math.round((passedCount / testCases.length) * 100);
-console.log(`\n📈 最终实测报告统计:`);
+console.log(`\n📈 深度压测报告统计:`);
 console.log(`   总测试项: ${testCases.length}`);
 console.log(`   通过项: ${passedCount}`);
-console.log(`   未通过/存在偷懒漏洞项: ${testCases.length - passedCount}`);
-console.log(`   综合可用性与防偷懒得分: ${score} / 100\n`);
+console.log(`   未通过项: ${testCases.length - passedCount}`);
+console.log(`   最终综合防偷懒与安全得分: ${score} / 100\n`);
