@@ -41,8 +41,10 @@ Before writing or modifying ANY SuiteScript, SuiteFlow, or SDF configuration cod
 3. **P3 Record Operations:** `ns_getRecordTypeMetadata` ➔ `ns_getRecord` / `ns_createRecord` / `ns_updateRecord`
 4. **P4 SuiteQL (Last Resort):** `ns_getSuiteQLMetadata` ➔ `ns_runCustomSuiteQL`
 
-> ⚡ **Parallel Execution:** Batch independent tool calls via `netsuite_batch_execute` to minimize round-trip latency.
-> 🔄 **Interactive Cards:** After invoking `ns_prompt_library_app`, `ns_report_filters_app`, or `ns_selector_app`, **IMMEDIATELY STOP calling tools** in that turn to yield control to the user's UI interaction.
+### ⚡ Parallel Batch Execution Mandate (`netsuite_batch_execute`)
+- **MANDATORY FOR MULTI-ITEM OPERATIONS:** Whenever querying or operating on **≥ 2 independent items** in a turn (e.g. multiple record IDs, multiple table schemas, multiple record links, or independent SuiteQL queries), you **MUST call `netsuite_batch_execute`** with the array of tasks to execute concurrently, instead of firing separate single-tool calls serially.
+- **SEQUENTIAL CALLS:** Use single-tool calls ONLY when querying 1 single item or when task B strictly depends on the runtime output of task A.
+- **INTERACTIVE CARDS:** After invoking `ns_prompt_library_app`, `ns_report_filters_app`, or `ns_selector_app`, **IMMEDIATELY STOP calling tools** in that turn to yield control to the user's UI interaction.
 
 ---
 
