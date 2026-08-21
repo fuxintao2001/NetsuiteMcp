@@ -329,10 +329,10 @@ export const SUITEQL_RULES_SUFFIX = `
   g) Security Guardrails: Queries MUST begin with SELECT or WITH. SQL comments (-- or /* */ or #) are strictly prohibited.
 
 📋 TRANSACTION TYPE SHORTCODES (Use in WHERE type = '...'):
-  • Sales Orders: SalesOrd | Invoices: CustInvc | Purchase Orders: PurchOrd | Vendor Bills: VendBill
-  • Journal Entries: Journal | Credit Memos: CustCred | Item Receipts: ItemRcpt | Item Fulfillments: ItemShip
-  • Cash Sales: CashSale | Vendor Payments: VendPymt | Customer Payments: CustPymt | Quotes: Estimate
-  • Return Auths: RtnAuth | Checks: Check | Deposits: Deposit | Transfer Orders: Transfer
+  • Sales & AR: SalesOrd (Sales Order), CustInvc (Invoice), CashSale (Cash Sale), Estimate (Quote), Opprtnty (Opportunity), CustPymt (Customer Payment), CustDep (Customer Deposit), DepAppl (Deposit App), CustCred (Credit Memo), CustRfnd (Refund), RtnAuth (RMA), ItemShip (Fulfillment), CustChrg (Statement Charge), FinChrg (Finance Charge)
+  • Purchases & AP: PurchOrd (Purchase Order), PurchReq (Requisition), PurchCon (Blanket PO), ItemRcpt (Item Receipt), VendBill (Bill), VendPymt (Bill Payment), VendCred (Bill Credit), VendAuth (Vendor Return), VPrep (Vendor Prepayment), VPrepApp (Prepayment App)
+  • Inventory & Mfg: Transfer/TrnfrOrd (Transfer Order), InvTrnfr (Inv Transfer), InvAdjst (Adjustment), InvCount (Count), InvReval (Revaluation), InvWksht (Worksheet), Build (Assembly Build), Unbuild (Assembly Unbuild), WorkOrd (Work Order), WOClose (WO Close), WOCompl (WO Completion), WOIssue (WO Issue), BinTrnfr (Bin Transfer), BinWksht (Bin Putaway), StatChng (Status Change), OwnTrnsf (Ownership Transfer)
+  • Financial & Other: Journal (Journal Entry), InterCompJrn (Intercompany Journal), AdvInterCompJrn (Adv Interco Journal), StatJrn (Statistical Journal), PEJrnl (Period End Journal), Check (Check), Deposit (Deposit), CardChrg (Credit Card), CardRfnd (Card Refund), TaxPymt/TaxLiab (Tax Payment), Paycheck (Paycheck), PchkJrnl (Paycheck Journal), Commissn (Commission), ExpRept (Expense Report), FxReval (FX Revaluation), RevArrng (Revenue Arrangement), RevComm (Revenue Commitment), Custom (Custom Transaction)
 
 🔄 STEP 3 — AUTOMATIC SELF-HEALING LOOP (Mandatory on failure):
   If query execution returns an error (e.g. invalid column, syntax error, missing permission) or unexpectedly empty results, DO NOT interrupt the user.

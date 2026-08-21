@@ -21,6 +21,11 @@ Before executing ANY action or returning ANY response, you MUST satisfy these no
    - ❌ NO `LIMIT`/`OFFSET` → MUST use `ROWNUM <= N` or `FETCH FIRST N ROWS ONLY`.
    - Date literals: use `TO_DATE('YYYY-MM-DD', 'YYYY-MM-DD')`.
    - Text display for foreign keys/status: use `BUILTIN.DF(fieldName)`.
+   - **Transaction Type Shortcodes (`WHERE type = '...'`):**
+     - *Sales/AR:* `SalesOrd`, `CustInvc`, `CashSale`, `Estimate`, `Opprtnty`, `CustPymt`, `CustDep`, `DepAppl`, `CustCred`, `CustRfnd`, `RtnAuth`, `ItemShip`
+     - *Purchases/AP:* `PurchOrd`, `PurchReq`, `PurchCon`, `ItemRcpt`, `VendBill`, `VendPymt`, `VendCred`, `VendAuth`, `VPrep`, `VPrepApp`
+     - *Inventory/Mfg:* `Transfer`, `InvTrnfr`, `InvAdjst`, `InvCount`, `InvReval`, `Build`, `Unbuild`, `WorkOrd`, `WOClose`, `WOCompl`, `WOIssue`, `BinTrnfr`
+     - *Financial/Other:* `Journal`, `InterCompJrn`, `AdvInterCompJrn`, `StatJrn`, `PEJrnl`, `Check`, `Deposit`, `CardChrg`, `TaxPymt`, `Paycheck`, `ExpRept`, `Custom`
 3. **Automatic Self-Healing Loop (Max 3 retries):**
    Upon query error or unexpected empty result:
    `Parse Error` ➔ `Call ns_getSuiteQLMetadata` ➔ `Correct SQL` ➔ `Re-run`. Escalate to user ONLY after 3 automated attempts.
