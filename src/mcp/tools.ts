@@ -16,6 +16,7 @@ import {
 	assertValidSuiteQL,
 	ensureSuiteQLPagination,
 	extractReferencedTables,
+	SchemaReconnaissanceTracker,
 } from "../utils/suiteqlGuard.js";
 
 interface RecordFieldInfo {
@@ -100,14 +101,24 @@ export class NetSuiteMCPTools {
 	): Promise<unknown> {
 		const accountId = await this.oauthManager.getAccountId();
 
-		// --- Cache check for metadata tools ---
-		if (this.isMetadataTool(toolName) && accountId) {
-			const cacheKey = this.metadataCacheKey(toolName, parameters);
-			try {
-				const cached = await cacheService.get(accountId, cacheKey);
-				if (cached) return cached;
-			} catch {
-				// Cache miss or read error — continue to API call
+		// --- Cache check & schema reconnaissance tracking for metadata tools ---
+		if (this.isMetadataTool(toolName)) {
+			const targetTable = (parameters.tableName ||
+				parameters.table ||
+				parameters.recordType ||
+				parameters.type ||
+				parameters.recordtype) as string;
+			if (targetTable) {
+				SchemaReconnaissanceTracker.record(targetTable);
+			}
+			if (accountId) {
+				const cacheKey = this.metadataCacheKey(toolName, parameters);
+				try {
+					const cached = await cacheService.get(accountId, cacheKey);
+					if (cached) return cached;
+				} catch {
+					// Cache miss or read error — continue to API call
+				}
 			}
 		}
 

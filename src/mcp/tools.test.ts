@@ -124,7 +124,8 @@ describe("NetSuiteMCPTools", () => {
 
 			await expect(
 				client.executeTool("ns_runCustomSuiteQL", {
-					sqlQuery: "SELECT * FROM customer JOIN salesorder",
+					sqlQuery:
+						"SELECT customer.id, salesorder.tranid FROM customer JOIN salesorder",
 				}),
 			).rejects.toThrow();
 

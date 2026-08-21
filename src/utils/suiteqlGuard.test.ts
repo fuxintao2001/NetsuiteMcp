@@ -91,15 +91,27 @@ describe("suiteqlGuard", () => {
 		});
 
 		it("should validate a query ending with a single semicolon", () => {
-			const res = validateSuiteQL("SELECT * FROM transaction;");
+			const res = validateSuiteQL("SELECT id FROM transaction;");
 			expect(res.valid).toBe(true);
 		});
 
 		it("should validate a valid CTE (WITH statement) query", () => {
 			const res = validateSuiteQL(
-				"WITH c AS (SELECT id FROM customer) SELECT * FROM c",
+				"WITH c AS (SELECT id FROM customer) SELECT id FROM c",
 			);
 			expect(res.valid).toBe(true);
+		});
+
+		it("should reject queries with SELECT * (Gate 2 Syntax Mandate)", () => {
+			const res = validateSuiteQL("SELECT * FROM transaction");
+			expect(res.valid).toBe(false);
+			expect(res.reason).toContain("contains 'SELECT *'");
+		});
+
+		it("should reject queries with MySQL/Postgres LIMIT (Gate 2 Syntax Mandate)", () => {
+			const res = validateSuiteQL("SELECT id FROM customer LIMIT 10");
+			expect(res.valid).toBe(false);
+			expect(res.reason).toContain("does not support 'LIMIT/OFFSET'");
 		});
 
 		it("should reject an empty query", () => {

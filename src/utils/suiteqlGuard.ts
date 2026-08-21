@@ -19,6 +19,31 @@ export interface SuiteQLValidationResult {
 	hasPagination?: boolean;
 }
 
+/**
+ * Tracks schema metadata reconnaissance calls in the current session
+ * to prevent agents from skipping ns_getSuiteQLMetadata (Gate 2 Enforcement).
+ */
+const consultedTables = new Set<string>();
+
+export const schemaReconnaissanceTracker = {
+	record(tableName?: unknown): void {
+		if (typeof tableName === "string" && tableName.trim().length > 0) {
+			consultedTables.add(tableName.toLowerCase().trim());
+		}
+	},
+	has(tableName: string): boolean {
+		return consultedTables.has(tableName.toLowerCase().trim());
+	},
+	getConsultedTables(): string[] {
+		return Array.from(consultedTables);
+	},
+	clear(): void {
+		consultedTables.clear();
+	},
+};
+
+export const SchemaReconnaissanceTracker = schemaReconnaissanceTracker;
+
 const DISALLOWED_KEYWORDS_REGEX =
 	/\b(INSERT|UPDATE|DELETE|DROP|CREATE|ALTER|TRUNCATE|GRANT|REVOKE|EXEC|EXECUTE|MERGE|INTO|DATABASE|SCHEMA)\b/i;
 
@@ -176,6 +201,28 @@ export function validateSuiteQL(sqlQuery: string): SuiteQLValidationResult {
 			valid: false,
 			reason:
 				"SuiteQL queries must begin with a SELECT or WITH statement. SuiteQL is strictly read-only; use record API tools for mutations.",
+		};
+	}
+
+	// Check for 'SELECT *' or 'SELECT alias.*' (Gate 2 Syntax Mandate)
+	if (
+		/(?:^|\s)SELECT\s+(?:DISTINCT\s+)?(?:\w+\.)?\*\s+(?:FROM\b|,)/i.test(
+			maskedSql,
+		)
+	) {
+		return {
+			valid: false,
+			reason:
+				"SuiteQL query contains 'SELECT *'. Explicitly specify each required column name to optimize performance, prevent governance timeouts, and avoid invalid field errors.",
+		};
+	}
+
+	// Check for MySQL/Postgres-style LIMIT / OFFSET (Gate 2 Syntax Mandate)
+	if (/\b(LIMIT|OFFSET)\b/i.test(withoutTrailingSemicolon)) {
+		return {
+			valid: false,
+			reason:
+				"SuiteQL does not support 'LIMIT/OFFSET' keywords. Use 'WHERE ROWNUM <= N' or 'FETCH FIRST N ROWS ONLY' for pagination.",
 		};
 	}
 
