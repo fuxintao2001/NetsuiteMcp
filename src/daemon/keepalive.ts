@@ -1,3 +1,4 @@
+import "../utils/envLoader.js";
 import { lookup } from "node:dns/promises";
 import fs from "node:fs/promises";
 import https from "node:https";

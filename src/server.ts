@@ -1,3 +1,4 @@
+import "./utils/envLoader.js";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { type ServerType, serve } from "@hono/node-server";

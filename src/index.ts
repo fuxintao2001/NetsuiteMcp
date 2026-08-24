@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import "./utils/envLoader.js";
 import { readFileSync } from "node:fs";
 import http from "node:http";
 import https from "node:https";
