@@ -14,6 +14,10 @@ import {
 	formatSuiteQLToCompactMarkdown,
 } from "../utils/contextSlimmer.js";
 import { buildEnvSuffix, isSandboxAccount } from "../utils/environment.js";
+import {
+	isPermissionError,
+	PERMISSION_HARD_STOP_ADVICE,
+} from "../utils/errors.js";
 import { asyncJsonParse } from "../utils/json.js";
 import {
 	type JsonSchemaProperty,
@@ -351,6 +355,25 @@ async function handleBatchExecute(
 			const parsedResult =
 				typeof result === "string" ? await asyncJsonParse(result) : result;
 
+			// Detect NetSuite-level error payloads in batch items
+			const unwrapped = unwrapMcpContent(parsedResult);
+			if (
+				unwrapped &&
+				typeof unwrapped === "object" &&
+				(unwrapped as Record<string, unknown>).success === false
+			) {
+				const errObj = unwrapped as Record<string, unknown>;
+				const errMsg = String(
+					errObj.error || errObj.message || JSON.stringify(errObj),
+				);
+				if (isPermissionError(errMsg)) {
+					throw new Error(
+						`NetSuite Permission Error: ${errMsg}\n\n${PERMISSION_HARD_STOP_ADVICE.trim()}`,
+					);
+				}
+				throw new Error(`NetSuite Error: ${errMsg}`);
+			}
+
 			// Clean/slim the results
 			if (toolName === "ns_getRecord") {
 				return cleanRecordPayload(parsedResult);
@@ -673,6 +696,12 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
 					) {
 						const errorMsg =
 							parsed.error || parsed.message || JSON.stringify(parsed);
+						if (isPermissionError(String(errorMsg))) {
+							return textResult(
+								`❌ NetSuite Permission Error: ${errorMsg}\n\n${PERMISSION_HARD_STOP_ADVICE.trim()}`,
+								true,
+							);
+						}
 						return textResult(`❌ NetSuite Error: ${errorMsg}`, true);
 					}
 
@@ -704,6 +733,12 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
 					parsedRecordResult.error ||
 					parsedRecordResult.message ||
 					JSON.stringify(parsedRecordResult);
+				if (isPermissionError(String(errorMsg))) {
+					return textResult(
+						`❌ NetSuite Permission Error: ${errorMsg}\n\n${PERMISSION_HARD_STOP_ADVICE.trim()}`,
+						true,
+					);
+				}
 				const guidance =
 					"\n\n💡 [Self-Healing Action]: Call `ns_getRecordTypeMetadata` to check schema constraints and valid field IDs.";
 				return textResult(`❌ NetSuite Error: ${errorMsg}${guidance}`, true);
@@ -748,7 +783,12 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
 			// All other errors: return as tool-level error response
 			const message = error instanceof Error ? error.message : String(error);
 			let guidance = "";
-			if (name === "ns_runCustomSuiteQL") {
+			if (isPermissionError(message)) {
+				// DO NOT attach self-healing guidance on permission errors
+				if (!message.includes("PERMISSION DENIED — HARD STOP REQUIRED")) {
+					guidance = `\n\n${PERMISSION_HARD_STOP_ADVICE.trim()}`;
+				}
+			} else if (name === "ns_runCustomSuiteQL") {
 				guidance =
 					"\n\n💡 [Self-Healing Action]: 1) Call `ns_getSuiteQLMetadata` for referenced tables to verify exact column names and case-sensitivity. 2) Revise your SuiteQL query and retry (Retry up to 3 times before asking the user).";
 			} else if (

@@ -1,11 +1,59 @@
 import { describe, expect, it } from "vitest";
 import {
+	isPermissionError,
+	PERMISSION_HARD_STOP_ADVICE,
 	parseNetSuiteError,
 	sanitizeError,
 	sanitizeMessage,
 } from "./errors.js";
 
 describe("Error Utilities", () => {
+	describe("isPermissionError", () => {
+		it("should identify permission errors by HTTP 403 status", () => {
+			expect(isPermissionError("error", 403)).toBe(true);
+			expect(isPermissionError(undefined, 403)).toBe(true);
+		});
+
+		it("should identify permission error codes and keywords", () => {
+			expect(isPermissionError("INSUFFICIENT_PERMISSION")).toBe(true);
+			expect(isPermissionError("ROLE_PERMISSION_ERROR")).toBe(true);
+			expect(isPermissionError("PERMISSION_VIOLATION")).toBe(true);
+			expect(
+				isPermissionError(
+					"Permission Violation: You need the 'Lists -> Customers' permission",
+				),
+			).toBe(true);
+			expect(
+				isPermissionError(
+					"USER_ERROR: You do not have permission to view this record",
+				),
+			).toBe(true);
+			expect(isPermissionError("Access denied")).toBe(true);
+			expect(isPermissionError("Forbidden")).toBe(true);
+		});
+
+		it("should return false for non-permission errors", () => {
+			expect(isPermissionError("INVALID_SQL")).toBe(false);
+			expect(isPermissionError("RECORD_NOT_FOUND")).toBe(false);
+			expect(isPermissionError("INVALID_FLD_VALUE")).toBe(false);
+			expect(isPermissionError(undefined, 400)).toBe(false);
+		});
+	});
+
+	describe("PERMISSION_HARD_STOP_ADVICE", () => {
+		it("should include critical stop and zero hallucination instructions", () => {
+			expect(PERMISSION_HARD_STOP_ADVICE).toContain(
+				"PERMISSION DENIED — HARD STOP REQUIRED",
+			);
+			expect(PERMISSION_HARD_STOP_ADVICE).toContain(
+				"STOP ALL TASKS IMMEDIATELY",
+			);
+			expect(PERMISSION_HARD_STOP_ADVICE).toContain(
+				"STRICTLY ZERO HALLUCINATION",
+			);
+		});
+	});
+
 	describe("sanitizeMessage", () => {
 		it("should redact sensitive OAuth parameters and tokens", () => {
 			const original =
@@ -55,6 +103,30 @@ describe("Error Utilities", () => {
 			expect(result.message).toContain("Troubleshooting Advice - SuiteQL/SQL");
 		});
 
+		it("should append hard-stop permission advice on INSUFFICIENT_PERMISSION", () => {
+			const mockError = {
+				response: {
+					status: 403,
+					data: {
+						"o:errorDetails": [
+							{
+								"o:errorCode": "INSUFFICIENT_PERMISSION",
+								detail: "You do not have permission to view customer records.",
+							},
+						],
+					},
+				},
+			};
+
+			const result = parseNetSuiteError(mockError);
+			expect(result.message).toContain("INSUFFICIENT_PERMISSION");
+			expect(result.message).toContain(
+				"PERMISSION DENIED — HARD STOP REQUIRED",
+			);
+			expect(result.message).toContain("STOP ALL TASKS IMMEDIATELY");
+			expect(result.message).toContain("STRICTLY ZERO HALLUCINATION");
+		});
+
 		it("should parse OAuth error responses", () => {
 			const mockError = {
 				response: {
@@ -89,7 +161,7 @@ describe("Error Utilities", () => {
 			expect(result.message).not.toContain("<body>Timeout</body>");
 		});
 
-		it("should fall back to standard response status message", () => {
+		it("should fall back to standard response status message with permission hard stop on 403", () => {
 			const mockError = {
 				response: {
 					status: 403,
@@ -100,6 +172,7 @@ describe("Error Utilities", () => {
 
 			const result = parseNetSuiteError(mockError);
 			expect(result.message).toContain("HTTP 403: Request failed with 403");
+			expect(result.message).toContain("PERMISSION DENIED");
 		});
 	});
 

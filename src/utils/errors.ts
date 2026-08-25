@@ -9,6 +9,41 @@ interface NetSuiteErrorDetail {
 }
 
 /**
+ * Hard-stop instruction banner appended to permission error responses.
+ * Instructs the AI agent to stop all tasks immediately and avoid hallucinating data.
+ */
+export const PERMISSION_HARD_STOP_ADVICE = `
+🚫 ═══ PERMISSION DENIED — HARD STOP REQUIRED ═══
+🛑 CRITICAL AGENT INSTRUCTION (ZERO HALLUCINATION & IMMEDIATE HALT):
+  1. STOP ALL TASKS IMMEDIATELY: Do NOT retry, do NOT attempt self-healing loops, and do NOT test alternative queries. NetSuite permission restrictions cannot be bypassed or self-healed by rewriting queries.
+  2. STRICTLY ZERO HALLUCINATION: You MUST NOT guess, invent, simulate, or fabricate any record data, schema, or query results.
+  3. REPORT TO USER & WAIT: Clearly report the failed record type/table name and specify the required NetSuite permission configuration path (e.g., Setup > Users/Roles > Manage Roles > Permissions > Transactions/Lists/Setup with appropriate Access Level such as View/Full). Explicitly wait for the user to configure permissions before proceeding.`;
+
+/**
+ * Checks if an error code, message, or HTTP status indicates a NetSuite permission/authorization error.
+ */
+export function isPermissionError(
+	codeOrMessage?: string,
+	status?: number,
+): boolean {
+	if (status === 403) return true;
+	if (!codeOrMessage) return false;
+	const normalized = codeOrMessage.toLowerCase();
+	return (
+		normalized.includes("insufficient_permission") ||
+		normalized.includes("permission_violation") ||
+		normalized.includes("permission_denied") ||
+		normalized.includes("role_permission_error") ||
+		normalized.includes("permission") ||
+		normalized.includes("privilege") ||
+		normalized.includes("access denied") ||
+		normalized.includes("you do not have permission") ||
+		normalized.includes("you need the '") ||
+		normalized.includes("forbidden")
+	);
+}
+
+/**
  * Returns actionable advice for common NetSuite errors to assist the AI agent.
  */
 function getActionableAdvice(code: string, message: string): string {
@@ -86,19 +121,8 @@ function getActionableAdvice(code: string, message: string): string {
 	}
 
 	// Permissions / Access errors
-	if (
-		normalizedCode.includes("INSUFFICIENT_PERMISSION") ||
-		normalizedCode.includes("PERMISSION") ||
-		normalizedMessage.includes("permission") ||
-		normalizedMessage.includes("privilege") ||
-		normalizedMessage.includes("access denied")
-	) {
-		let advice = "\n💡 [Troubleshooting Advice - Permissions]:";
-		advice +=
-			'\n  - Check that the active integration role has "Web Services" and "REST Web Services" permissions enabled.';
-		advice +=
-			"\n  - Verify that the active role has permissions to view/modify the target record type.";
-		return advice;
+	if (isPermissionError(code, 0) || isPermissionError(message, 0)) {
+		return PERMISSION_HARD_STOP_ADVICE;
 	}
 
 	// Concurrency / Rate limit errors
@@ -218,8 +242,7 @@ export function parseNetSuiteError(error: unknown): Error {
 			advice =
 				"\n💡 [Troubleshooting Advice - Concurrency]:\n  - You have exceeded NetSuite's concurrent request limit.\n  - Recommended: Use `netsuite_batch_execute` or reduce request frequency.";
 		} else if (status === 403) {
-			advice =
-				"\n💡 [Troubleshooting Advice - Permissions]:\n  - Access denied. Verify authentication status and permissions.";
+			advice = PERMISSION_HARD_STOP_ADVICE;
 		}
 		return new Error(
 			`HTTP ${status}: ${err.message || "Request failed"}${advice}`,

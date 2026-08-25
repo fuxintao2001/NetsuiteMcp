@@ -203,6 +203,55 @@ describe("MCP Handler Wires", () => {
 			);
 		});
 
+		it("should return hard stop error without self-healing advice on record permission failure payload", async () => {
+			const callFn = registeredHandlers.get("tools/call");
+
+			mockMCPTools.executeTool.mockResolvedValueOnce({
+				success: false,
+				error:
+					"INSUFFICIENT_PERMISSION: You do not have permission to view this record",
+			});
+
+			const res = await callFn?.({
+				params: {
+					name: "ns_getRecord",
+					arguments: { recordType: "customer", id: "101" },
+				},
+			});
+
+			expect(res.isError).toBe(true);
+			expect(res.content[0].text).toContain("NetSuite Permission Error");
+			expect(res.content[0].text).toContain(
+				"PERMISSION DENIED — HARD STOP REQUIRED",
+			);
+			expect(res.content[0].text).toContain("STOP ALL TASKS IMMEDIATELY");
+			expect(res.content[0].text).not.toContain("Self-Healing Action");
+		});
+
+		it("should return hard stop error without self-healing advice when SuiteQL throws permission error", async () => {
+			const callFn = registeredHandlers.get("tools/call");
+
+			mockMCPTools.executeTool.mockRejectedValueOnce(
+				new Error(
+					"NetSuite API Error: [USER_ERROR] Permission Violation: You need the 'Lists -> Customers' permission",
+				),
+			);
+
+			const res = await callFn?.({
+				params: {
+					name: "ns_runCustomSuiteQL",
+					arguments: { sqlQuery: "SELECT id FROM customer" },
+				},
+			});
+
+			expect(res.isError).toBe(true);
+			expect(res.content[0].text).toContain(
+				"PERMISSION DENIED — HARD STOP REQUIRED",
+			);
+			expect(res.content[0].text).toContain("STOP ALL TASKS IMMEDIATELY");
+			expect(res.content[0].text).not.toContain("Self-Healing Action");
+		});
+
 		it("should throw error when custom record rectype cannot be resolved", async () => {
 			const callFn = registeredHandlers.get("tools/call");
 
@@ -298,6 +347,41 @@ describe("MCP Handler Wires", () => {
 				expect(parsed.failedTasks).toBe(1);
 				expect(parsed.individualResults[0].success).toBe(true);
 				expect(parsed.individualResults[1].success).toBe(false);
+			});
+
+			it("should capture permission errors in batch tasks and format with hard-stop banner", async () => {
+				const callFn = registeredHandlers.get("tools/call");
+
+				mockMCPTools.executeTool.mockResolvedValueOnce({
+					success: false,
+					error: "INSUFFICIENT_PERMISSION: Permission Violation: Access Denied",
+				});
+
+				const res = await callFn?.({
+					params: {
+						name: "netsuite_batch_execute",
+						arguments: {
+							tasks: [
+								{
+									toolName: "ns_getRecord",
+									arguments: { recordType: "invoice", id: "555" },
+								},
+							],
+						},
+					},
+				});
+
+				const parsed = JSON.parse(res.content[0].text);
+				expect(parsed.totalTasks).toBe(1);
+				expect(parsed.successfulTasks).toBe(0);
+				expect(parsed.failedTasks).toBe(1);
+				expect(parsed.individualResults[0].success).toBe(false);
+				expect(parsed.individualResults[0].error).toContain(
+					"NetSuite Permission Error",
+				);
+				expect(parsed.individualResults[0].error).toContain(
+					"PERMISSION DENIED — HARD STOP REQUIRED",
+				);
 			});
 
 			it("should execute parallel SuiteQL queries via batch", async () => {

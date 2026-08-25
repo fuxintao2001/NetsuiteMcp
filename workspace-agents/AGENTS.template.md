@@ -26,15 +26,24 @@ Before executing ANY action or returning ANY response, you MUST satisfy these no
      - *Purchases/AP:* `PurchOrd`, `PurchReq`, `PurchCon`, `ItemRcpt`, `VendBill`, `VendPymt`, `VendCred`, `VendAuth`, `VPrep`, `VPrepApp`
      - *Inventory/Mfg:* `TrnfrOrd` (Transfer Order), `InvTrnfr`, `InvAdjst`, `InvCount`, `InvReval`, `Build`, `Unbuild`, `WorkOrd`, `WOClose`, `WOCompl`, `WOIssue`, `BinTrnfr`
      - *Financial/Other:* `Journal`, `InterCompJrn`, `AdvInterCompJrn`, `StatJrn`, `PEJrnl`, `Check`, `Deposit`, `CardChrg`, `TaxPymt`, `Paycheck`, `ExpRept`, `Transfer` (Bank Transfer), `Custom`
-3. **Automatic Self-Healing Loop (Max 3 retries):**
-   Upon query error or unexpected empty result:
-   `Parse Error` ➔ `Call ns_getSuiteQLMetadata` ➔ `Correct SQL` ➔ `Re-run`. Escalate to user ONLY after 3 automated attempts.
+3. **Automatic Self-Healing Loop (Max 3 retries, syntax/schema errors ONLY):**
+   Upon syntax error or unexpected empty result:
+   `Parse Error` ➔ `Call ns_getSuiteQLMetadata` ➔ `Correct SQL` ➔ `Re-run`. Escalate to user ONLY after 3 automated attempts. (Note: Excludes permission errors; see Gate 4).
 
 ## GATE 3: Code Development & Verification Gate (No Memory Coding)
 Before writing or modifying ANY SuiteScript, SuiteFlow, or SDF configuration code:
 1. **Analyze:** Locate code and line numbers (`view_file` / `grep_search`).
 2. **Verify (Mandatory):** Query Context7 (`resolve-library-id` ➔ `query-docs`) and read relevant Skills (e.g., `netsuite://skills/netsuite-sdf-safe-guide`) for API signatures, governance limits, and pitfalls.
 3. **Implement & Cite:** Write complete, robust code (no placeholders / `// TODO` omissions). Explicitly cite the consulted official docs or skills.
+
+## GATE 4: Permission Hard-Stop & Zero-Hallucination Protocol (权限熔断与零幻觉准则)
+当遇到任何 NetSuite 记录/表/功能权限报错（如 `INSUFFICIENT_PERMISSION`、HTTP 403 Forbidden、权限不足、`Permission Violation`、访问拒绝）时：
+1. **立即全线熔断 (Immediate Hard Stop)**：必须立即终止当前一切后续任务与工具调用。**严禁**进入自动修复重试循环（权限问题无法通过重写查询或重试解决），**严禁**尝试换其他未授权方式探测。
+2. **绝对零幻觉 (Zero Hallucination)**：**严禁**根据上下文、历史或猜测臆造、编造、模拟任何记录数据、字段值或查询结果。
+3. **明确报错并等待用户配置权限**：必须向用户明确说明：
+   - 当前受阻的具体操作与目标记录类型 / 表名；
+   - 需要管理员在 NetSuite 角色中配置的具体权限路径与权限级别（例如：`Setup > Users/Roles > Manage Roles > Permissions` 下的 `Transactions` / `Lists` / `Setup` 权限项与级别，如 View / Full）；
+   - 明确提示用户在 NetSuite 中完成权限配置后，方可继续下一步操作。
 
 ---
 
