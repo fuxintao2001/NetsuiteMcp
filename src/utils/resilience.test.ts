@@ -1,12 +1,20 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	ConcurrencyLimiter,
+	checkNetworkReadiness,
 	getRetryAfterMs,
 	retryWithBackoff,
 	TokenRefreshScheduler,
 } from "./resilience.js";
 
 describe("Resilience Utilities", () => {
+	describe("checkNetworkReadiness", () => {
+		it("should return true in test environment", async () => {
+			const ready = await checkNetworkReadiness();
+			expect(ready).toBe(true);
+		});
+	});
+
 	describe("retryWithBackoff", () => {
 		it("should resolve immediately if function succeeds first time", async () => {
 			const fn = vi.fn<() => Promise<string>>().mockResolvedValue("success");

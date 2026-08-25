@@ -57,6 +57,16 @@ function isRetryableTokenError(error: unknown): boolean {
 		return true;
 	}
 
+	// Pre-TLS socket disconnection before connection was established
+	if (
+		err.message &&
+		(err.message.includes("before secure TLS connection was established") ||
+			err.message.includes("socket disconnected before secure TLS") ||
+			err.message.includes("Client network socket disconnected"))
+	) {
+		return true;
+	}
+
 	const status = err.response?.status;
 	// 429 Too Many Requests: rejected safely before processing
 	// 503 Service Unavailable: rejected by NetSuite's edge/load balancer

@@ -3,7 +3,49 @@
  * Provides proactive token refresh scheduling to maintain session validity.
  */
 
+import { lookup } from "node:dns/promises";
+import https from "node:https";
 import pLimit, { type LimitFunction } from "p-limit";
+
+/**
+ * Checks if basic network connectivity is up by resolving a well-known NetSuite API hostname.
+ * Prevents firing token requests right as macOS wakes up from sleep when Wi-Fi/TLS socket is not yet ready.
+ */
+export async function checkNetworkReadiness(
+	timeoutMs = 5000,
+): Promise<boolean> {
+	if (
+		process.env.NODE_ENV === "test" ||
+		process.env.VITEST ||
+		process.env.JEST_WORKER_ID
+	) {
+		return true;
+	}
+	try {
+		await lookup("system.netsuite.com");
+		return await new Promise<boolean>((resolve) => {
+			const req = https.request(
+				{
+					hostname: "system.netsuite.com",
+					port: 443,
+					method: "HEAD",
+					timeout: timeoutMs,
+				},
+				() => {
+					resolve(true);
+				},
+			);
+			req.on("error", () => resolve(false));
+			req.on("timeout", () => {
+				req.destroy();
+				resolve(false);
+			});
+			req.end();
+		});
+	} catch {
+		return false;
+	}
+}
 
 /** Minimal interface for the OAuthManager used by the scheduler */
 interface TokenRefreshTarget {
@@ -98,8 +140,33 @@ export class TokenRefreshScheduler {
 
 			if (wasSleeping) {
 				console.error(
-					`⏰ [TokenRefreshScheduler] System woke from sleep (elapsed ${Math.round(elapsed / 1000)}s)`,
+					`⏰ [TokenRefreshScheduler] System woke from sleep (elapsed ${Math.round(elapsed / 1000)}s). Checking network readiness...`,
 				);
+
+				const isReady = await checkNetworkReadiness();
+				if (!isReady) {
+					console.error(
+						"⚠️ [TokenRefreshScheduler] Network not ready after wake. Waiting 10s for Wi-Fi/TLS stabilization...",
+					);
+					await new Promise((resolve) => setTimeout(resolve, 10000));
+					if (!(await checkNetworkReadiness())) {
+						console.error(
+							"⚠️ [TokenRefreshScheduler] Network still unreachable. Skipping this tick to protect refresh token.",
+						);
+						return;
+					}
+					console.error("✅ [TokenRefreshScheduler] Network stabilized!");
+				}
+
+				// Stagger multiple accounts waking up simultaneously with small random jitter (0-3s)
+				if (
+					process.env.NODE_ENV !== "test" &&
+					!process.env.VITEST &&
+					!process.env.JEST_WORKER_ID
+				) {
+					const jitterMs = Math.floor(Math.random() * 3000);
+					await new Promise((resolve) => setTimeout(resolve, jitterMs));
+				}
 			}
 
 			const hasSession = await this.target.hasValidSession();
@@ -117,7 +184,6 @@ export class TokenRefreshScheduler {
 			}
 
 			// Normal path: ensureValidToken() auto-refreshes if within the 5-minute window
-			// If we just woke from sleep, it'll naturally refresh here if needed, but only if the network is ready.
 			await this.target.ensureValidToken();
 
 			await this.target.touchHeartbeat?.().catch(() => {});

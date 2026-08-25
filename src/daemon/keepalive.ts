@@ -1,5 +1,4 @@
 import "../utils/envLoader.js";
-import { lookup } from "node:dns/promises";
 import fs from "node:fs/promises";
 import https from "node:https";
 import os from "node:os";
@@ -7,6 +6,7 @@ import path from "node:path";
 import { Redis } from "ioredis";
 import { shouldRefreshToken } from "../oauth/tokenExchange.js";
 import { RedisLockProvider } from "../utils/redisLock.js";
+import { checkNetworkReadiness } from "../utils/resilience.js";
 
 export interface TokenData {
 	access_token: string;
@@ -61,37 +61,6 @@ function logError(msg: string) {
  */
 function formatNetSuiteAccountHost(accountId: string): string {
 	return accountId.toLowerCase().replace(/_/g, "-");
-}
-
-/**
- * Checks if basic network connectivity is up by resolving a well-known NetSuite API hostname.
- * Prevents firing token requests right as macOS wakes up from sleep when Wi-Fi/TLS socket is not yet ready.
- */
-async function checkNetworkReadiness(timeoutMs = 5000): Promise<boolean> {
-	try {
-		await lookup("system.netsuite.com");
-		return await new Promise<boolean>((resolve) => {
-			const req = https.request(
-				{
-					hostname: "system.netsuite.com",
-					port: 443,
-					method: "HEAD",
-					timeout: timeoutMs,
-				},
-				() => {
-					resolve(true);
-				},
-			);
-			req.on("error", () => resolve(false));
-			req.on("timeout", () => {
-				req.destroy();
-				resolve(false);
-			});
-			req.end();
-		});
-	} catch {
-		return false;
-	}
 }
 
 /**
