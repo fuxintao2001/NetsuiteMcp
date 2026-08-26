@@ -252,16 +252,34 @@ async function handleGetScriptLogs(
 	}
 }
 
-/** Normalize standard parameters (recordType, tableName). */
+/** Normalize standard parameters (recordType, tableName, table_name, record_type, table). */
 function normalizeStandardArgs(
 	args: Record<string, unknown>,
 ): Record<string, unknown> {
-	if (typeof args.recordType === "string") {
-		args.recordType = args.recordType.toLowerCase().trim();
+	const rawRecordType =
+		args.recordType ??
+		args.record_type ??
+		args.tableName ??
+		args.table_name ??
+		args.table;
+
+	if (typeof rawRecordType === "string" && rawRecordType.trim().length > 0) {
+		const normalized = rawRecordType.toLowerCase().trim();
+		args.recordType = normalized;
+		if (typeof args.tableName === "string") {
+			args.tableName = normalized;
+		}
 	}
-	if (typeof args.tableName === "string") {
-		args.tableName = args.tableName.toLowerCase().trim();
+
+	if (
+		typeof args.record_id === "string" ||
+		typeof args.record_id === "number"
+	) {
+		const strId = String(args.record_id).trim();
+		if (!args.recordId) args.recordId = strId;
+		if (!args.id) args.id = strId;
 	}
+
 	return args;
 }
 
@@ -674,7 +692,7 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
 				name === "ns_getRecordTypeMetadata" ||
 				name === "ns_getSuiteQLMetadata"
 			) {
-				const recordTypeRaw = safeArgs.recordType;
+				const recordTypeRaw = safeArgs.recordType || safeArgs.tableName;
 				const hydratedResult = await hydrateMetadataIfNeeded(
 					name,
 					recordTypeRaw,

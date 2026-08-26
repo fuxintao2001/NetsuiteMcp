@@ -171,6 +171,24 @@ describe("MCP Handler Wires", () => {
 			expect(res.content[0].text).toContain("Acme Corp");
 		});
 
+		it("should normalize table_name / tableName to recordType in ns_getSuiteQLMetadata", async () => {
+			const callFn = registeredHandlers.get("tools/call");
+
+			await callFn?.({
+				params: {
+					name: "ns_getSuiteQLMetadata",
+					arguments: { table_name: "item" },
+				},
+			});
+
+			expect(mockMCPTools.executeTool).toHaveBeenCalledWith(
+				"ns_getSuiteQLMetadata",
+				expect.objectContaining({
+					recordType: "item",
+				}),
+			);
+		});
+
 		it("should resolve custom record string rectype in ns_runCustomSuiteQL", async () => {
 			const callFn = registeredHandlers.get("tools/call");
 

@@ -178,10 +178,14 @@ class NetSuiteMCPServer {
 
 	private async handleCacheRefresh(args: Record<string, unknown>) {
 		try {
-			const tableName = (args.tableName ||
-				args.table ||
-				args.recordType ||
-				"") as string;
+			const rawTable =
+				args.tableName ??
+				args.table_name ??
+				args.recordType ??
+				args.record_type ??
+				args.table;
+			const tableName =
+				typeof rawTable === "string" ? rawTable.trim().toLowerCase() : "";
 			if (tableName) {
 				await this.mcpTools.clearTableMetadataCache(tableName);
 				return textResult(

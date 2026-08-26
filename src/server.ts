@@ -247,7 +247,26 @@ class NetSuiteHTTPServer {
 					content: [{ type: "text", text: "Logged out successfully." }],
 				};
 			},
-			handleCacheRefresh: async () => {
+			handleCacheRefresh: async (args: Record<string, unknown> = {}) => {
+				const rawTable =
+					args.tableName ??
+					args.table_name ??
+					args.recordType ??
+					args.record_type ??
+					args.table;
+				const tableName =
+					typeof rawTable === "string" ? rawTable.trim().toLowerCase() : "";
+				if (tableName) {
+					await mcpTools.clearTableMetadataCache(tableName);
+					return {
+						content: [
+							{
+								type: "text",
+								text: `✅ Successfully cleared cache for table/recordType: ${tableName}`,
+							},
+						],
+					};
+				}
 				await mcpTools.clearMetadataCache();
 				return {
 					content: [{ type: "text", text: "Cache cleared successfully." }],

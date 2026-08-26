@@ -103,9 +103,15 @@ export class NetSuiteMCPTools {
 
 		// --- Cache check & schema reconnaissance tracking for metadata tools ---
 		if (this.isMetadataTool(toolName)) {
+			const targetTableRaw =
+				parameters.recordType ??
+				parameters.tableName ??
+				parameters.table_name ??
+				parameters.record_type ??
+				parameters.table;
 			const targetTable =
-				typeof parameters.recordType === "string"
-					? parameters.recordType.toLowerCase().trim()
+				typeof targetTableRaw === "string" && targetTableRaw.trim().length > 0
+					? targetTableRaw.toLowerCase().trim()
 					: undefined;
 			if (targetTable) {
 				parameters.recordType = targetTable;
@@ -263,7 +269,7 @@ export class NetSuiteMCPTools {
 		try {
 			const accountId = await this.oauthManager.getAccountId();
 			if (accountId) {
-				const cleanName = tableName.trim();
+				const cleanName = tableName.trim().toLowerCase();
 				await cacheService.delete(
 					accountId,
 					`ns_getSuiteQLMetadata_${cleanName}`,
@@ -624,9 +630,15 @@ export class NetSuiteMCPTools {
 		toolName: string,
 		params: Record<string, unknown>,
 	): string {
-		const recordTypeRaw = params.recordType ?? "all";
+		const recordTypeRaw =
+			params.recordType ??
+			params.tableName ??
+			params.table_name ??
+			params.record_type ??
+			params.table ??
+			"all";
 		const recordType =
-			typeof recordTypeRaw === "string"
+			typeof recordTypeRaw === "string" && recordTypeRaw.trim().length > 0
 				? recordTypeRaw.toLowerCase().trim()
 				: "all";
 		return `${toolName}_${recordType}`;

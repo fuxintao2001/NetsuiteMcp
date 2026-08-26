@@ -70,9 +70,7 @@ function isRetryableTokenError(error: unknown): boolean {
 	const status = err.response?.status;
 	// 429 Too Many Requests: rejected safely before processing
 	// 502 Bad Gateway / 503 Service Unavailable / 504 Gateway Timeout: rejected by NetSuite's edge/load balancer
-	return (
-		status === 429 || status === 502 || status === 503 || status === 504
-	);
+	return status === 429 || status === 502 || status === 503 || status === 504;
 }
 
 async function postTokenRequest(

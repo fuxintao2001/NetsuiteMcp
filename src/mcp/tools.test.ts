@@ -182,5 +182,40 @@ describe("NetSuiteMCPTools", () => {
 			expect(result).toEqual(mockResult);
 			expect(httpPostSpy).toHaveBeenCalledTimes(2);
 		});
+
+		it("should normalize table_name / tableName / table aliases to recordType and use correct cache key", async () => {
+			const cached = {
+				success: true,
+				metadata: { properties: { itemid: { type: "string" } } },
+			};
+			const cacheGetSpy = vi
+				.spyOn(cacheService, "get")
+				.mockResolvedValue(cached);
+
+			const result = await client.executeTool("ns_getSuiteQLMetadata", {
+				table_name: "item",
+			});
+			expect(result).toEqual(cached);
+			expect(cacheGetSpy).toHaveBeenCalledWith(
+				"test-acc",
+				"ns_getSuiteQLMetadata_item",
+			);
+		});
+
+		it("should lowercase tableName when clearing table metadata cache", async () => {
+			const cacheDelSpy = vi
+				.spyOn(cacheService, "delete")
+				.mockResolvedValue(undefined);
+
+			await client.clearTableMetadataCache("ITEM");
+			expect(cacheDelSpy).toHaveBeenCalledWith(
+				"test-acc",
+				"ns_getSuiteQLMetadata_item",
+			);
+			expect(cacheDelSpy).toHaveBeenCalledWith(
+				"test-acc",
+				"ns_getRecordTypeMetadata_item",
+			);
+		});
 	});
 });
