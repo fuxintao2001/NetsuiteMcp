@@ -258,6 +258,80 @@ export function validateSuiteQL(sqlQuery: string): SuiteQLValidationResult {
 	const tables = extractReferencedTables(trimmed);
 	const hasPagination = hasPaginationClause(trimmed);
 
+	// --- Slow Query Anti-Pattern Checks & Smart Routing Guidance ---
+
+	// Anti-Pattern 1: Prohibited SystemNote JOIN (causes catastrophic timeouts on high-volume datasets)
+	if (tables.includes("systemnote") && tables.length > 1) {
+		return {
+			valid: false,
+			reason:
+				"Prohibited 'JOIN SystemNote': Joining 'SystemNote' directly with other tables causes severe query timeouts due to massive table volume. Please execute a standalone query against SystemNote with tight filters on 'recordid' and a narrow date range instead.",
+		};
+	}
+
+	// Anti-Pattern 2: 'createdfrom' field location on transaction header
+	if (
+		/\b(?:transaction|t)\.createdfrom\b/i.test(trimmed) ||
+		(tables.includes("transaction") &&
+			!tables.includes("transactionline") &&
+			/\bcreatedfrom\b/i.test(trimmed))
+	) {
+		return {
+			valid: false,
+			reason:
+				"Invalid field location 'createdfrom': In NetSuite SuiteQL, 'createdfrom' does NOT exist on the 'transaction' header table; it is a column on 'transactionline'. Please join transactionline to query lineage (e.g. `JOIN transactionline tl ON t.id = tl.transaction WHERE tl.createdfrom = :id AND tl.mainline = 'T'`).",
+		};
+	}
+
+	// Anti-Pattern 3: Suboptimal table 'inventoryitemlocations' for general inventory
+	if (
+		tables.includes("inventoryitemlocations") &&
+		!/\b(itemtype|type)\s*=\s*['"]?InvtPart['"]?/i.test(trimmed)
+	) {
+		return {
+			valid: false,
+			reason:
+				"Suboptimal table 'inventoryitemlocations': 'inventoryitemlocations' only contains standard inventory items (InvtPart) and omits Assembly, Lot-numbered, and Serialized items. For complete cross-item location stock (quantityOnHand, quantityAvailable, quantityOnOrder, averageCostMli), use the unified 'aggregateitemlocation' table instead: `SELECT a.item, a.location, a.quantityOnHand, a.quantityAvailable, a.quantityOnOrder, a.averageCostMli FROM aggregateitemlocation a`.",
+		};
+	}
+
+	// Anti-Pattern 4: 'transactionline' missing 'mainline' filter
+	if (
+		tables.includes("transactionline") &&
+		!/\bmainline\s*=\s*['"]?[TF]['"]?/i.test(trimmed)
+	) {
+		return {
+			valid: false,
+			reason:
+				"Missing 'mainline' filter on 'transactionline': NetSuite 'transactionline' rows contain both header summary (mainline = 'T') and line items (mainline = 'F'). Omitting this filter causes row duplication and distorted sum amounts. Add `tl.mainline = 'F'` (for line item details) or `tl.mainline = 'T'` (for transaction header line) to your WHERE clause.",
+		};
+	}
+
+	// Anti-Pattern 5: Unindexed query against 'transaction' + 'transactionline'
+	if (tables.includes("transaction") && tables.includes("transactionline")) {
+		const whereMatch =
+			/\bWHERE\s+([\s\S]+?)(?:\s+(?:GROUP\s+BY|HAVING|ORDER\s+BY|FETCH\s+FIRST)|;|$)/i.exec(
+				maskedSql,
+			);
+		const whereClause = whereMatch?.[1] || "";
+
+		const hasDrivingFilter =
+			/\b(tranid|otherrefnum|trandate|datecreated|type|recordtype|entity|item|subsidiary|location|createdfrom)\s*(?:=|IN|<|>|BETWEEN|LIKE|>=|<=)/i.test(
+				whereClause,
+			) ||
+			/\b(?:t\.|tl\.|transaction\.|transactionline\.)?(?:id|internalid)\s*(?:=|IN|<|>|BETWEEN|LIKE|>=|<=)\s*(?:\d+|__STR_LITERAL_\d+__|\?|\()/i.test(
+				whereClause,
+			);
+
+		if (!hasDrivingFilter) {
+			return {
+				valid: false,
+				reason:
+					"Unindexed query against 'transaction' + 'transactionline': Queries joining transaction tables MUST include at least one indexed driving filter in the WHERE clause (such as 'trandate', 'type', 'id', 'tranid', 'entity', 'subsidiary', or 'item') to prevent full-table scan timeouts. Example: `WHERE t.type = 'SalesOrd' AND t.trandate >= TO_DATE('2025-01-01', 'YYYY-MM-DD') AND tl.mainline = 'F'`.",
+			};
+		}
+	}
+
 	return { valid: true, tables, hasPagination };
 }
 

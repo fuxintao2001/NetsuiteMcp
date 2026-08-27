@@ -143,7 +143,7 @@ describe("SuiteQL, Search & Query Utilities", () => {
 				expect(multiCountRes.valid).toBe(true);
 
 				const arithRes = validateSuiteQL(
-					"SELECT a.id, a.quantity * a.rate AS total FROM transactionline a",
+					"SELECT a.id, a.quantity * a.rate AS total FROM transactionline a WHERE a.mainline = 'F'",
 				);
 				expect(arithRes.valid).toBe(true);
 			});
@@ -215,6 +215,83 @@ describe("SuiteQL, Search & Query Utilities", () => {
 					"multiple statements separated by semicolons",
 				);
 			});
+
+			it("should reject prohibited SystemNote JOIN queries", () => {
+				const res = validateSuiteQL(
+					"SELECT t.id, sn.detail FROM transaction t JOIN SystemNote sn ON sn.recordid = t.id WHERE t.id = 1",
+				);
+				expect(res.valid).toBe(false);
+				expect(res.reason).toContain("Prohibited 'JOIN SystemNote'");
+			});
+
+			it("should reject createdfrom on transaction header table", () => {
+				const res1 = validateSuiteQL(
+					"SELECT t.id FROM transaction t WHERE t.createdfrom = 100",
+				);
+				expect(res1.valid).toBe(false);
+				expect(res1.reason).toContain("Invalid field location 'createdfrom'");
+
+				const res2 = validateSuiteQL(
+					"SELECT id FROM transaction WHERE createdfrom = 100",
+				);
+				expect(res2.valid).toBe(false);
+				expect(res2.reason).toContain("Invalid field location 'createdfrom'");
+			});
+
+			it("should reject inventoryitemlocations without itemtype filter and guide to aggregateitemlocation", () => {
+				const res = validateSuiteQL(
+					"SELECT a.item, a.location, a.quantityOnHand FROM inventoryitemlocations a WHERE a.location = 1",
+				);
+				expect(res.valid).toBe(false);
+				expect(res.reason).toContain(
+					"Suboptimal table 'inventoryitemlocations'",
+				);
+				expect(res.reason).toContain("aggregateitemlocation");
+			});
+
+			it("should allow inventoryitemlocations when explicitly filtered by itemtype", () => {
+				const res = validateSuiteQL(
+					"SELECT a.item, a.location, a.quantityOnHand FROM inventoryitemlocations a WHERE a.itemtype = 'InvtPart' AND a.location = 1",
+				);
+				expect(res.valid).toBe(true);
+			});
+
+			it("should validate aggregateitemlocation queries successfully", () => {
+				const res = validateSuiteQL(
+					"SELECT a.item, a.location, a.quantityOnHand, a.quantityAvailable, a.quantityOnOrder FROM aggregateitemlocation a WHERE a.location = 23",
+				);
+				expect(res.valid).toBe(true);
+				expect(res.tables).toContain("aggregateitemlocation");
+			});
+
+			it("should reject transactionline queries missing mainline filter", () => {
+				const res = validateSuiteQL(
+					"SELECT tl.id, tl.item, tl.quantity FROM transactionline tl WHERE tl.transaction = 100",
+				);
+				expect(res.valid).toBe(false);
+				expect(res.reason).toContain(
+					"Missing 'mainline' filter on 'transactionline'",
+				);
+			});
+
+			it("should reject unindexed transaction + transactionline joins", () => {
+				const res = validateSuiteQL(
+					"SELECT t.id, tl.amount FROM transaction t JOIN transactionline tl ON t.id = tl.transaction WHERE tl.mainline = 'F'",
+				);
+				expect(res.valid).toBe(false);
+				expect(res.reason).toContain(
+					"Unindexed query against 'transaction' + 'transactionline'",
+				);
+			});
+
+			it("should allow indexed transaction + transactionline queries with mainline filter", () => {
+				const res = validateSuiteQL(
+					"SELECT t.id, t.tranid, tl.item, tl.amount FROM transaction t JOIN transactionline tl ON t.id = tl.transaction WHERE t.type = 'SalesOrd' AND t.trandate >= TO_DATE('2025-01-01', 'YYYY-MM-DD') AND tl.mainline = 'F'",
+				);
+				expect(res.valid).toBe(true);
+				expect(res.tables).toContain("transaction");
+				expect(res.tables).toContain("transactionline");
+			});
 		});
 
 		describe("assertValidSuiteQL", () => {
@@ -228,6 +305,14 @@ describe("SuiteQL, Search & Query Utilities", () => {
 				expect(() => assertValidSuiteQL("DROP TABLE item")).toThrow(
 					SuiteQLValidationError,
 				);
+			});
+
+			it("should throw SuiteQLValidationError with helpful suggestion on missing mainline", () => {
+				expect(() =>
+					assertValidSuiteQL(
+						"SELECT id, item FROM transactionline WHERE transaction = 1",
+					),
+				).toThrowError(/Missing 'mainline' filter/);
 			});
 		});
 	});

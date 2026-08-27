@@ -314,19 +314,59 @@ export const SCRIPT_LOGS_TOOL = {
  */
 export const SUITEQL_RULES_SUFFIX = `
 
-⚠️ ═══ MANDATORY SUITEQL PROTOCOL & SELF-ITERATION WORKFLOW ═══
+⚠️ ═══ MANDATORY SUITEQL PROTOCOL, DOMAIN TABLE ROUTING & SELF-HEALING WORKFLOW ═══
 
 🔒 STEP 1 — RECONNAISSANCE (Before writing ANY query):
   Always call ns_getSuiteQLMetadata to verify exact table/field names and case-sensitivity before executing custom queries.
 
-📝 STEP 2 — SYNTAX & PAGINATION RULES (Non-negotiable):
-  a) Explicit Column Selection: NO 'SELECT *'. Explicitly specify each required field name.
-  b) Pagination: Use 'FETCH FIRST N ROWS ONLY' or 'WHERE ROWNUM <= N'. NEVER use 'LIMIT' or 'OFFSET' (unsupported by SuiteQL).
+🎯 STEP 2 — BUSINESS DOMAIN TABLE ROUTING (Choose the right table for the business scenario):
+  1. 📦 Inventory & Stock Management (Multi-Location & All Item Types):
+     • 🌟 Cross-Item Location Stock (GOLDEN TABLE): ALWAYS use 'aggregateitemlocation' (NOT 'item', NOT 'inventoryitemlocations')!
+       - Key Fields: item, location, quantityOnHand, quantityAvailable, quantityCommitted, quantityOnOrder, quantityBackOrdered, quantityInTransit, averageCostMli, onHandValueMli, reorderPoint, preferredStockLevel
+       - Golden Template: SELECT a.item, BUILTIN.DF(a.item) AS item_name, a.location, BUILTIN.DF(a.location) AS loc_name, a.quantityOnHand, a.quantityAvailable, a.quantityOnOrder, a.averageCostMli FROM aggregateitemlocation a WHERE a.location = :loc_id
+       - ⚠️ CRITICAL: 'inventoryitemlocations' only covers standard inventory items (InvtPart) and OMITS Assembly, Lot-numbered, and Serialized items. Querying 'item' table directly causes severe polymorphic scan timeouts.
+     • Subtype Locations (Specific Types Only): 'inventoryitemlocations' (InvtPart), 'assemblyitemlocations' (Assembly), 'lotnumberedassemblyitemlocations' (Lot Assembly), 'lotnumberedinventoryitemlocations' (Lot Invt).
+     • Granular Bin & Lot/Serial Stock: 'inventorybalance' (bin-level quantity), 'inventorynumber' (lot/serial tracking), 'bin'.
+     • Item Catalog / Master Metadata: 'item' (SELECT minimal columns only: id, itemid, displayname, itemtype, baseprice, isinactive).
+
+  2. 📑 Transactions & Order-to-Cash / Procure-to-Pay:
+     • Header-Level Summary & Metrics: 'transaction' (MUST filter with indexed fields: WHERE type = '...' AND trandate >= TO_DATE(...) AND voided = 'F').
+     • Line Item Breakdown: 'transactionline' JOIN 'transaction' (MUST include WHERE tl.mainline = 'F' AND tl.taxline = 'F' to prevent 2x+ row duplication).
+     • Transaction Header Summary Line: 'transactionline' (WHERE tl.mainline = 'T').
+     • Document Lineage / Upstream Links (PO➔IR, SO➔IF, etc.): 'tl.createdfrom = :upstream_id' on 'transactionline' (⚠️ 'createdfrom' does NOT exist on 'transaction' header!).
+     • Intercompany Paired Numbers: Match 't.tranid' with 't.otherrefnum'.
+
+  3. 🏭 Manufacturing, Work Orders & Assembly Builds:
+     • Work Orders & Builds: 'transaction' WHERE type IN ('WorkOrd', 'Build', 'Unbuild', 'WOCompl', 'WOIssue', 'WOClose').
+     • WO Component Consumption: 'transactionline' tl WHERE tl.transaction = :wo_id AND tl.mainline = 'F'.
+
+  4. 📈 MRP & Demand Planning:
+     • Custom MRP Records: 'customrecord_hc_mrp_*', paired with Open Sales Orders ('SalesOrd') and Purchase Orders ('PurchOrd').
+
+  5. 🧬 Product Lifecycle (PL) & PIM Attributes:
+     • Product Lifecycle Status: 'item' filtering 'custitem_product_lifecycle_status' and PIM attributes.
+
+  6. 🚢 Landed Cost, Receipts & Customs:
+     • Inbound Shipments: 'inboundshipment', 'inboundshipmentitem'.
+     • Customs & Item Receipts: 'transaction' WHERE type = 'ItemRcpt' with customs declaration custom fields.
+
+  7. 💰 Financial Costing & GL Postings:
+     • GL Impact & Accounting Entries: 'transactionaccountingline' tal JOIN 'transaction' t ON t.id = tal.transaction JOIN 'account' a ON a.id = tal.account WHERE tal.posting = 'T'.
+     • Chart of Accounts: 'account', Accounting Periods: 'accountingperiod', Subsidiaries: 'subsidiary'.
+
+  8. 🛠️ Governance, System Notes & Script Logs:
+     • Script Execution Logs: 'scriptnote' (or use tool 'netsuite_get_script_logs').
+     • System Audit Logs: Standalone 'systemnote' ONLY with strict 'recordid' filter. ⚠️ NEVER JOIN SystemNote with transaction/entity tables (causes 45s+ timeouts).
+
+📝 STEP 3 — SYNTAX & PERFORMANCE RULES (Non-negotiable):
+  a) Explicit Column Selection: NO 'SELECT *' or 'table.*'. Explicitly specify each required field name.
+  b) Pagination: Use 'FETCH FIRST N ROWS ONLY' or 'WHERE ROWNUM <= N'. NEVER use 'LIMIT' or 'OFFSET'.
   c) Date Handling: Wrap date literals in TO_DATE('<value>', '<format>'), e.g. TO_DATE('2025-01-15', 'YYYY-MM-DD'). NEVER compare bare date strings.
-  d) Display Name Extraction: Use BUILTIN.DF(<foreign_key_field>) (e.g., BUILTIN.DF(entity), BUILTIN.DF(status), BUILTIN.DF(subsidiary)) to retrieve human-readable text labels instead of writing multi-table JOINs.
+  d) Display Name Extraction: Use BUILTIN.DF(<foreign_key_field>) (e.g., BUILTIN.DF(item), BUILTIN.DF(location), BUILTIN.DF(entity), BUILTIN.DF(status), BUILTIN.DF(subsidiary)) to retrieve human-readable text labels instead of writing expensive multi-table JOINs.
   e) Primary Key Naming: The primary key column for NetSuite tables is 'id' (NOT 'internalid').
   f) Null Value Handling: Use NVL(field, default_value) to replace NULLs, e.g. NVL(memo, 'None').
-  g) Security Guardrails: Queries MUST begin with SELECT or WITH. SQL comments (-- or /* */ or #) are strictly prohibited.
+  g) Driving Indexed Filters: Queries against 'transaction' / 'transactionline' MUST include indexed driving filters ('trandate', 'type', 'id', 'tranid', 'subsidiary', 'location', 'entity', 'item').
+  h) Security Guardrails: Queries MUST begin with SELECT or WITH. SQL comments (-- or /* */ or #) are strictly prohibited.
 
 📋 TRANSACTION TYPE SHORTCODES (Use in WHERE type = '...'):
   • Sales & AR: SalesOrd (Sales Order), CustInvc (Invoice), CashSale (Cash Sale), Estimate (Quote), Opprtnty (Opportunity), CustPymt (Customer Payment), CustDep (Customer Deposit), DepAppl (Deposit App), CustCred (Credit Memo), CustRfnd (Refund), RtnAuth (RMA), ItemShip (Fulfillment), CustChrg (Statement Charge), FinChrg (Finance Charge)
@@ -334,15 +374,15 @@ export const SUITEQL_RULES_SUFFIX = `
   • Inventory & Mfg: TrnfrOrd (Transfer Order), InvTrnfr (Inv Transfer), InvAdjst (Adjustment), InvCount (Count), InvReval (Revaluation), InvWksht (Worksheet), Build (Assembly Build), Unbuild (Assembly Unbuild), WorkOrd (Work Order), WOClose (WO Close), WOCompl (WO Completion), WOIssue (WO Issue), BinTrnfr (Bin Transfer), BinWksht (Bin Putaway), StatChng (Status Change), OwnTrnsf (Ownership Transfer)
   • Financial & Other: Journal (Journal Entry), InterCompJrn (Intercompany Journal), AdvInterCompJrn (Adv Interco Journal), StatJrn (Statistical Journal), PEJrnl (Period End Journal), Check (Check), Deposit (Deposit), CardChrg (Credit Card), CardRfnd (Card Refund), TaxPymt/TaxLiab (Tax Payment), Paycheck (Paycheck), PchkJrnl (Paycheck Journal), Commissn (Commission), ExpRept (Expense Report), FxReval (FX Revaluation), RevArrng (Revenue Arrangement), RevComm (Revenue Commitment), Transfer (Bank Transfer), Custom (Custom Transaction)
 
-🔄 STEP 3 — AUTOMATIC SELF-HEALING LOOP (On syntax/schema errors only):
-  If query execution returns a syntax or schema error (e.g. invalid column, syntax error, wrong type code) or unexpectedly empty results:
+🔄 STEP 4 — AUTOMATIC SELF-HEALING LOOP (On syntax/schema errors only):
+  If query execution returns a syntax or schema error (e.g. invalid column, wrong table, missing mainline, wrong type code) or unexpectedly empty results:
   Follow this self-healing procedure (up to 3 retry iterations):
-    1. Parse the error message to pinpoint the exact failure (e.g., misspelled field or wrong type code).
-    2. Re-call ns_getSuiteQLMetadata to inspect table schema and confirm valid field names/types.
-    3. Correct the SuiteQL statement and re-run ns_runCustomSuiteQL.
+    1. Parse the error message and guardrail advice to pinpoint the exact failure (e.g. use 'aggregateitemlocation' instead of 'inventoryitemlocations', or add 'tl.mainline = ''F''').
+    2. Re-call ns_getSuiteQLMetadata to inspect table schema and confirm valid field names/types if needed.
+    3. Correct the SuiteQL statement using recommended domain patterns and re-run ns_runCustomSuiteQL.
     4. Only report failure to the user after 3 unsuccessful automated retries.
 
-🚫 ═══ PERMISSION ERROR HARD STOP (CRITICAL EXCEPTION TO STEP 3) ═══
+🚫 ═══ PERMISSION ERROR HARD STOP (CRITICAL EXCEPTION TO STEP 4) ═══
   If query execution fails due to PERMISSION RESTRICTIONS (e.g. 'INSUFFICIENT_PERMISSION', HTTP 403, 'Permission Violation', or role access denied):
   • DO NOT attempt self-healing or query retries (permission errors CANNOT be resolved by modifying queries).
   • DO NOT guess, simulate, or fabricate any record data.
