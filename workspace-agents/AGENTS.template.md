@@ -7,65 +7,87 @@
 
 # 🚨 MANDATORY PRE-FLIGHT EXECUTION GATES
 
-Before executing ANY action or returning ANY response, you MUST satisfy these non-negotiable gates in order:
+Before executing ANY tool call or generating ANY response, you MUST satisfy these non-negotiable gates in strict sequential order:
 
-## GATE 1: Official Documentation Highest Priority & Zero-Hallucination Protocol (官方文档绝对最高优先级与零幻觉准则)
-1. **Language (全中文交互):** **ALL responses, outputs, and user interactions MUST BE EXCLUSIVELY IN CHINESE (全中文交互).** Code, variable names, and API identifiers remain in English.
-2. **Official NetSuite Docs Are the Absolute Highest Priority (官方文档绝对最高优先级，冲突时一律以官方为准):**
-   - 👑 **最高优先级法则 (Absolute Highest Priority):** Oracle NetSuite 官方权威文档（Oracle Help Center、SuiteAnswers、SuiteAnalytics NetSuite2.com Records Catalog、Oracle SAFE Guide 2025.2 官方设计规范）拥有**全系统最高优先级**。
-     * **任何第三方教程、过往旧代码习惯、口头经验、模糊推断或大模型通用知识，只要与 NetSuite 官方文档存在差异或冲突，必须无条件、100% 以官方文档为准！**
-     * 严禁给出任何与官方标准相悖的低效、陈旧或错误建议。
-   - **绝对权威来源 (Single Source of Truth):** 所有的技术结论、表选型方案、字段名称、SuiteScript API 签名、治理用量（Governance Units）与架构设计，**必须严格查证自 NetSuite 官方权威来源**：
-     * **Oracle NetSuite 官方文档与 SuiteAnswers**；
-     * **Context7 文档库**（`resolve-library-id` ➔ `query-docs`）；
-     * **官方 SuiteCloud Skills 知识库**（`netsuite://skills/*`）；
-     * **实机真实元数据校验**（`ns_getSuiteQLMetadata`、`ns_getRecordTypeMetadata`）。
-   - 🚫 **严禁从模糊记忆中盲目猜测 (Zero Guesswork):**
-     * **严禁凭空臆造不存在的表名或字段**（例如盲目猜测 `LotNumberedAssemblyItemLocations` 或 `transaction.createdfrom`，而不知道使用官方聚合表 `aggregateitemlocation` 或 `transactionline.createdfrom`）；
-     * **严禁提供未经官方文档验证的低效、幼稚或具有破坏性的“垃圾建议”**（如建议在多态巨表 `item` 上做全量地点库存聚合、建议在生产环境对 `transaction` 做无索引全表扫描、或在 SuiteQL 中直接 `JOIN SystemNote`）；
-     * **凡涉及不确定的表名、字段名、关联路径或 API 方法，必须先调用元数据工具或查阅官方文档查证，绝不允许信口开河！**
-   - 📖 **强制标注官方出处 (Mandatory Citation):** 给出关键技术结论、表选型建议或 API 方案时，必须明确标注出处：`📖 官方出处：[Oracle SAFE Guide 章节 / SuiteAnswers ID / Records Catalog / ns_getSuiteQLMetadata 实测]`。无法给出官方依据的推论一律视为违规幻觉。
-3. **Environment Lock (环境锁定):** When initiating NetSuite operations in a turn, state once: `🎯 当前工作区环境已锁定为: {{ACCOUNT_ID}} ({{ENV_TYPE}})`. Cross-environment queries are STRICTLY PROHIBITED.
+## GATE 1: Language Policy & Official Documentation Absolute Priority
 
-## GATE 2: SuiteQL Domain Routing, Reconnaissance & Anti-Slow-Query Protocol
-1. **Domain Scenario Table Routing (按业务领域精准选表，严禁错选基表):**
-   - 📦 **全品类多地点库存汇总 (Multi-Location Inventory across all item types):**
-     * 🎯 **黄金表 MUST USE:** `aggregateitemlocation`（统一聚合原材料 InvtPart、装配品 Assembly、批次品 Lot、序列号品的 `quantityOnHand`, `quantityAvailable`, `quantityOnOrder`, `averageCostMli`）。
-     * ⚠️ **严禁误用:** `inventoryitemlocations`（仅限标准原材料，会彻底漏掉装配品与批次品）；严禁直接在 `item` 上做地点库存全表扫描。
-   - 📑 **单据明细与关联追踪 (Transactions & Lineage):**
-     * 🎯 **单据明细行:** `transactionline` JOIN `transaction` 必须强制包含 `WHERE tl.mainline = 'F' AND tl.taxline = 'F'`（防止行数成倍冗余和金额翻倍）。
-     * 🎯 **单据上下游链路 (PO➔IR, SO➔IF 等):** `tl.createdfrom = :id` 位于 `transactionline`（⚠️ `createdfrom` 字段在 `transaction` 头表上**不存在**）。
-     * 🎯 **公司间配对单号:** 关联 `t.tranid` ⇄ `t.otherrefnum`。
-   - 🏭 **生产工单与装配完工 (Manufacturing & WO):**
-     * `transaction` WHERE `type IN ('WorkOrd', 'Build', 'Unbuild')`；用料明细查 `transactionline` WHERE `transaction = :wo_id AND mainline = 'F'`。
-   - 💰 **财务 GL 过账与分录 (GL Impact):**
-     * `transactionaccountingline` tal JOIN `transaction` t JOIN `account` a WHERE `tal.posting = 'T'`。
-   - 🛠️ **系统审计与操作日志 (System Notes):**
-     * ⚠️ **严禁在 SuiteQL 中直接 `JOIN SystemNote`**（官方 SAFE Guide 明确指出会导致极高超时的笛卡尔积）。如需查询，必须作为单表独立查询，并对 `recordid` 和日期进行精确过滤。
-2. **Schema Check First:** **MUST call `ns_getSuiteQLMetadata` BEFORE generating any custom SuiteQL.**
-3. **Syntax & Performance Mandates:**
-   - ❌ NO `SELECT *` or `table.*` (explicit columns only).
+### 1. Language Policy (全中文交互)
+- **ALL user-facing explanations, responses, reasoning summaries, and UI messages MUST be in Simplified Chinese (简体中文).**
+- Code, variable names, SQL identifiers, table names, field IDs, and API names MUST remain in their original English syntax.
+
+### 2. 👑 Absolute Highest Priority for Official Oracle NetSuite Documentation
+- **Oracle NetSuite Official Authoritative Documentation ALWAYS TAKES PRECEDENCE over everything else.** This includes:
+  1. Oracle Help Center & SuiteAnswers (Official Records Catalog / NetSuite2.com Data Source)
+  2. Oracle NetSuite SAFE Guide (2025.2 Leading Practices & Architecture Standards)
+  3. Context7 Official SuiteScript Docs (`resolve-library-id` ➔ `query-docs`)
+  4. Bundled SuiteCloud Skills (`netsuite://skills/*`)
+  5. Live NetSuite Schema Metadata (`ns_getSuiteQLMetadata`, `ns_getRecordTypeMetadata`)
+- **Precedence Rule:** If any third-party blog, legacy codebase habit, colloquial advice, or general LLM pre-training intuition conflicts with official NetSuite documentation, **YOU MUST UNCONDITIONALLY FOLLOW THE OFFICIAL DOCUMENTATION**.
+- **STRICT ZERO-HALLUCINATION & ANTI-GUESSWORK MANDATE:**
+  - ❌ **NEVER guess or invent non-existent table names, field IDs, or record types** (e.g. NEVER fabricate `LotNumberedAssemblyItemLocations` or `transaction.createdfrom`).
+  - ❌ **NEVER provide naive, unverified, or destructive advice** (e.g. querying multi-type location inventory from the monolithic `item` table, performing unindexed full-table scans on `transaction`, or joining `SystemNote` directly in SuiteQL).
+  - 🔍 **Verification First:** Before proposing any table, field, or SuiteScript API, you MUST verify its existence and official usage via `ns_getSuiteQLMetadata` or Context7/Skills.
+  - 📖 **Mandatory Citation:** Every technical conclusion, table choice, or architecture recommendation MUST cite its official source: `📖 官方出处：[Oracle SAFE Guide Section / SuiteAnswers ID / Records Catalog / ns_getSuiteQLMetadata 实测]`.
+
+### 3. Environment Lock
+- When initiating NetSuite operations in a turn, state once: `🎯 当前工作区环境已锁定为: {{ACCOUNT_ID}} ({{ENV_TYPE}})`.
+- Cross-environment operations are STRICTLY PROHIBITED.
+
+---
+
+## GATE 2: SuiteQL 8-Domain Decision Matrix & Anti-Slow-Query Guardrails
+
+### 1. Domain Table Selection Decision Matrix
+| Domain Scenario | Official Golden Table | Avoid / Anti-Pattern | Mandatory Filters & Syntax |
+|:---|:---|:---|:---|
+| **Multi-Location Inventory (All item types)** | **`aggregateitemlocation`** (Unified MLI view for InvtPart, Assembly, Lot, Serial) | ❌ `inventoryitemlocations` (omits assemblies & lots)<br>❌ `item` (slow polymorphic table) | `SELECT a.item, BUILTIN.DF(a.item), a.location, BUILTIN.DF(a.location), a.quantityOnHand, a.quantityAvailable, a.quantityOnOrder, a.averageCostMli FROM aggregateitemlocation a WHERE a.location = :loc` |
+| **Transaction Header & Line Items** | **`transaction`** (Header) + **`transactionline`** (Lines) | ❌ Omitting `mainline` filter (causes 2x row duplication & inflated amounts) | `JOIN transactionline tl ON t.id = tl.transaction WHERE tl.mainline = 'F' AND tl.taxline = 'F'` |
+| **Transaction Lineage & Upstream Links** | **`transactionline.createdfrom`** | ❌ `transaction.createdfrom` (Field DOES NOT EXIST on header table!) | `JOIN transactionline tl ON t.id = tl.transaction WHERE tl.createdfrom = :upstream_id AND tl.mainline = 'T'` |
+| **Intercompany Transaction Pairing** | `transaction.tranid` ⇄ `transaction.otherrefnum` | ❌ Guessing internal foreign keys | `WHERE t.otherrefnum = :paired_tranid` |
+| **Manufacturing Work Orders & Builds** | **`transaction`** (`type IN ('WorkOrd', 'Build', 'Unbuild')`) + **`transactionline`** | ❌ Querying BOM master instead of transaction lines for actual consumption | `WHERE t.type = 'WorkOrd' AND tl.mainline = 'F'` (for component issue lines) |
+| **Financial GL Impact & Postings** | **`transactionaccountingline`** + **`account`** | ❌ Calculating GL from item rate / amount without GL posting lines | `JOIN transactionaccountingline tal ON t.id = tal.transaction JOIN account a ON tal.account = a.id WHERE tal.posting = 'T'` |
+| **Bin-Level Inventory** | **`inventorybalance`** / **`bin`** | ❌ Guessing bin fields on `item` | `SELECT item, location, binnumber, inventorynumber, quantityavailable FROM inventorybalance` |
+| **System Audit Trail & History** | **`systemnote`** (Standalone only) | ❌ `JOIN SystemNote` (causes catastrophic 45s+ timeouts) | Execute standalone query: `SELECT * FROM systemnote WHERE recordid = :id AND date >= TO_DATE(...)` |
+
+### 2. Mandatory Pre-Execution SuiteQL Reconnaissance
+1. **Always Check Schema:** Call `ns_getSuiteQLMetadata` BEFORE generating custom SuiteQL whenever table schema or field name is not 100% verified.
+2. **Mandatory Syntax Rules:**
+   - ❌ NO `SELECT *` or `table.*` (always specify explicit columns).
    - ❌ NO `LIMIT`/`OFFSET` → MUST use `ROWNUM <= N` or `FETCH FIRST N ROWS ONLY`.
-   - Date literals: MUST wrap in `TO_DATE('YYYY-MM-DD', 'YYYY-MM-DD')`.
-   - Text display for foreign keys/status: MUST use `BUILTIN.DF(fieldName)` instead of heavy table joins.
-   - Driving indexed filters: Queries against `transaction` / `transactionline` MUST include indexed filters (`trandate`, `type`, `id`, `tranid`, `entity`, `subsidiary`, `item`).
-4. **Automatic Self-Healing Loop (Max 3 retries, syntax/schema errors ONLY):**
-   `Parse Error` ➔ `Call ns_getSuiteQLMetadata` ➔ `Correct SQL using Domain Matrix` ➔ `Re-run`. (Excludes permission errors; see Gate 4).
+   - Date literals: MUST use `TO_DATE('YYYY-MM-DD', 'YYYY-MM-DD')`.
+   - Foreign key & status labels: MUST use `BUILTIN.DF(fieldName)` instead of joining master tables.
+   - Transaction driving filters: MUST include at least one indexed filter (`trandate`, `type`, `id`, `tranid`, `entity`, `subsidiary`, or `item`).
+3. **Automated Self-Healing (Max 3 retries, syntax/schema errors only):**
+   `Parse Error` ➔ `Call ns_getSuiteQLMetadata` ➔ `Correct SQL via Domain Matrix` ➔ `Re-run`.
 
-## GATE 3: Code Development & Verification Gate (严禁凭记忆写代码)
-Before writing or modifying ANY SuiteScript, SuiteFlow, or SDF configuration code:
-1. **Analyze:** Locate code and line numbers (`view_file` / `grep_search`).
-2. **Verify against Official Docs (Mandatory):** Query Context7 (`resolve-library-id` ➔ `query-docs`) and read relevant Skills (e.g., `netsuite://skills/netsuite-sdf-safe-guide`) for exact API method signatures, module loading paths, governance limits, and documented pitfalls.
-3. **Implement & Cite:** Write complete, robust code (no placeholders / `// TODO` omissions). Explicitly cite the consulted official docs or SAFE Guide principle.
+---
 
-## GATE 4: Permission Hard-Stop & Zero-Hallucination Protocol (权限熔断与零幻觉准则)
-当遇到任何 NetSuite 记录/表/功能权限报错（如 `INSUFFICIENT_PERMISSION`、HTTP 403 Forbidden、权限不足、`Permission Violation`、访问拒绝）时：
-1. **立即全线熔断 (Immediate Hard Stop)**：必须立即终止当前一切后续任务与工具调用。**严禁**进入自动修复重试循环（权限问题无法通过重写查询或重试解决），**严禁**尝试换其他未授权方式探测。
-2. **绝对零幻觉 (Zero Hallucination)**：**严禁**根据上下文、历史或猜测臆造、编造、模拟任何记录数据、字段值或查询结果。
-3. **明确报错并等待用户配置权限**：必须向用户明确说明：
-   - 当前受阻的具体操作与目标记录类型 / 表名；
-   - 需要管理员在 NetSuite 角色中配置的具体权限路径与权限级别（例如：`Setup > Users/Roles > Manage Roles > Permissions` 下的 `Transactions` / `Lists` / `Setup` 权限项与级别，如 View / Full）；
-   - 明确提示用户在 NetSuite 中完成权限配置后，方可继续下一步操作。
+## GATE 3: SuiteScript Code Development (No Memory Coding)
+
+Before writing or modifying ANY SuiteScript (2.1), SuiteFlow, or SDF XML:
+1. **Analyze First:** Inspect existing project files with `view_file` / `grep_search`.
+2. **Mandatory Official Docs Verification:** Query Context7 (`resolve-library-id` ➔ `query-docs`) and read relevant skills (e.g. `netsuite://skills/netsuite-sdf-safe-guide`). Verify exact method signatures, governance units, entry points, and error codes.
+3. **Zero Placeholder Rule:** Implement complete, production-grade code without `// TODO` omissions. Explicitly cite the SAFE Guide principle or SuiteScript API reference.
+
+---
+
+## GATE 4: Permission Hard-Stop & Zero-Hallucination Protocol
+
+When encountering NetSuite authorization/permission errors (e.g., `INSUFFICIENT_PERMISSION`, HTTP 403 Forbidden, `Permission Violation`, role access denied):
+1. **Immediate Hard Stop:** Cease all further tasks, tool calls, and retries immediately. DO NOT attempt self-healing loops or alternative query probing.
+2. **Strict Zero Hallucination:** Strictly prohibited from guessing, simulating, or fabricating any record data or query results.
+3. **Actionable User Guidance:** Report the exact failed record type/table name and specify the required NetSuite role permission configuration (under `Setup > Users/Roles > Manage Roles > Permissions`), waiting for the user to configure permissions before proceeding.
+
+---
+
+# 🎯 CONTRASTIVE BENCHMARK (BAD VS GOOD)
+
+| Scenario | ❌ BAD (Hallucination / Naive / Slow) | ✅ GOOD (Official Standard / High Performance) |
+|:---|:---|:---|
+| **Cross-Item Location Stock** | `SELECT * FROM LotNumberedAssemblyItemLocations` *(Table does not exist)*<br>`SELECT * FROM item WHERE location = 28` *(Slow polymorphic scan)* | `SELECT a.item, BUILTIN.DF(a.item) AS item_name, a.location, BUILTIN.DF(a.location) AS loc_name, a.quantityOnHand, a.quantityAvailable FROM aggregateitemlocation a WHERE a.location = 28 FETCH FIRST 100 ROWS ONLY`<br>*(📖 Source: NetSuite2.com Records Catalog `aggregateitemlocation`)* |
+| **Sales Order Item Lines** | `SELECT t.tranid, tl.item, tl.amount FROM transaction t JOIN transactionline tl ON t.id = tl.transaction WHERE t.type = 'SalesOrd'` *(Missing mainline filter; duplicates header)* | `SELECT t.id, t.tranid, t.trandate, tl.item, BUILTIN.DF(tl.item) AS item_name, tl.quantity, tl.rate, tl.amount FROM transaction t JOIN transactionline tl ON t.id = tl.transaction WHERE t.type = 'SalesOrd' AND t.trandate >= TO_DATE('2025-01-01', 'YYYY-MM-DD') AND tl.mainline = 'F' FETCH FIRST 100 ROWS ONLY`<br>*(📖 Source: Oracle SAFE Guide Section 3.3.7)* |
+| **Transaction Lineage (PO from SO)** | `SELECT id FROM transaction WHERE createdfrom = 12345` *(createdfrom does not exist on transaction header)* | `SELECT t.id, t.tranid, t.type FROM transactionline tl JOIN transaction t ON t.id = tl.transaction WHERE tl.createdfrom = 12345 AND tl.mainline = 'T'`<br>*(📖 Source: Oracle SAFE Guide Section 3.3.7)* |
+| **Audit Log Tracking** | `SELECT t.tranid, sn.field, sn.oldvalue, sn.newvalue FROM transaction t JOIN SystemNote sn ON sn.recordid = t.id` *(Causes severe 45s query timeout)* | `SELECT recordid, field, oldvalue, newvalue, date, BUILTIN.DF(name) AS author FROM systemnote WHERE recordtypeid = -30 AND recordid = 12345 AND date >= TO_DATE('2025-01-01', 'YYYY-MM-DD') FETCH FIRST 50 ROWS ONLY`<br>*(📖 Source: Oracle SAFE Guide Section 3.3.6 & Pitfall 11)* |
 
 ---
 
@@ -115,3 +137,4 @@ Read on-demand via `view_file` when handling domain-specific tasks:
   ```javascript
   log.error({title: '客户同步失败', details: 'Invalid customer internal ID: ' + customerId});
   ```
+
