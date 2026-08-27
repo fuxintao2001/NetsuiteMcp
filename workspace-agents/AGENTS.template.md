@@ -9,32 +9,51 @@
 
 Before executing ANY action or returning ANY response, you MUST satisfy these non-negotiable gates in order:
 
-## GATE 1: Language & Verification Protocol (Zero-Hallucination)
-1. **Language:** **ALL responses, outputs, and user interactions MUST BE EXCLUSIVELY IN CHINESE (全中文交互).** Code, variable names, and API identifiers remain in English.
-2. **Single Source of Truth:** Technical conclusions MUST derive from official NetSuite docs, Context7 queries, or Skills (`netsuite://skills/*`). ALWAYS cite sources: `📖 出处：[Title/Resource/Skill]`.
-3. **Environment Lock:** When initiating NetSuite operations in a turn, state once: `🎯 当前工作区环境已锁定为: {{ACCOUNT_ID}} ({{ENV_TYPE}})`. Cross-environment queries are STRICTLY PROHIBITED.
+## GATE 1: Official Documentation Verification & Zero-Hallucination Protocol (官方文档查证与绝对零幻觉守则)
+1. **Language (全中文交互):** **ALL responses, outputs, and user interactions MUST BE EXCLUSIVELY IN CHINESE (全中文交互).** Code, variable names, and API identifiers remain in English.
+2. **Technical Conclusions MUST Derive from Official NetSuite Docs (严禁脑补，必须官方查证):**
+   - **绝对权威来源 (Single Source of Truth):** 所有的技术结论、表选型方案、字段名称、SuiteScript API 签名、治理用量（Governance Units）与架构设计，**必须 100% 查证自 NetSuite 官方权威来源**：
+     * **Oracle NetSuite 官方文档与 SuiteAnswers**（如 SuiteAnalytics NetSuite2.com Records Catalog、Oracle SAFE Guide 2025.2 最佳实践）；
+     * **Context7 文档库**（`resolve-library-id` ➔ `query-docs`）；
+     * **官方 SuiteCloud Skills 知识库**（`netsuite://skills/*`）；
+     * **实机真实元数据校验**（`ns_getSuiteQLMetadata`、`ns_getRecordTypeMetadata`）。
+   - 🚫 **严禁从模糊记忆中盲目猜测 (Zero Guesswork):**
+     * **严禁凭空臆造不存在的表名或字段**（例如盲目猜测 `LotNumberedAssemblyItemLocations` 或 `transaction.createdfrom`，而不知道使用官方聚合表 `aggregateitemlocation` 或 `transactionline.createdfrom`）；
+     * **严禁提供未经官方文档验证的低效、幼稚或具有破坏性的“垃圾建议”**（如建议在多态巨表 `item` 上做全量地点库存聚合、建议在生产环境对 `transaction` 做无索引全表扫描、或在 SuiteQL 中直接 `JOIN SystemNote`）；
+     * **凡涉及不确定的表名、字段名、关联路径或 API 方法，必须先调用元数据工具或查阅官方文档查证，绝不允许信口开河！**
+   - 📖 **强制标注官方出处 (Mandatory Citation):** 给出关键技术结论、表选型建议或 API 方案时，必须明确标注出处：`📖 官方出处：[Oracle SAFE Guide 章节 / SuiteAnswers ID / Records Catalog / ns_getSuiteQLMetadata 实测]`。无法给出官方依据的推论一律视为违规幻觉。
+3. **Environment Lock (环境锁定):** When initiating NetSuite operations in a turn, state once: `🎯 当前工作区环境已锁定为: {{ACCOUNT_ID}} ({{ENV_TYPE}})`. Cross-environment queries are STRICTLY PROHIBITED.
 
-## GATE 2: SuiteQL Reconnaissance & Self-Healing Protocol
-1. **Schema Check First:** **MUST call `ns_getSuiteQLMetadata` BEFORE generating any custom SuiteQL.** NEVER guess column names or relationships from memory.
-2. **Syntax Mandates:**
-   - ❌ NO `SELECT *` (explicit columns only).
+## GATE 2: SuiteQL Domain Routing, Reconnaissance & Anti-Slow-Query Protocol
+1. **Domain Scenario Table Routing (按业务领域精准选表，严禁错选基表):**
+   - 📦 **全品类多地点库存汇总 (Multi-Location Inventory across all item types):**
+     * 🎯 **黄金表 MUST USE:** `aggregateitemlocation`（统一聚合原材料 InvtPart、装配品 Assembly、批次品 Lot、序列号品的 `quantityOnHand`, `quantityAvailable`, `quantityOnOrder`, `averageCostMli`）。
+     * ⚠️ **严禁误用:** `inventoryitemlocations`（仅限标准原材料，会彻底漏掉装配品与批次品）；严禁直接在 `item` 上做地点库存全表扫描。
+   - 📑 **单据明细与关联追踪 (Transactions & Lineage):**
+     * 🎯 **单据明细行:** `transactionline` JOIN `transaction` 必须强制包含 `WHERE tl.mainline = 'F' AND tl.taxline = 'F'`（防止行数成倍冗余和金额翻倍）。
+     * 🎯 **单据上下游链路 (PO➔IR, SO➔IF 等):** `tl.createdfrom = :id` 位于 `transactionline`（⚠️ `createdfrom` 字段在 `transaction` 头表上**不存在**）。
+     * 🎯 **公司间配对单号:** 关联 `t.tranid` ⇄ `t.otherrefnum`。
+   - 🏭 **生产工单与装配完工 (Manufacturing & WO):**
+     * `transaction` WHERE `type IN ('WorkOrd', 'Build', 'Unbuild')`；用料明细查 `transactionline` WHERE `transaction = :wo_id AND mainline = 'F'`。
+   - 💰 **财务 GL 过账与分录 (GL Impact):**
+     * `transactionaccountingline` tal JOIN `transaction` t JOIN `account` a WHERE `tal.posting = 'T'`。
+   - 🛠️ **系统审计与操作日志 (System Notes):**
+     * ⚠️ **严禁在 SuiteQL 中直接 `JOIN SystemNote`**（官方 SAFE Guide 明确指出会导致极高超时的笛卡尔积）。如需查询，必须作为单表独立查询，并对 `recordid` 和日期进行精确过滤。
+2. **Schema Check First:** **MUST call `ns_getSuiteQLMetadata` BEFORE generating any custom SuiteQL.**
+3. **Syntax & Performance Mandates:**
+   - ❌ NO `SELECT *` or `table.*` (explicit columns only).
    - ❌ NO `LIMIT`/`OFFSET` → MUST use `ROWNUM <= N` or `FETCH FIRST N ROWS ONLY`.
-   - Date literals: use `TO_DATE('YYYY-MM-DD', 'YYYY-MM-DD')`.
-   - Text display for foreign keys/status: use `BUILTIN.DF(fieldName)`.
-   - **Transaction Type Shortcodes (`WHERE type = '...'`):**
-     - *Sales/AR:* `SalesOrd`, `CustInvc`, `CashSale`, `Estimate`, `Opprtnty`, `CustPymt`, `CustDep`, `DepAppl`, `CustCred`, `CustRfnd`, `RtnAuth`, `ItemShip`
-     - *Purchases/AP:* `PurchOrd`, `PurchReq`, `PurchCon`, `ItemRcpt`, `VendBill`, `VendPymt`, `VendCred`, `VendAuth`, `VPrep`, `VPrepApp`
-     - *Inventory/Mfg:* `TrnfrOrd` (Transfer Order), `InvTrnfr`, `InvAdjst`, `InvCount`, `InvReval`, `Build`, `Unbuild`, `WorkOrd`, `WOClose`, `WOCompl`, `WOIssue`, `BinTrnfr`
-     - *Financial/Other:* `Journal`, `InterCompJrn`, `AdvInterCompJrn`, `StatJrn`, `PEJrnl`, `Check`, `Deposit`, `CardChrg`, `TaxPymt`, `Paycheck`, `ExpRept`, `Transfer` (Bank Transfer), `Custom`
-3. **Automatic Self-Healing Loop (Max 3 retries, syntax/schema errors ONLY):**
-   Upon syntax error or unexpected empty result:
-   `Parse Error` ➔ `Call ns_getSuiteQLMetadata` ➔ `Correct SQL` ➔ `Re-run`. Escalate to user ONLY after 3 automated attempts. (Note: Excludes permission errors; see Gate 4).
+   - Date literals: MUST wrap in `TO_DATE('YYYY-MM-DD', 'YYYY-MM-DD')`.
+   - Text display for foreign keys/status: MUST use `BUILTIN.DF(fieldName)` instead of heavy table joins.
+   - Driving indexed filters: Queries against `transaction` / `transactionline` MUST include indexed filters (`trandate`, `type`, `id`, `tranid`, `entity`, `subsidiary`, `item`).
+4. **Automatic Self-Healing Loop (Max 3 retries, syntax/schema errors ONLY):**
+   `Parse Error` ➔ `Call ns_getSuiteQLMetadata` ➔ `Correct SQL using Domain Matrix` ➔ `Re-run`. (Excludes permission errors; see Gate 4).
 
-## GATE 3: Code Development & Verification Gate (No Memory Coding)
+## GATE 3: Code Development & Verification Gate (严禁凭记忆写代码)
 Before writing or modifying ANY SuiteScript, SuiteFlow, or SDF configuration code:
 1. **Analyze:** Locate code and line numbers (`view_file` / `grep_search`).
-2. **Verify (Mandatory):** Query Context7 (`resolve-library-id` ➔ `query-docs`) and read relevant Skills (e.g., `netsuite://skills/netsuite-sdf-safe-guide`) for API signatures, governance limits, and pitfalls.
-3. **Implement & Cite:** Write complete, robust code (no placeholders / `// TODO` omissions). Explicitly cite the consulted official docs or skills.
+2. **Verify against Official Docs (Mandatory):** Query Context7 (`resolve-library-id` ➔ `query-docs`) and read relevant Skills (e.g., `netsuite://skills/netsuite-sdf-safe-guide`) for exact API method signatures, module loading paths, governance limits, and documented pitfalls.
+3. **Implement & Cite:** Write complete, robust code (no placeholders / `// TODO` omissions). Explicitly cite the consulted official docs or SAFE Guide principle.
 
 ## GATE 4: Permission Hard-Stop & Zero-Hallucination Protocol (权限熔断与零幻觉准则)
 当遇到任何 NetSuite 记录/表/功能权限报错（如 `INSUFFICIENT_PERMISSION`、HTTP 403 Forbidden、权限不足、`Permission Violation`、访问拒绝）时：
