@@ -346,3 +346,228 @@ export function assertValidSuiteQL(sqlQuery: string): void {
 		);
 	}
 }
+
+export interface SuiteQLErrorDiagnosis {
+	isDiagnosed: boolean;
+	summary: string;
+	rootCause: string;
+	officialGuidance: string;
+	suggestedFix?: string;
+	selfHealingAction: string;
+}
+
+/**
+ * Diagnoses NetSuite runtime SuiteQL errors or guardrail rejection reasons,
+ * providing actionable self-healing guidance and official NetSuite suggestions.
+ */
+export function diagnoseSuiteQLError(
+	rawError: string,
+	sqlQuery?: string,
+): SuiteQLErrorDiagnosis {
+	const err = (rawError || "").trim();
+	const sql = (sqlQuery || "").trim();
+
+	// 1. Unknown identifier: createdfrom on transaction
+	if (
+		/unknown identifier ['"]?createdfrom['"]?/i.test(err) ||
+		/Invalid field location 'createdfrom'/i.test(err) ||
+		(sql &&
+			/\bcreatedfrom\b/i.test(sql) &&
+			/\btransaction\b/i.test(sql) &&
+			!/\btransactionline\b/i.test(sql))
+	) {
+		return {
+			isDiagnosed: true,
+			summary: "Invalid Field Location: 'createdfrom'",
+			rootCause:
+				"In NetSuite SuiteQL, 'createdfrom' does NOT exist on the 'transaction' header table; it is exclusively a column on 'transactionline'.",
+			officialGuidance:
+				"To query upstream transaction lineage (e.g. PO from SO, IR from PO, IF from SO), join 'transactionline' and filter on 'tl.createdfrom'.",
+			suggestedFix:
+				"SELECT t.id, t.tranid, t.type FROM transactionline tl JOIN transaction t ON t.id = tl.transaction WHERE tl.createdfrom = :upstream_id AND tl.mainline = 'T'",
+			selfHealingAction:
+				"Join 'transactionline' and query 'tl.createdfrom' with tl.mainline = 'T'.",
+		};
+	}
+
+	// 2. Table not found: bin / oa_tables / generic
+	if (
+		/record ['"]?bin['"]? was not found/i.test(err) ||
+		/invalid search type: bin/i.test(err)
+	) {
+		return {
+			isDiagnosed: true,
+			summary: "Table Not Directly Accessible: 'bin'",
+			rootCause:
+				"The table 'bin' is not directly queryable via SuiteQL in this account configuration.",
+			officialGuidance:
+				"Use 'inventorybalance' to query bin-level inventory balances, bin numbers, and status breakdown.",
+			suggestedFix:
+				"SELECT item, location, binnumber, inventorynumber, quantityavailable, quantityonhand FROM inventorybalance WHERE location = :loc_id",
+			selfHealingAction: "Rewrite the query against 'inventorybalance' table.",
+		};
+	}
+
+	if (
+		/record ['"]?([a-zA-Z0-9_]+)['"]? was not found/i.test(err) ||
+		/invalid search type: ([a-zA-Z0-9_]+)/i.test(err)
+	) {
+		const match =
+			/record ['"]?([a-zA-Z0-9_]+)['"]? was not found/i.exec(err) ||
+			/invalid search type: ([a-zA-Z0-9_]+)/i.exec(err);
+		const tableName = match?.[1] || "unknown";
+
+		return {
+			isDiagnosed: true,
+			summary: `Non-Existent or Disabled Table: '${tableName}'`,
+			rootCause: `Table '${tableName}' does not exist in NetSuite's SuiteQL schema or the corresponding feature is disabled.`,
+			officialGuidance:
+				"Verify available tables by calling `ns_getSuiteQLMetadata({ keyword: '...' })` or check NetSuite Records Catalog.",
+			selfHealingAction: `Call ns_getSuiteQLMetadata({ keyword: '${tableName}' }) to discover the correct table name.`,
+		};
+	}
+
+	// 3. Generic Unknown identifier
+	if (/unknown identifier ['"]?([a-zA-Z0-9_]+)['"]?/i.test(err)) {
+		const match = /unknown identifier ['"]?([a-zA-Z0-9_]+)['"]?/i.exec(err);
+		const colName = match?.[1] || "unknown";
+		const tables = sql ? extractReferencedTables(sql) : [];
+		const tableContext =
+			tables.length > 0 ? ` on table(s): ${tables.join(", ")}` : "";
+
+		return {
+			isDiagnosed: true,
+			summary: `Unknown Field/Column: '${colName}'`,
+			rootCause: `Column '${colName}' was not recognized${tableContext}. Field names are case-sensitive and vary by custom fields (custbody_*, custrecord_*, custitem_*).`,
+			officialGuidance: `Inspect the exact column definitions for ${tables[0] || "the table"} using ns_getSuiteQLMetadata.`,
+			selfHealingAction: `Call ns_getSuiteQLMetadata({ recordType: '${tables[0] || "tableName"}' }) to verify valid column names.`,
+		};
+	}
+
+	// 4. Suboptimal table inventoryitemlocations
+	if (
+		/Suboptimal table 'inventoryitemlocations'/i.test(err) ||
+		(sql &&
+			/\binventoryitemlocations\b/i.test(sql) &&
+			!/\b(itemtype|type)\s*=/i.test(sql))
+	) {
+		return {
+			isDiagnosed: true,
+			summary: "Suboptimal Table: 'inventoryitemlocations'",
+			rootCause:
+				"'inventoryitemlocations' only contains standard raw materials (InvtPart) and omits Assembly, Lot-numbered, and Serialized items.",
+			officialGuidance:
+				"Use 'aggregateitemlocation' for unified multi-location stock across all item types.",
+			suggestedFix:
+				"SELECT a.item, BUILTIN.DF(a.item) AS item_name, a.location, BUILTIN.DF(a.location) AS loc_name, a.quantityOnHand, a.quantityAvailable, a.quantityOnOrder, a.averageCostMli FROM aggregateitemlocation a WHERE a.location = :loc_id",
+			selfHealingAction:
+				"Switch query table from 'inventoryitemlocations' to 'aggregateitemlocation'.",
+		};
+	}
+
+	// 5. Missing mainline filter
+	if (
+		/Missing 'mainline' filter/i.test(err) ||
+		(sql &&
+			/\btransactionline\b/i.test(sql) &&
+			!/\bmainline\s*=\s*['"]?[TF]['"]?/i.test(sql))
+	) {
+		return {
+			isDiagnosed: true,
+			summary: "Missing 'mainline' Filter on 'transactionline'",
+			rootCause:
+				"NetSuite 'transactionline' contains both header summary lines (mainline = 'T') and line items (mainline = 'F'). Omitting this filter causes row duplication and 2x inflated totals.",
+			officialGuidance:
+				"Add `tl.mainline = 'F'` for line-item details or `tl.mainline = 'T'` for transaction header line.",
+			suggestedFix:
+				"SELECT t.id, t.tranid, tl.item, tl.quantity, tl.rate, tl.amount FROM transaction t JOIN transactionline tl ON t.id = tl.transaction WHERE t.type = 'SalesOrd' AND tl.mainline = 'F'",
+			selfHealingAction:
+				"Add `tl.mainline = 'F'` (for line items) or `tl.mainline = 'T'` (for transaction header line) to your WHERE clause.",
+		};
+	}
+
+	// 6. LIMIT / OFFSET dialect error
+	if (/\b(LIMIT|OFFSET)\b/i.test(err) || /\b(LIMIT|OFFSET)\b/i.test(sql)) {
+		return {
+			isDiagnosed: true,
+			summary: "Unsupported Dialect Keyword: LIMIT / OFFSET",
+			rootCause:
+				"NetSuite SuiteQL does not support MySQL/Postgres-style 'LIMIT' or 'OFFSET' keywords.",
+			officialGuidance:
+				"Use Oracle-standard pagination: 'ROWNUM <= N' or 'FETCH FIRST N ROWS ONLY' (and 'OFFSET M ROWS FETCH NEXT N ROWS ONLY').",
+			suggestedFix:
+				"SELECT id, tranid FROM transaction WHERE type = 'SalesOrd' FETCH FIRST 100 ROWS ONLY",
+			selfHealingAction:
+				"Replace LIMIT/OFFSET with ROWNUM <= N or FETCH FIRST N ROWS ONLY.",
+		};
+	}
+
+	// 7. SystemNote JOIN error
+	if (
+		/Prohibited 'JOIN SystemNote'/i.test(err) ||
+		(sql &&
+			/\bsystemnote\b/i.test(sql) &&
+			extractReferencedTables(sql).length > 1)
+	) {
+		return {
+			isDiagnosed: true,
+			summary: "Prohibited Multi-Table JOIN with SystemNote",
+			rootCause:
+				"Joining SystemNote with large transactional/entity tables causes massive Cartesian products and 45s query timeouts.",
+			officialGuidance:
+				"Query SystemNote as an independent standalone table with strict filters on 'recordid' and a narrow date range.",
+			suggestedFix:
+				"SELECT recordid, field, oldvalue, newvalue, date, BUILTIN.DF(name) AS author FROM systemnote WHERE recordtypeid = -30 AND recordid = :id AND date >= TO_DATE('YYYY-MM-DD', 'YYYY-MM-DD')",
+			selfHealingAction:
+				"Separate into a standalone SystemNote query with tight filters on recordid.",
+		};
+	}
+
+	// 8. Unindexed transaction query
+	if (/Unindexed query against 'transaction'/i.test(err)) {
+		return {
+			isDiagnosed: true,
+			summary: "Unindexed Transaction Query (Timeout Risk)",
+			rootCause:
+				"Querying transaction and transactionline without driving index filters causes full-table scans across millions of rows.",
+			officialGuidance:
+				"Include at least one indexed filter: 'trandate', 'type', 'id', 'tranid', 'entity', or 'subsidiary'.",
+			suggestedFix:
+				"WHERE t.type = 'SalesOrd' AND t.trandate >= TO_DATE('2025-01-01', 'YYYY-MM-DD') AND tl.mainline = 'F'",
+			selfHealingAction:
+				"Add indexed driving filters to the WHERE clause before executing.",
+		};
+	}
+
+	// Default / Generic SuiteQL Error
+	return {
+		isDiagnosed: false,
+		summary: "SuiteQL Query Error",
+		rootCause: err,
+		officialGuidance:
+			"Verify table and column names using ns_getSuiteQLMetadata, ensure strict read-only SELECT syntax, and include indexed filters.",
+		selfHealingAction:
+			"1. Call `ns_getSuiteQLMetadata` for referenced table(s) to verify columns. 2. Revise query and retry.",
+	};
+}
+
+/**
+ * Formats a diagnosed SuiteQL error into a clean Markdown block for MCP tool responses.
+ */
+export function formatSuiteQLErrorResponse(
+	rawError: string,
+	sqlQuery?: string,
+): string {
+	const diag = diagnoseSuiteQLError(rawError, sqlQuery);
+
+	let out = `❌ **SuiteQL Error:** ${rawError}\n\n`;
+	out += `🔍 **Diagnostic:** ${diag.summary}\n`;
+	out += `📌 **Root Cause:** ${diag.rootCause}\n`;
+	out += `📖 **Official NetSuite Guidance:** ${diag.officialGuidance}\n`;
+	if (diag.suggestedFix) {
+		out += `💡 **Suggested Pattern:**\n\`\`\`sql\n${diag.suggestedFix}\n\`\`\`\n`;
+	}
+	out += `🔄 **Self-Healing Action:** ${diag.selfHealingAction}`;
+
+	return out;
+}

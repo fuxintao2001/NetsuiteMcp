@@ -292,6 +292,119 @@ describe("MCP Handler Wires", () => {
 			expect(res.content[0].text).toContain("Could not resolve rectype ID");
 		});
 
+		it("should enhance tool descriptions and input schemas for ns_runCustomSuiteQL and ns_getSuiteQLMetadata", async () => {
+			mockOAuthManager.getAccountId.mockResolvedValue("9260916-sb1");
+			mockMCPTools.fetchTools.mockResolvedValueOnce([
+				{
+					name: "ns_runCustomSuiteQL",
+					description: "Run SuiteQL queries",
+					inputSchema: {
+						type: "object",
+						properties: {
+							sqlQuery: { type: "string" },
+						},
+					},
+				},
+				{
+					name: "ns_getSuiteQLMetadata",
+					description: "Get metadata",
+					inputSchema: {
+						type: "object",
+						properties: {
+							recordType: { type: "string" },
+						},
+					},
+				},
+			]);
+
+			const listFn = registeredHandlers.get("tools/list");
+			const result = await listFn?.();
+			const suiteqlTool = result.tools.find(
+				(t: any) => t.name === "ns_runCustomSuiteQL",
+			);
+			const metaTool = result.tools.find(
+				(t: any) => t.name === "ns_getSuiteQLMetadata",
+			);
+
+			expect(suiteqlTool.description).toContain("MANDATORY SUITEQL PROTOCOL");
+			expect(suiteqlTool.inputSchema.properties.sqlQuery.description).toContain(
+				"UNIVERSAL RULES",
+			);
+
+			expect(metaTool.description).toContain("Fast Table Discovery");
+			expect(metaTool.inputSchema.properties.keyword).toBeDefined();
+			expect(metaTool.inputSchema.properties.keyword.description).toContain(
+				"search keyword",
+			);
+		});
+
+		it("should return fast table catalog discovery when ns_getSuiteQLMetadata has no recordType", async () => {
+			const callFn = registeredHandlers.get("tools/call");
+
+			const res = await callFn?.({
+				params: {
+					name: "ns_getSuiteQLMetadata",
+					arguments: {},
+				},
+			});
+
+			expect(mockMCPTools.executeTool).not.toHaveBeenCalledWith(
+				"ns_getSuiteQLMetadata",
+				expect.anything(),
+			);
+			expect(res.content[0].text).toContain(
+				"### 📚 NetSuite SuiteQL Universal Table Catalog",
+			);
+			expect(res.content[0].text).toContain("`aggregateitemlocation`");
+			expect(res.content[0].text).toContain("`transaction`");
+		});
+
+		it("should return filtered table catalog when ns_getSuiteQLMetadata is called with keyword", async () => {
+			const callFn = registeredHandlers.get("tools/call");
+
+			const res = await callFn?.({
+				params: {
+					name: "ns_getSuiteQLMetadata",
+					arguments: { keyword: "inventory" },
+				},
+			});
+
+			expect(mockMCPTools.executeTool).not.toHaveBeenCalledWith(
+				"ns_getSuiteQLMetadata",
+				expect.anything(),
+			);
+			expect(res.content[0].text).toContain(
+				'### 🔍 NetSuite SuiteQL Table Catalog (Matches for "inventory"',
+			);
+			expect(res.content[0].text).toContain("`aggregateitemlocation`");
+		});
+
+		it("should return rich diagnostic error on SuiteQL schema failure", async () => {
+			const callFn = registeredHandlers.get("tools/call");
+
+			mockMCPTools.executeTool.mockRejectedValueOnce(
+				new Error(
+					"SuiteQL query execution failed: Unknown identifier 'createdfrom'",
+				),
+			);
+
+			const res = await callFn?.({
+				params: {
+					name: "ns_runCustomSuiteQL",
+					arguments: {
+						sqlQuery: "SELECT id, createdfrom FROM transaction WHERE id = 1",
+					},
+				},
+			});
+
+			expect(res.isError).toBe(true);
+			expect(res.content[0].text).toContain("❌ **SuiteQL Error:**");
+			expect(res.content[0].text).toContain("🔍 **Diagnostic:**");
+			expect(res.content[0].text).toContain("Invalid Field Location");
+			expect(res.content[0].text).toContain("💡 **Suggested Pattern:**");
+			expect(res.content[0].text).toContain("transactionline");
+		});
+
 		it("should handle local authentication tool call", async () => {
 			const callFn = registeredHandlers.get("tools/call");
 

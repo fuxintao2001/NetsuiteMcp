@@ -49,8 +49,16 @@ Before executing ANY tool call or generating ANY response, you MUST satisfy thes
 | **Bin-Level Inventory** | **`inventorybalance`** / **`bin`** | ❌ Guessing bin fields on `item` | `SELECT item, location, binnumber, inventorynumber, quantityavailable FROM inventorybalance` |
 | **System Audit Trail & History** | **`systemnote`** (Standalone only) | ❌ `JOIN SystemNote` (causes catastrophic 45s+ timeouts) | Execute standalone query: `SELECT * FROM systemnote WHERE recordid = :id AND date >= TO_DATE(...)` |
 
-### 2. Mandatory Pre-Execution SuiteQL Reconnaissance
-1. **Always Check Schema:** Call `ns_getSuiteQLMetadata` BEFORE generating custom SuiteQL whenever table schema or field name is not 100% verified.
+### 2. 🧠 Universal Chain-of-Verification (CoVe before calling ns_runCustomSuiteQL)
+In your thinking/reasoning process before calling `ns_runCustomSuiteQL`, you MUST explicitly verify:
+1. **[Reconnaissance]**: Have I verified that all table and column names genuinely exist via official docs or `ns_getSuiteQLMetadata`?
+2. **[Table Granularity]**: Is this query targeting the right table layer (Header vs Line details, Domain-specialized view vs Polymorphic base table, Standalone audit log)?
+3. **[Dialect Compliance]**: Are NetSuite dialect rules strictly satisfied (explicit columns, `ROWNUM <= N` or `FETCH FIRST N ROWS ONLY`, `TO_DATE`, `BUILTIN.DF`)?
+4. **[Performance Indexing]**: Does the `WHERE` clause include indexed driving filters (e.g. `trandate`, `type`, `id`, `tranid`, `entity`, `subsidiary`)?
+*If ANY answer is NO or UNCERTAIN, you MUST call `ns_getSuiteQLMetadata` first before executing the query.*
+
+### 3. Mandatory Pre-Execution SuiteQL Reconnaissance
+1. **Always Check Schema:** Call `ns_getSuiteQLMetadata` (with `recordType` for columns, or `keyword` for table discovery) BEFORE generating custom SuiteQL whenever schema is not 100% verified.
 2. **Mandatory Syntax Rules:**
    - ❌ NO `SELECT *` or `table.*` (always specify explicit columns).
    - ❌ NO `LIMIT`/`OFFSET` → MUST use `ROWNUM <= N` or `FETCH FIRST N ROWS ONLY`.

@@ -20,12 +20,15 @@ import {
 } from "../utils/errors.js";
 import { asyncJsonParse } from "../utils/json.js";
 import {
+	formatTableCatalogMarkdown,
 	type JsonSchemaProperty,
 	mapFieldType,
 	sanitizeIntegerId,
+	searchSuiteQLCatalog,
 	unwrapMcpContent,
 } from "../utils/metadata.js";
 import { generateNetSuiteUrl } from "../utils/netsuiteUrls.js";
+import { formatSuiteQLErrorResponse } from "../utils/suiteqlGuard.js";
 import {
 	AUTH_TOOL,
 	BatchExecuteArgsSchema,
@@ -530,16 +533,46 @@ function enhanceDescription(
 	return { ...tool, description: desc ? `${desc}${suffix}` : suffix };
 }
 
-/** Enhance fetched NetSuite tool descriptions with SuiteQL rules. */
+/** Enhance fetched NetSuite tool descriptions with SuiteQL rules and parameter-level guidance. */
 function enhanceToolDescriptions(
 	tools: Array<Record<string, unknown>>,
 ): Array<Record<string, unknown>> {
 	return tools.map((t) => {
 		if (t.name === "ns_runCustomSuiteQL") {
-			return enhanceDescription(t, SUITEQL_RULES_SUFFIX);
+			const enhanced = enhanceDescription(t, SUITEQL_RULES_SUFFIX);
+			if (enhanced.inputSchema && typeof enhanced.inputSchema === "object") {
+				const schema = { ...(enhanced.inputSchema as Record<string, unknown>) };
+				if (schema.properties && typeof schema.properties === "object") {
+					const props = { ...(schema.properties as Record<string, unknown>) };
+					if (props.sqlQuery && typeof props.sqlQuery === "object") {
+						props.sqlQuery = {
+							...(props.sqlQuery as Record<string, unknown>),
+							description:
+								"The SuiteQL query string to execute. UNIVERSAL RULES: (1) Reconnaissance: Verify exact table and column names via 'ns_getSuiteQLMetadata' before querying unfamiliar schemas. (2) Dialect: Explicit columns only (no SELECT *), use ROWNUM <= N or FETCH FIRST N ROWS ONLY (no LIMIT/OFFSET), wrap dates in TO_DATE('YYYY-MM-DD', 'YYYY-MM-DD'), and use BUILTIN.DF(field) for labels. (3) Table Granularity: Distinguish header from line tables (filter line items with mainline='F'; relationship/upstream fields like createdfrom live on line tables); prefer domain-specialized tables over monolithic base tables for aggregations; never JOIN SystemNote directly. (4) Indexing: High-volume queries must include indexed filters (id, tranid, trandate, type, entity, subsidiary).",
+						};
+					}
+					schema.properties = props;
+				}
+				enhanced.inputSchema = schema;
+			}
+			return enhanced;
 		}
 		if (t.name === "ns_getSuiteQLMetadata") {
-			return enhanceDescription(t, METADATA_RULES_SUFFIX);
+			const enhanced = enhanceDescription(t, METADATA_RULES_SUFFIX);
+			if (enhanced.inputSchema && typeof enhanced.inputSchema === "object") {
+				const schema = { ...(enhanced.inputSchema as Record<string, unknown>) };
+				const props = {
+					...((schema.properties as Record<string, unknown>) || {}),
+				};
+				props.keyword = {
+					type: "string",
+					description:
+						"Optional search keyword to discover available NetSuite SuiteQL tables across all business domains (e.g. 'inventory', 'transaction', 'invoice', 'order', 'account', 'customer', 'bom'). If provided without recordType, returns matching table names and descriptions in milliseconds without network timeout.",
+				};
+				schema.properties = props;
+				enhanced.inputSchema = schema;
+			}
+			return enhanced;
 		}
 		return t;
 	});
@@ -660,6 +693,18 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
 				return await handleGetScriptLogs(safeArgs, mcpTools);
 			}
 
+			// --- Fast metadata discovery for ns_getSuiteQLMetadata without recordType ---
+			if (name === "ns_getSuiteQLMetadata") {
+				const recordTypeRaw = safeArgs.recordType || safeArgs.tableName;
+				if (!recordTypeRaw) {
+					const keywordRaw = safeArgs.keyword || safeArgs.search;
+					const keyword =
+						typeof keywordRaw === "string" ? keywordRaw.trim() : undefined;
+					const entries = searchSuiteQLCatalog(keyword);
+					return textResult(formatTableCatalogMarkdown(entries, keyword));
+				}
+			}
+
 			// --- Block write operations in production ---
 			if (name === "ns_createRecord" || name === "ns_updateRecord") {
 				const accountId = await oauthManager.getAccountId();
@@ -720,6 +765,12 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
 								true,
 							);
 						}
+						if (name === "ns_getSuiteQLMetadata") {
+							return textResult(
+								formatSuiteQLErrorResponse(String(errorMsg)),
+								true,
+							);
+						}
 						return textResult(`❌ NetSuite Error: ${errorMsg}`, true);
 					}
 
@@ -729,6 +780,13 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
 				}
 
 				if (executeError) {
+					const errMsg =
+						executeError instanceof Error
+							? executeError.message
+							: String(executeError);
+					if (name === "ns_getSuiteQLMetadata") {
+						return textResult(formatSuiteQLErrorResponse(errMsg), true);
+					}
 					throw executeError;
 				}
 
@@ -747,13 +805,24 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
 				typeof parsedRecordResult === "object" &&
 				parsedRecordResult.success === false
 			) {
-				const errorMsg =
+				const errorMsg = String(
 					parsedRecordResult.error ||
-					parsedRecordResult.message ||
-					JSON.stringify(parsedRecordResult);
-				if (isPermissionError(String(errorMsg))) {
+						parsedRecordResult.message ||
+						JSON.stringify(parsedRecordResult),
+				);
+				if (isPermissionError(errorMsg)) {
 					return textResult(
 						`❌ NetSuite Permission Error: ${errorMsg}\n\n${PERMISSION_HARD_STOP_ADVICE.trim()}`,
+						true,
+					);
+				}
+				if (name === "ns_runCustomSuiteQL") {
+					const sqlQuery = (safeArgs.sqlQuery ||
+						safeArgs.query ||
+						safeArgs.sql ||
+						"") as string;
+					return textResult(
+						formatSuiteQLErrorResponse(errorMsg, sqlQuery),
 						true,
 					);
 				}
@@ -807,8 +876,11 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
 					guidance = `\n\n${PERMISSION_HARD_STOP_ADVICE.trim()}`;
 				}
 			} else if (name === "ns_runCustomSuiteQL") {
-				guidance =
-					"\n\n💡 [Self-Healing Action]: 1) Call `ns_getSuiteQLMetadata` for referenced tables to verify exact column names and case-sensitivity. 2) Revise your SuiteQL query and retry (Retry up to 3 times before asking the user).";
+				const sqlQuery = (safeArgs.sqlQuery ||
+					safeArgs.query ||
+					safeArgs.sql ||
+					"") as string;
+				return textResult(formatSuiteQLErrorResponse(message, sqlQuery), true);
 			} else if (
 				name === "ns_getRecord" ||
 				name === "ns_createRecord" ||

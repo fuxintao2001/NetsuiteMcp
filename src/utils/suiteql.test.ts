@@ -4,12 +4,18 @@ import {
 	formatMetadataToCompactMarkdown,
 	formatSuiteQLToCompactMarkdown,
 } from "./contextSlimmer.js";
+import {
+	formatTableCatalogMarkdown,
+	searchSuiteQLCatalog,
+} from "./metadata.js";
 import { generateNetSuiteUrl } from "./netsuiteUrls.js";
 import { SuiteScriptSearchValidator } from "./searchValidator.js";
 import {
 	assertValidSuiteQL,
+	diagnoseSuiteQLError,
 	ensureSuiteQLPagination,
 	extractReferencedTables,
+	formatSuiteQLErrorResponse,
 	hasPaginationClause,
 	maskStringLiterals,
 	SuiteQLValidationError,
@@ -313,6 +319,118 @@ describe("SuiteQL, Search & Query Utilities", () => {
 						"SELECT id, item FROM transactionline WHERE transaction = 1",
 					),
 				).toThrowError(/Missing 'mainline' filter/);
+			});
+		});
+
+		describe("diagnoseSuiteQLError & formatSuiteQLErrorResponse", () => {
+			it("should diagnose unknown identifier 'createdfrom' on transaction", () => {
+				const diag = diagnoseSuiteQLError(
+					"Unknown identifier 'createdfrom'",
+					"SELECT id, createdfrom FROM transaction WHERE id = 1",
+				);
+				expect(diag.isDiagnosed).toBe(true);
+				expect(diag.summary).toContain("Invalid Field Location");
+				expect(diag.rootCause).toContain("transactionline");
+				expect(diag.suggestedFix).toContain("transactionline");
+				expect(diag.selfHealingAction).toContain("tl.mainline = 'T'");
+
+				const formatted = formatSuiteQLErrorResponse(
+					"Unknown identifier 'createdfrom'",
+					"SELECT id, createdfrom FROM transaction WHERE id = 1",
+				);
+				expect(formatted).toContain("❌ **SuiteQL Error:**");
+				expect(formatted).toContain("🔍 **Diagnostic:**");
+				expect(formatted).toContain("💡 **Suggested Pattern:**");
+			});
+
+			it("should diagnose 'Record bin was not found' and guide to inventorybalance", () => {
+				const diag = diagnoseSuiteQLError(
+					"Record 'bin' was not found in schema",
+				);
+				expect(diag.isDiagnosed).toBe(true);
+				expect(diag.summary).toContain("Table Not Directly Accessible");
+				expect(diag.officialGuidance).toContain("inventorybalance");
+				expect(diag.suggestedFix).toContain("inventorybalance");
+			});
+
+			it("should diagnose non-existent table and suggest ns_getSuiteQLMetadata", () => {
+				const diag = diagnoseSuiteQLError(
+					"Record 'nonexistent_tbl' was not found",
+				);
+				expect(diag.isDiagnosed).toBe(true);
+				expect(diag.summary).toContain("Non-Existent or Disabled Table");
+				expect(diag.selfHealingAction).toContain(
+					"ns_getSuiteQLMetadata({ keyword: 'nonexistent_tbl' })",
+				);
+			});
+
+			it("should diagnose LIMIT/OFFSET dialect errors", () => {
+				const diag = diagnoseSuiteQLError(
+					"Syntax error near LIMIT",
+					"SELECT id FROM customer LIMIT 10",
+				);
+				expect(diag.isDiagnosed).toBe(true);
+				expect(diag.summary).toContain("Unsupported Dialect Keyword");
+				expect(diag.suggestedFix).toContain("FETCH FIRST");
+			});
+
+			it("should diagnose Prohibited SystemNote multi-table joins", () => {
+				const diag = diagnoseSuiteQLError(
+					"Prohibited 'JOIN SystemNote'",
+					"SELECT s.field FROM systemnote s JOIN transaction t ON s.recordid = t.id",
+				);
+				expect(diag.isDiagnosed).toBe(true);
+				expect(diag.summary).toContain(
+					"Prohibited Multi-Table JOIN with SystemNote",
+				);
+				expect(diag.suggestedFix).toContain("WHERE recordtypeid = -30");
+			});
+
+			it("should handle unknown generic errors gracefully", () => {
+				const diag = diagnoseSuiteQLError("Some bizarre internal error");
+				expect(diag.isDiagnosed).toBe(false);
+				expect(diag.selfHealingAction).toContain("ns_getSuiteQLMetadata");
+			});
+		});
+
+		describe("searchSuiteQLCatalog & formatTableCatalogMarkdown", () => {
+			it("should return full catalog when keyword is omitted or empty", () => {
+				const all = searchSuiteQLCatalog();
+				expect(all.length).toBeGreaterThan(15);
+				expect(all.some((t) => t.tableName === "aggregateitemlocation")).toBe(
+					true,
+				);
+				expect(all.some((t) => t.tableName === "transaction")).toBe(true);
+			});
+
+			it("should filter catalog by keyword accurately across domains and fields", () => {
+				const invMatches = searchSuiteQLCatalog("inventory");
+				expect(invMatches.length).toBeGreaterThan(0);
+				expect(
+					invMatches.some((t) => t.tableName === "aggregateitemlocation"),
+				).toBe(true);
+
+				const mfgMatches = searchSuiteQLCatalog("bom");
+				expect(mfgMatches.some((t) => t.tableName === "bom")).toBe(true);
+				expect(mfgMatches.some((t) => t.tableName === "bomcomponent")).toBe(
+					true,
+				);
+
+				const emptyMatches = searchSuiteQLCatalog("nonexistent_keyword_xyz");
+				expect(emptyMatches.length).toBe(0);
+			});
+
+			it("should format catalog results into Markdown table", () => {
+				const matches = searchSuiteQLCatalog("inventory");
+				const md = formatTableCatalogMarkdown(matches, "inventory");
+				expect(md).toContain("### 🔍 NetSuite SuiteQL Table Catalog");
+				expect(md).toContain("| `aggregateitemlocation` |");
+				expect(md).toContain("GOLDEN TABLE");
+
+				const emptyMd = formatTableCatalogMarkdown([], "xyz");
+				expect(emptyMd).toContain(
+					"⚠️ No matching NetSuite SuiteQL tables found",
+				);
 			});
 		});
 	});

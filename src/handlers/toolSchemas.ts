@@ -394,8 +394,9 @@ export const SUITEQL_RULES_SUFFIX = `
 export const METADATA_RULES_SUFFIX = `
 
 ⚠️ MANDATORY: Call this tool BEFORE writing any SuiteQL query to verify exact field names, types, and case-sensitivity.
+- Fast Table Discovery: To discover available SuiteQL tables across all business domains (Inventory, Transactions, Manufacturing, Accounting, CRM, Custom Records) without network timeouts, pass a search keyword (e.g. \`{ keyword: 'inventory' }\`, \`{ keyword: 'transaction' }\`, \`{ keyword: 'order' }\`, \`{ keyword: 'account' }\`).
+- Column Schema Inspection: To view exact column names, data types, and nullability for a specific table, provide recordType (e.g. \`{ recordType: 'aggregateitemlocation' }\`).
 - Field names are CASE-SENSITIVE — use them exactly as returned (e.g., 'tranid' instead of 'TranId').
-- Eliminates guesswork and prevents INVALID_SEARCH_SELECT_FIELD errors.
 - If a subsequent ns_runCustomSuiteQL query fails, re-call this tool to self-heal and inspect field definitions.
 - For custom records (customrecord_*), this returns both system and custom field definitions.`;
 
