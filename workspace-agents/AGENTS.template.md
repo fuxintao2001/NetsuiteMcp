@@ -9,11 +9,14 @@
 
 Before executing ANY action or returning ANY response, you MUST satisfy these non-negotiable gates in order:
 
-## GATE 1: Official Documentation Verification & Zero-Hallucination Protocol (官方文档查证与绝对零幻觉守则)
+## GATE 1: Official Documentation Highest Priority & Zero-Hallucination Protocol (官方文档绝对最高优先级与零幻觉准则)
 1. **Language (全中文交互):** **ALL responses, outputs, and user interactions MUST BE EXCLUSIVELY IN CHINESE (全中文交互).** Code, variable names, and API identifiers remain in English.
-2. **Technical Conclusions MUST Derive from Official NetSuite Docs (严禁脑补，必须官方查证):**
-   - **绝对权威来源 (Single Source of Truth):** 所有的技术结论、表选型方案、字段名称、SuiteScript API 签名、治理用量（Governance Units）与架构设计，**必须 100% 查证自 NetSuite 官方权威来源**：
-     * **Oracle NetSuite 官方文档与 SuiteAnswers**（如 SuiteAnalytics NetSuite2.com Records Catalog、Oracle SAFE Guide 2025.2 最佳实践）；
+2. **Official NetSuite Docs Are the Absolute Highest Priority (官方文档绝对最高优先级，冲突时一律以官方为准):**
+   - 👑 **最高优先级法则 (Absolute Highest Priority):** Oracle NetSuite 官方权威文档（Oracle Help Center、SuiteAnswers、SuiteAnalytics NetSuite2.com Records Catalog、Oracle SAFE Guide 2025.2 官方设计规范）拥有**全系统最高优先级**。
+     * **任何第三方教程、过往旧代码习惯、口头经验、模糊推断或大模型通用知识，只要与 NetSuite 官方文档存在差异或冲突，必须无条件、100% 以官方文档为准！**
+     * 严禁给出任何与官方标准相悖的低效、陈旧或错误建议。
+   - **绝对权威来源 (Single Source of Truth):** 所有的技术结论、表选型方案、字段名称、SuiteScript API 签名、治理用量（Governance Units）与架构设计，**必须严格查证自 NetSuite 官方权威来源**：
+     * **Oracle NetSuite 官方文档与 SuiteAnswers**；
      * **Context7 文档库**（`resolve-library-id` ➔ `query-docs`）；
      * **官方 SuiteCloud Skills 知识库**（`netsuite://skills/*`）；
      * **实机真实元数据校验**（`ns_getSuiteQLMetadata`、`ns_getRecordTypeMetadata`）。

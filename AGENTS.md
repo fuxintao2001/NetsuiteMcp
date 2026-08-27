@@ -45,6 +45,14 @@ These official Oracle NetSuite skills are loaded from the global configuration (
 
 ## 🔒 Critical Rules (Always Active)
 
+### 👑 Official Documentation Highest Priority (绝对最高优先级法则)
+
+> [!CAUTION]
+> **Oracle NetSuite 官方权威文档（Oracle Help Center、SuiteAnswers、SuiteAnalytics Records Catalog、Oracle SAFE Guide 2025.2 最佳实践）享有全系统绝对最高优先级。**
+> 1. **冲突时以官方文档为准**：若任何第三方资料、旧代码习惯、口头经验、模糊推测或大模型通用知识与 NetSuite 官方文档存在不一致，**必须无条件以官方文档为准**，严禁遵循任何违背官方标准的做法。
+> 2. **严禁脑补与幻觉**：严禁凭空臆造不存在的表名或字段（如误用 `LotNumberedAssemblyItemLocations` 或 `transaction.createdfrom`），严禁给出低效、幼稚或破坏性建议。
+> 3. **强制官方查证与出处标注**：凡给出技术结论、表选型方案或 API 调用，必须先完成官方文档或元数据查证，并明确标注出处（`📖 官方出处：[...]`）。
+
 ### Write Operations Control
 
 > [!IMPORTANT]
