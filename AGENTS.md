@@ -66,6 +66,18 @@ These official Oracle NetSuite skills are loaded from the global configuration (
 > 2. **Reconnaissance First**: Call `ns_getSuiteQLMetadata` (with `recordType` for columns, or `keyword` for discovery) before executing queries against unfamiliar schemas.
 > 3. **Error-Driven Direct Correction (Syntax/Schema Only)**: On query syntax/schema error or empty results, parse the structured diagnostic response, inspect metadata via `ns_getSuiteQLMetadata` if needed, directly fix the query based on the error output, and execute the corrected query without blind retries. (Excludes permission errors).
 
+### Field Classification & Table Granularity Rules
+
+> [!IMPORTANT]
+> **Core Classification & Volume Guardrails:**
+> 1. **Item vs Transaction vs Entity Types**:
+>    - `transaction`: uses `recordtype` (`custinvc`, `salesord`, etc.) or `type` (`CustInvc`, `SalesOrd`, etc.).
+>    - `entity`: uses `recordtype` (`custjob`, `vendor`, `employee`, etc.).
+>    - `item`: uses **`itemtype`** (`Assembly`, `InvtPart`, `NonInvtPart`, `Service`, `Kit`, etc.) and **`subtype`** (`Sale`, `Purchase`, `Resale`). **`item` NEVER HAS `recordtype`**.
+> 2. **High-Volume Tables & Joins**:
+>    - Advanced BOM tables (`BomRevisionComponent`, `bomrevision`) and Transaction line tables (`transactionline`) contain hundreds of thousands to millions of rows.
+>    - Never execute unindexed multi-table joins on custom fields (`custrecord_*`) without bounding primary keys (`id BETWEEN ...`) or using indexed driving filters.
+
 ### Permission Hard-Stop & Zero-Hallucination Protocol
 
 > [!CAUTION]
@@ -73,7 +85,4 @@ These official Oracle NetSuite skills are loaded from the global configuration (
 > 1. **Immediate Hard Stop**: AI agents MUST immediately cease all further tasks, tool calls, and retries. DO NOT attempt self-healing loops or alternative query probing.
 > 2. **Strict Zero Hallucination**: AI agents are strictly prohibited from guessing, simulating, or fabricating any record data or query results.
 > 3. **Actionable User Guidance**: AI agents must report the exact failed record type/table name and specify the required NetSuite role permission configuration (under `Setup > Users/Roles > Manage Roles > Permissions`), waiting for the user to configure permissions before proceeding.
-
-
-
 

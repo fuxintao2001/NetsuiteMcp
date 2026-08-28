@@ -403,18 +403,47 @@ export const SUITEQL_TABLE_CATALOG: SuiteQLTableCatalogEntry[] = [
 		domain: "Manufacturing",
 		description: "Bill of Materials master definition.",
 		keyFields: ["id", "name", "isinactive", "memo", "subsidiary"],
+		bestPractice:
+			"Standard Advanced BOM master record. Links to assembly items via 'assemblyitembom'.",
 	},
 	{
 		tableName: "bomrevision",
 		domain: "Manufacturing",
 		description: "BOM revisions with effective dates.",
-		keyFields: ["id", "billofmaterials", "name", "effectivestartdate"],
+		keyFields: [
+			"id",
+			"billofmaterials",
+			"name",
+			"effectivestartdate",
+			"isinactive",
+		],
+		bestPractice:
+			"Join with 'bomrevisioncomponent' on bomrevisioncomponent.bomrevision = bomrevision.id. Always bound queries with indexed id filters (e.g. bomr.id BETWEEN ...).",
+	},
+	{
+		tableName: "bomrevisioncomponent",
+		domain: "Manufacturing",
+		description:
+			"Component materials and quantities within a BOM revision (Advanced BOM).",
+		keyFields: ["id", "bomrevision", "item", "bomquantity", "componentyield"],
+		bestPractice:
+			"High-volume table (>200k rows). Always bound driving BOM revision IDs or filter by item before multi-table joins to prevent timeouts.",
 	},
 	{
 		tableName: "bomcomponent",
 		domain: "Manufacturing",
-		description: "Component materials and quantities within a BOM revision.",
+		description:
+			"Component materials and quantities within a BOM (Legacy BOM definition).",
 		keyFields: ["id", "bomrevision", "item", "bomquantity", "units"],
+	},
+	{
+		tableName: "assemblyitembom",
+		domain: "Manufacturing",
+		description:
+			"Mapping between assembly items and Bill of Materials definitions.",
+		keyFields: ["id", "assembly", "billofmaterials", "default"],
+		bestPractice:
+			"Standard Advanced BOM link table between assembly item (item.id) and BOM master (bom.id).",
 	},
 	{
 		tableName: "manufacturingrouting",
@@ -571,12 +600,13 @@ export const SUITEQL_TABLE_CATALOG: SuiteQLTableCatalogEntry[] = [
 			"itemid",
 			"displayname",
 			"itemtype",
+			"subtype",
 			"baseprice",
 			"cost",
 			"isinactive",
 		],
 		bestPractice:
-			"Query minimal master attributes. For multi-location stock, prefer 'aggregateitemlocation'.",
+			"CRITICAL: 'item' uses 'itemtype' (e.g. 'Assembly', 'InvtPart', 'Kit', 'NonInvtPart', 'Service') and 'subtype' (NOT 'recordtype'). For multi-location stock, prefer 'aggregateitemlocation'.",
 	},
 	{
 		tableName: "pricing",

@@ -307,7 +307,61 @@ export function validateSuiteQL(sqlQuery: string): SuiteQLValidationResult {
 		};
 	}
 
-	// Anti-Pattern 5: Unindexed query against 'transaction' + 'transactionline'
+	// Anti-Pattern 5: Invalid column 'recordtype' on 'item' table
+	if (tables.includes("item")) {
+		const itemAliasRegex =
+			/\b(?:FROM|JOIN)\s+item\s+(?:AS\s+)?([a-zA-Z0-9_]+)/gi;
+		const itemAliases = new Set<string>(["item"]);
+		let aliasMatch: RegExpExecArray | null;
+		while (true) {
+			aliasMatch = itemAliasRegex.exec(maskedSql);
+			if (!aliasMatch) break;
+			const alias = aliasMatch[1]?.toLowerCase().trim();
+			if (
+				alias &&
+				![
+					"where",
+					"join",
+					"left",
+					"right",
+					"inner",
+					"outer",
+					"cross",
+					"on",
+					"group",
+					"order",
+				].includes(alias)
+			) {
+				itemAliases.add(alias);
+			}
+		}
+
+		for (const alias of itemAliases) {
+			const aliasDotRecordType = new RegExp(`\\b${alias}\\.recordtype\\b`, "i");
+			if (aliasDotRecordType.test(maskedSql)) {
+				return {
+					valid: false,
+					reason: `Invalid column '${alias}.recordtype' on 'item': In NetSuite SuiteQL, the 'item' table does NOT have a 'recordtype' column. Use '${alias}.itemtype' (e.g. 'Assembly', 'InvtPart', 'Kit', 'NonInvtPart', 'Service') or '${alias}.subtype' instead. ('recordtype' is exclusively used on 'transaction' and 'entity' tables).`,
+				};
+			}
+		}
+
+		// Also check if query has item but no transaction/entity and queries bare 'recordtype'
+		if (
+			!tables.includes("transaction") &&
+			!tables.includes("entity") &&
+			!tables.includes("customrecordtype") &&
+			/\brecordtype\b/i.test(maskedSql)
+		) {
+			return {
+				valid: false,
+				reason:
+					"Invalid column 'recordtype': 'recordtype' does not exist on the 'item' table. In NetSuite SuiteQL, use 'itemtype' (e.g. 'Assembly', 'InvtPart', 'Kit', 'NonInvtPart', 'Service') or 'subtype' to filter or group items.",
+			};
+		}
+	}
+
+	// Anti-Pattern 6: Unindexed query against 'transaction' + 'transactionline'
 	if (tables.includes("transaction") && tables.includes("transactionline")) {
 		const whereMatch =
 			/\bWHERE\s+([\s\S]+?)(?:\s+(?:GROUP\s+BY|HAVING|ORDER\s+BY|FETCH\s+FIRST)|;|$)/i.exec(
@@ -387,6 +441,32 @@ export function diagnoseSuiteQLError(
 				"SELECT t.id, t.tranid, t.type FROM transactionline tl JOIN transaction t ON t.id = tl.transaction WHERE tl.createdfrom = :upstream_id AND tl.mainline = 'T'",
 			selfHealingAction:
 				"Join 'transactionline' and query 'tl.createdfrom' with tl.mainline = 'T'.",
+		};
+	}
+
+	// 2. Unknown identifier: recordtype on item
+	if (
+		/Invalid column '.*recordtype' on 'item'/i.test(err) ||
+		(/unknown identifier ['"]?recordtype['"]?/i.test(err) &&
+			sql &&
+			/\bitem\b/i.test(sql)) ||
+		(sql &&
+			/\bitem\b/i.test(sql) &&
+			!/\btransaction\b/i.test(sql) &&
+			!/\bentity\b/i.test(sql) &&
+			/\brecordtype\b/i.test(sql))
+	) {
+		return {
+			isDiagnosed: true,
+			summary: "Invalid Column on 'item' Table: 'recordtype'",
+			rootCause:
+				"In NetSuite SuiteQL, 'recordtype' exists exclusively on 'transaction' (e.g. custinvc, salesord) and 'entity' records. The 'item' table uses 'itemtype' (e.g. 'Assembly', 'InvtPart', 'Service', 'Kit') and 'subtype' instead.",
+			officialGuidance:
+				"Query 'itemtype' or 'subtype' on 'item'. Use values such as 'Assembly', 'InvtPart', 'Kit', 'NonInvtPart', 'Service' for item type classification.",
+			suggestedFix:
+				"SELECT id, itemid, itemtype, subtype, displayname FROM item WHERE itemtype = 'Assembly' AND isinactive = 'F'",
+			selfHealingAction:
+				"Replace all occurrences of 'recordtype' on 'item' with 'itemtype' or 'subtype' and re-run query.",
 		};
 	}
 

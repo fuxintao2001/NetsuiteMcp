@@ -298,6 +298,32 @@ describe("SuiteQL, Search & Query Utilities", () => {
 				expect(res.tables).toContain("transaction");
 				expect(res.tables).toContain("transactionline");
 			});
+
+			it("should reject queries using invalid column 'recordtype' on item table", () => {
+				const res1 = validateSuiteQL(
+					"SELECT id, itemid, recordtype FROM item WHERE isinactive = 'F'",
+				);
+				expect(res1.valid).toBe(false);
+				expect(res1.reason).toContain("does not exist on the 'item' table");
+				expect(res1.reason).toContain("itemtype");
+
+				const res2 = validateSuiteQL(
+					"SELECT asm.recordtype, com.itemtype FROM BomRevisionComponent brc JOIN bomRevision bomr ON bomr.id = brc.bomrevision JOIN item asm ON asm.id = bomr.assembly JOIN item com ON com.id = brc.item",
+				);
+				expect(res2.valid).toBe(false);
+				expect(res2.reason).toContain(
+					"Invalid column 'asm.recordtype' on 'item'",
+				);
+				expect(res2.reason).toContain("asm.itemtype");
+			});
+
+			it("should allow valid itemtype and subtype on item table", () => {
+				const res = validateSuiteQL(
+					"SELECT id, itemid, itemtype, subtype FROM item WHERE itemtype = 'Assembly'",
+				);
+				expect(res.valid).toBe(true);
+				expect(res.tables).toContain("item");
+			});
 		});
 
 		describe("assertValidSuiteQL", () => {
@@ -341,6 +367,20 @@ describe("SuiteQL, Search & Query Utilities", () => {
 				expect(formatted).toContain("❌ **SuiteQL Error:**");
 				expect(formatted).toContain("🔍 **Diagnostic:**");
 				expect(formatted).toContain("💡 **Suggested Pattern:**");
+			});
+
+			it("should diagnose unknown identifier 'recordtype' on item table", () => {
+				const diag = diagnoseSuiteQLError(
+					"Unknown identifier 'recordtype'",
+					"SELECT id, recordtype FROM item WHERE id = 100",
+				);
+				expect(diag.isDiagnosed).toBe(true);
+				expect(diag.summary).toContain("Invalid Column on 'item' Table");
+				expect(diag.rootCause).toContain("itemtype");
+				expect(diag.suggestedFix).toContain("itemtype");
+				expect(diag.selfHealingAction).toContain(
+					"Replace all occurrences of 'recordtype'",
+				);
 			});
 
 			it("should diagnose 'Record bin was not found' and guide to inventorybalance", () => {
