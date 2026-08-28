@@ -65,8 +65,10 @@ In your thinking/reasoning process before calling `ns_runCustomSuiteQL`, you MUS
    - Date literals: MUST use `TO_DATE('YYYY-MM-DD', 'YYYY-MM-DD')`.
    - Foreign key & status labels: MUST use `BUILTIN.DF(fieldName)` instead of joining master tables.
    - Transaction driving filters: MUST include at least one indexed filter (`trandate`, `type`, `id`, `tranid`, `entity`, `subsidiary`, or `item`).
-3. **Automated Self-Healing (Max 3 retries, syntax/schema errors only):**
-   `Parse Error` ➔ `Call ns_getSuiteQLMetadata` ➔ `Correct SQL via Domain Matrix` ➔ `Re-run`.
+3. **Error-Driven Direct Correction (Syntax/Schema Errors Only):**
+   - Strictly prohibit blind retries on identical or uncorrected queries.
+   - On the first error, immediately analyze the diagnostic response and table schema to pinpoint the root cause, directly fix the query, and execute the corrected version:
+     `Parse Error & Diagnostics` ➔ `Inspect Schema via ns_getSuiteQLMetadata (if needed)` ➔ `Directly Fix SQL via Domain Matrix` ➔ `Execute Corrected Query`.
 
 ---
 

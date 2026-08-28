@@ -74,7 +74,7 @@ function getActionableAdvice(code: string, message: string): string {
 		advice +=
 			"\n  - Transaction Types: SalesOrd, CustInvc, PurchOrd, VendBill, Journal, CustCred, ItemRcpt, ItemShip, CashSale, CustPymt, VendPymt.";
 		advice +=
-			"\n  - Self-Healing Action: Call `ns_getSuiteQLMetadata` for the target table to verify actual field names, fix the query, and RETRY automatically.";
+			"\n  - Self-Healing Action: Call `ns_getSuiteQLMetadata` for the target table to verify actual field names, directly fix the query based on the diagnostic, and execute the corrected query.";
 		return advice;
 	}
 

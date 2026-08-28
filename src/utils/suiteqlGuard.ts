@@ -547,7 +547,7 @@ export function diagnoseSuiteQLError(
 		officialGuidance:
 			"Verify table and column names using ns_getSuiteQLMetadata, ensure strict read-only SELECT syntax, and include indexed filters.",
 		selfHealingAction:
-			"1. Call `ns_getSuiteQLMetadata` for referenced table(s) to verify columns. 2. Revise query and retry.",
+			"1. Call `ns_getSuiteQLMetadata` for referenced table(s) to verify columns. 2. Directly fix query based on the diagnostic and execute.",
 	};
 }
 

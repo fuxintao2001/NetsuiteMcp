@@ -374,13 +374,12 @@ export const SUITEQL_RULES_SUFFIX = `
   • Inventory & Mfg: TrnfrOrd (Transfer Order), InvTrnfr (Inv Transfer), InvAdjst (Adjustment), InvCount (Count), InvReval (Revaluation), InvWksht (Worksheet), Build (Assembly Build), Unbuild (Assembly Unbuild), WorkOrd (Work Order), WOClose (WO Close), WOCompl (WO Completion), WOIssue (WO Issue), BinTrnfr (Bin Transfer), BinWksht (Bin Putaway), StatChng (Status Change), OwnTrnsf (Ownership Transfer)
   • Financial & Other: Journal (Journal Entry), InterCompJrn (Intercompany Journal), AdvInterCompJrn (Adv Interco Journal), StatJrn (Statistical Journal), PEJrnl (Period End Journal), Check (Check), Deposit (Deposit), CardChrg (Credit Card), CardRfnd (Card Refund), TaxPymt/TaxLiab (Tax Payment), Paycheck (Paycheck), PchkJrnl (Paycheck Journal), Commissn (Commission), ExpRept (Expense Report), FxReval (FX Revaluation), RevArrng (Revenue Arrangement), RevComm (Revenue Commitment), Transfer (Bank Transfer), Custom (Custom Transaction)
 
-🔄 STEP 4 — AUTOMATIC SELF-HEALING LOOP (On syntax/schema errors only):
+🔄 STEP 4 — ERROR-DRIVEN DIRECT CORRECTION (On syntax/schema errors only):
   If query execution returns a syntax or schema error (e.g. invalid column, wrong table, missing mainline, wrong type code) or unexpectedly empty results:
-  Follow this self-healing procedure (up to 3 retry iterations):
+  DO NOT blindly retry identical queries. Modify the query directly based on the error diagnostic:
     1. Parse the error message and guardrail advice to pinpoint the exact failure (e.g. use 'aggregateitemlocation' instead of 'inventoryitemlocations', or add 'tl.mainline = ''F''').
     2. Re-call ns_getSuiteQLMetadata to inspect table schema and confirm valid field names/types if needed.
-    3. Correct the SuiteQL statement using recommended domain patterns and re-run ns_runCustomSuiteQL.
-    4. Only report failure to the user after 3 unsuccessful automated retries.
+    3. Correct the SuiteQL statement using recommended domain patterns and execute the corrected query.
 
 🚫 ═══ PERMISSION ERROR HARD STOP (CRITICAL EXCEPTION TO STEP 4) ═══
   If query execution fails due to PERMISSION RESTRICTIONS (e.g. 'INSUFFICIENT_PERMISSION', HTTP 403, 'Permission Violation', or role access denied):
