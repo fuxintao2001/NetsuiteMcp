@@ -30,25 +30,32 @@ const configPath = path.join(projectRoot, 'workspace-agents', 'workspaces.json')
 // ---------------------------------------------------------------------------
 
 const WRITE_TOOLS_TABLE_SANDBOX = `| \`ns_createRecord\` | Create a new record (**Sandbox only**) |
-| \`ns_updateRecord\` | Update an existing record (**Sandbox only**) |`;
+| \`ns_updateRecord\` | Update an existing record (**Sandbox only**) |
+| \`netsuite_suitecloud_upload\` | Upload file via SuiteCloud CLI (🔒 **Requires user confirmation gate**) |`;
 
-const WRITE_TOOLS_TABLE_PRODUCTION = `\n> *Write tools (\`ns_createRecord\`, \`ns_updateRecord\`) are disabled in Production.*\n`;
+const WRITE_TOOLS_TABLE_PRODUCTION = `\n> *Write tools (\`ns_createRecord\`, \`ns_updateRecord\`) and direct file uploads (\`netsuite_suitecloud_upload\`) are blocked in Production.*\n`;
 
-const WRITE_OPS_SECTION_SANDBOX = `### Write Operations (✅ Enabled)
+const WRITE_OPS_SECTION_SANDBOX = `### Write Operations & Code Uploads (✅ Enabled)
 
-Write operations (\`ns_createRecord\` / \`ns_updateRecord\`) are fully enabled in this Sandbox environment.
+Write operations (\`ns_createRecord\` / \`ns_updateRecord\`) and file uploads (\`netsuite_suitecloud_upload\`) are enabled in this Sandbox environment.
 
-**Write Workflow:**
+**Record Write Workflow:**
 1. \`ns_getRecordTypeMetadata\` → verify record schema and field constraints
 2. For reference fields → use \`ns_selector_app\` or SuiteQL to look up valid IDs
 3. Build \`data\` as **stringified JSON** matching the schema exactly
 4. Call \`ns_createRecord\` or \`ns_updateRecord\`
-5. Verify result → Check output for auto-appended UI confirmation link`;
+5. Verify result → Check output for auto-appended UI confirmation link
 
-const WRITE_OPS_SECTION_PRODUCTION = `### Write Operations (❌ Disabled)
+**File Upload Workflow (\`netsuite_suitecloud_upload\`):**
+1. Call \`netsuite_suitecloud_upload\` with \`{ paths: '...' }\` (Dry Run inspection)
+2. Present the preview card to the user and await explicit confirmation
+3. Call with \`{ paths: '...', confirmed: true, confirmationToken: '...' }\` to execute`;
+
+const WRITE_OPS_SECTION_PRODUCTION = `### Write Operations & Code Uploads (❌ Disabled)
 
 > [!CAUTION]
-> \`ns_createRecord\` and \`ns_updateRecord\` are **disabled** in this Production environment to protect data integrity. Use \`ns_getRecord\` for read-only access. To perform write operations, switch to a Sandbox workspace.`;
+> \`ns_createRecord\`, \`ns_updateRecord\`, and direct \`netsuite_suitecloud_upload\` are **disabled** in this Production environment to protect data and code integrity. Use read tools (\`ns_getRecord\`, \`netsuite_inspect_record\`) for safe access. To perform write operations, switch to a Sandbox workspace.`;
+
 
 // ---------------------------------------------------------------------------
 // Main

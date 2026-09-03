@@ -5,8 +5,10 @@ import { type ServerType, serve } from "@hono/node-server";
 import { createMcpHandler, Server } from "@modelcontextprotocol/server";
 import type { Context } from "hono";
 import { Hono } from "hono";
+import { registerPromptHandlers } from "./handlers/prompts.js";
 import { registerResourceHandlers } from "./handlers/resources.js";
 import { registerToolHandlers } from "./handlers/tools.js";
+
 import { NetSuiteMCPTools } from "./mcp/tools.js";
 import { OAuthManager } from "./oauth/manager.js";
 import { cacheService } from "./utils/cache.js";
@@ -216,6 +218,7 @@ class NetSuiteHTTPServer {
 				capabilities: {
 					tools: {},
 					resources: {},
+					prompts: {},
 				},
 			},
 		);
@@ -283,6 +286,7 @@ class NetSuiteHTTPServer {
 		});
 
 		registerResourceHandlers(server, projectRoot);
+		registerPromptHandlers(server);
 		return server;
 	}
 

@@ -9,8 +9,10 @@ import { fileURLToPath } from "node:url";
 import { Server } from "@modelcontextprotocol/server";
 import { StdioServerTransport } from "@modelcontextprotocol/server/stdio";
 import axios from "axios";
+import { registerPromptHandlers } from "./handlers/prompts.js";
 import { registerResourceHandlers } from "./handlers/resources.js";
 import type { ToolHandlerDeps } from "./handlers/tools.js";
+
 // Import handlers
 import { registerToolHandlers, textResult } from "./handlers/tools.js";
 import { NetSuiteMCPTools } from "./mcp/tools.js";
@@ -95,7 +97,7 @@ class NetSuiteMCPServer {
 
 		this.server = new Server(
 			{ name: "netsuite-mcp", version: SERVER_VERSION },
-			{ capabilities: { tools: {}, resources: {} } },
+			{ capabilities: { tools: {}, resources: {}, prompts: {} } },
 		);
 	}
 
@@ -116,6 +118,7 @@ class NetSuiteMCPServer {
 
 		registerToolHandlers(deps);
 		registerResourceHandlers(this.server, projectRoot);
+		registerPromptHandlers(this.server);
 	}
 
 	// -------------------------------------------------------------------------

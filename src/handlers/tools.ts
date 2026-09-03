@@ -28,17 +28,26 @@ import {
 	unwrapMcpContent,
 } from "../utils/metadata.js";
 import { generateNetSuiteUrl } from "../utils/netsuiteUrls.js";
+import { recordsReferenceService } from "../utils/recordsReference.js";
+import { suitecloudRunnerService } from "../utils/suitecloudRunner.js";
 import { formatSuiteQLErrorResponse } from "../utils/suiteqlGuard.js";
+
+import { suiteqlTemplateService } from "../utils/suiteqlTemplates.js";
 import {
 	AUTH_TOOL,
 	BatchExecuteArgsSchema,
+	GetQueryTemplateArgsSchema,
+	GetRecordDefinitionArgsSchema,
 	GetRecordLinkArgsSchema,
 	GetScriptLogsArgsSchema,
+	GetSystemNotesArgsSchema,
+	InspectRecordArgsSchema,
 	LOCAL_TOOLS,
 	LOGOUT_TOOL,
 	METADATA_RULES_SUFFIX,
 	STATUS_TOOL,
 	SUITEQL_RULES_SUFFIX,
+	SuitecloudUploadArgsSchema,
 } from "./toolSchemas.js";
 
 // ---------------------------------------------------------------------------
@@ -238,10 +247,30 @@ async function handleGetScriptLogs(
 
 		const data = mcpTools.extractDataArray(result);
 
+		// If errors exist, add structured diagnostic summary inside JSON payload
+		const errors = data.filter(
+			(d) =>
+				typeof d === "object" &&
+				d !== null &&
+				(d.type === "ERROR" || d.type === "EMERGENCY"),
+		);
+		let diagnosticSummary: Record<string, unknown> | undefined;
+		const latest = errors[0] as Record<string, unknown> | undefined;
+		if (latest) {
+			diagnosticSummary = {
+				errorCount: errors.length,
+				latestScript: latest.scriptScriptId || latest.scriptName || "Unknown",
+				latestTimestamp: latest.date,
+				latestTitle: latest.title,
+				latestDetailSnippet: String(latest.detail || "").slice(0, 200),
+			};
+		}
+
 		return textResult(
 			JSON.stringify(
 				{
 					totalResults: data.length,
+					...(diagnosticSummary ? { diagnosticSummary } : {}),
 					query: sql,
 					data,
 				},
@@ -253,6 +282,449 @@ async function handleGetScriptLogs(
 		const msg = err instanceof Error ? err.message : String(err);
 		return textResult(`❌ Failed to query script logs: ${msg}`, true);
 	}
+}
+
+async function handleInspectRecord(
+	args: Record<string, unknown>,
+	mcpTools: NetSuiteMCPTools,
+): Promise<ToolResponse> {
+	const parsed = InspectRecordArgsSchema.safeParse(args);
+	if (!parsed.success) {
+		return textResult(
+			`❌ Invalid arguments: ${parsed.error.issues[0]?.message}`,
+			true,
+		);
+	}
+	let { recordType, recordId, includeLines, nonEmptyOnly } = parsed.data;
+
+	// If recordId is not numeric (e.g. document tranid 'SO1002'), try resolving internal numeric ID
+	const isNumeric = /^\d+$/.test(recordId.trim());
+	if (!isNumeric) {
+		try {
+			const lookupSql = `SELECT id, recordtype FROM transaction WHERE tranid = '${recordId.replace(/'/g, "''")}' FETCH FIRST 1 ROWS ONLY`;
+			const lookupRes = await mcpTools.executeTool("ns_runCustomSuiteQL", {
+				sqlQuery: lookupSql,
+			});
+			const rows = mcpTools.extractDataArray(lookupRes);
+			if (rows.length > 0 && rows[0]?.id) {
+				recordId = String(rows[0].id);
+				if (rows[0].recordtype) {
+					recordType = String(rows[0].recordtype).toLowerCase();
+				}
+			}
+		} catch {
+			// Continue with original recordId if lookup fails
+		}
+	}
+
+	try {
+		const rawRecord = await mcpTools.executeTool("ns_getRecord", {
+			recordType,
+			id: recordId,
+		});
+
+		const unwrapped = (unwrapMcpContent(rawRecord) || rawRecord) as Record<
+			string,
+			unknown
+		>;
+		if (!unwrapped || typeof unwrapped !== "object") {
+			return textResult(
+				`❌ Record not found or invalid response for ${recordType} ID: ${recordId}`,
+				true,
+			);
+		}
+
+		// Separate system fields vs custom fields vs sublists
+		const systemFields: Record<string, unknown> = {};
+		const customFields: Record<string, unknown> = {};
+		const sublists: Record<string, unknown> = {};
+
+		for (const [key, val] of Object.entries(unwrapped)) {
+			if (
+				nonEmptyOnly &&
+				(val === null ||
+					val === undefined ||
+					val === "" ||
+					(Array.isArray(val) && val.length === 0))
+			) {
+				continue;
+			}
+
+			if (
+				key.startsWith("custbody_") ||
+				key.startsWith("custentity_") ||
+				key.startsWith("custrecord_")
+			) {
+				customFields[key] = val;
+			} else if (
+				Array.isArray(val) ||
+				(typeof val === "object" &&
+					val !== null &&
+					!("id" in val && Object.keys(val).length <= 2))
+			) {
+				if (includeLines) {
+					sublists[key] = val;
+				}
+			} else {
+				systemFields[key] = val;
+			}
+		}
+
+		let md = `## 🔍 NetSuite Record Inspection: \`${recordType}\` (ID: ${recordId})\n\n`;
+
+		// Format system fields table
+		md += `### 📋 System Header Fields (${Object.keys(systemFields).length})\n`;
+		md += `| Field ID | Value |\n|---|---|\n`;
+		for (const [k, v] of Object.entries(systemFields)) {
+			const displayVal =
+				typeof v === "object" && v !== null ? JSON.stringify(v) : String(v);
+			md += `| \`${k}\` | ${displayVal.replace(/\|/g, "\\|").replace(/\n/g, " ")} |\n`;
+		}
+
+		// Format custom fields table
+		md += `\n### 🏷️ Custom Fields (${Object.keys(customFields).length})\n`;
+		if (Object.keys(customFields).length === 0) {
+			md += `*(No populated custom fields found)*\n`;
+		} else {
+			md += `| Field ID | Value |\n|---|---|\n`;
+			for (const [k, v] of Object.entries(customFields)) {
+				const displayVal =
+					typeof v === "object" && v !== null ? JSON.stringify(v) : String(v);
+				md += `| \`${k}\` | ${displayVal.replace(/\|/g, "\\|").replace(/\n/g, " ")} |\n`;
+			}
+		}
+
+		// Format sublists overview
+		if (includeLines && Object.keys(sublists).length > 0) {
+			md += `\n### 📦 Sublists & Lines Summary\n`;
+			for (const [sublistName, val] of Object.entries(sublists)) {
+				if (Array.isArray(val)) {
+					md += `- **\`${sublistName}\`** (${val.length} rows)\n`;
+					if (val.length > 0 && typeof val[0] === "object" && val[0] !== null) {
+						const sampleKeys = Object.keys(val[0]).filter(
+							(k) => val[0][k] !== null && val[0][k] !== "",
+						);
+						md += `  - Populated Columns in Row 1: \`${sampleKeys.slice(0, 15).join("`, `")}\`${sampleKeys.length > 15 ? "..." : ""}\n`;
+					}
+				}
+			}
+		}
+
+		return textResult(md);
+	} catch (err: unknown) {
+		const msg = err instanceof Error ? err.message : String(err);
+		return textResult(
+			`❌ Failed to inspect record ${recordType} (${recordId}): ${msg}`,
+			true,
+		);
+	}
+}
+
+async function handleGetRecordDefinition(
+	args: Record<string, unknown>,
+): Promise<ToolResponse> {
+	const parsed = GetRecordDefinitionArgsSchema.safeParse(args);
+	if (!parsed.success) {
+		return textResult(
+			`❌ Invalid arguments: ${parsed.error.issues[0]?.message}`,
+			true,
+		);
+	}
+	const { recordType, keyword } = parsed.data;
+
+	const def = recordsReferenceService.getRecordDefinition(recordType, keyword);
+	if (!def) {
+		return textResult(
+			`⚠️ Official records definition not found on local disk. (Ensure 'npm run fetch-skills' has been executed).`,
+			true,
+		);
+	}
+
+	if (!def.found) {
+		const allTypes = recordsReferenceService.listRecordTypes();
+		const suggestions = allTypes
+			.filter((t) => t.includes(recordType) || recordType.includes(t))
+			.slice(0, 10);
+
+		let msg = `❌ Record type '${recordType}' not found in official SuiteScript 272 records list.\n`;
+		if (suggestions.length > 0) {
+			msg += `\n💡 Did you mean one of these: \`${suggestions.join("`, `")}\`?`;
+		}
+		return textResult(msg, true);
+	}
+
+	let md = `## 📖 Official Records Definition: \`${def.recordType}\` (${def.fields.length} of ${def.totalFields} fields matching)\n\n`;
+	md += `| Field ID | Label | Type | Required | Help / Notes |\n|---|---|---|---|---|\n`;
+
+	for (const f of def.fields.slice(0, 100)) {
+		const helpSnippet = (f.help || "")
+			.slice(0, 80)
+			.replace(/\|/g, "\\|")
+			.replace(/\n/g, " ");
+		md += `| \`${f.internalId}\` | ${f.label} | \`${f.type}\` | ${f.required ? "✅" : "❌"} | ${helpSnippet} |\n`;
+	}
+
+	if (def.fields.length > 100) {
+		md += `\n*(Showing top 100 of ${def.fields.length} fields. Use keyword parameter to narrow search)*\n`;
+	}
+
+	if (def.sublists && def.sublists.length > 0) {
+		md += `\n### 📦 Sublists:\n`;
+		for (const sl of def.sublists) {
+			md += `- \`${sl.name}\`${sl.label ? ` (${sl.label})` : ""}\n`;
+		}
+	}
+
+	return textResult(md);
+}
+
+async function handleGetQueryTemplate(
+	args: Record<string, unknown>,
+): Promise<ToolResponse> {
+	const parsed = GetQueryTemplateArgsSchema.safeParse(args);
+	if (!parsed.success) {
+		return textResult(
+			`❌ Invalid arguments: ${parsed.error.issues[0]?.message}`,
+			true,
+		);
+	}
+	const { templateId, category, search } = parsed.data;
+
+	if (templateId) {
+		const tmpl = suiteqlTemplateService.getTemplate(templateId);
+		if (!tmpl) {
+			return textResult(`❌ Template '${templateId}' not found.`, true);
+		}
+
+		let md = `## 💎 SuiteQL Template: ${tmpl.name} (\`${tmpl.id}\`)\n\n`;
+		md += `**Category**: \`${tmpl.category}\`  \n`;
+		md += `**Source**: ${tmpl.officialSource}  \n\n`;
+		md += `> ${tmpl.description}\n\n`;
+		md += `### 📝 SQL Template\n\`\`\`sql\n${tmpl.sqlTemplate}\n\`\`\`\n\n`;
+		md += `### ⚙️ Parameters\n| Parameter | Description |\n|---|---|\n`;
+		for (const [param, desc] of Object.entries(tmpl.params)) {
+			md += `| \`${param}\` | ${desc} |\n`;
+		}
+		md += `\n### 🛡️ SAFE Best Practices\n`;
+		for (const bp of tmpl.bestPractices) {
+			md += `- ${bp}\n`;
+		}
+		return textResult(md);
+	}
+
+	let templates = suiteqlTemplateService.listTemplates(category);
+	if (search) {
+		templates = suiteqlTemplateService.searchTemplates(search);
+	}
+
+	let md = `## 📚 Curated SuiteQL Templates (${templates.length} available)\n\n`;
+	md += `| ID | Name | Category | Description |\n|---|---|---|---|\n`;
+	for (const t of templates) {
+		md += `| \`${t.id}\` | ${t.name} | \`${t.category}\` | ${t.description.slice(0, 70)}... |\n`;
+	}
+	md += `\n💡 Call with \`{ templateId: '...' }\` to retrieve full SQL and parameter guidance.`;
+	return textResult(md);
+}
+
+async function handleGetSystemNotes(
+	args: Record<string, unknown>,
+	mcpTools: NetSuiteMCPTools,
+): Promise<ToolResponse> {
+	const parsed = GetSystemNotesArgsSchema.safeParse(args);
+	if (!parsed.success) {
+		return textResult(
+			`❌ Invalid arguments: ${parsed.error.issues[0]?.message}`,
+			true,
+		);
+	}
+	let { recordId, limit } = parsed.data;
+
+	const isNumeric = /^\d+$/.test(recordId.trim());
+	if (!isNumeric) {
+		try {
+			const lookupSql = `SELECT id FROM transaction WHERE tranid = '${recordId.replace(/'/g, "''")}' FETCH FIRST 1 ROWS ONLY`;
+			const lookupRes = await mcpTools.executeTool("ns_runCustomSuiteQL", {
+				sqlQuery: lookupSql,
+			});
+			const rows = mcpTools.extractDataArray(lookupRes);
+			if (rows.length > 0 && rows[0]?.id) {
+				recordId = String(rows[0].id);
+			}
+		} catch {
+			// Continue with recordId
+		}
+	}
+
+	// Standalone query complying with SAFE Guide Pitfall 11
+	const sql = `SELECT sn.date, sn.field, sn.oldvalue, sn.newvalue, sn.name AS author_id, BUILTIN.DF(sn.name) AS author_name, BUILTIN.DF(sn.role) AS role_name FROM systemnote sn WHERE sn.recordid = ${recordId} ORDER BY sn.date DESC FETCH FIRST ${limit} ROWS ONLY`;
+
+	try {
+		const res = await mcpTools.executeTool("ns_runCustomSuiteQL", {
+			sqlQuery: sql,
+		});
+		const rows = mcpTools.extractDataArray(res);
+
+		if (rows.length === 0) {
+			return textResult(`ℹ️ No system notes found for record ID ${recordId}.`);
+		}
+
+		let md = `## 🕵️ System Notes Audit Trail (Record ID: ${recordId}, ${rows.length} changes)\n\n`;
+		md += `| Timestamp | Author | Role | Field | Old Value | New Value |\n|---|---|---|---|---|---|\n`;
+
+		for (const r of rows) {
+			const author = r.author_name || r.author_id || "System";
+			const role = r.role_name || "-";
+			const field = r.field || "-";
+			const oldVal = (
+				r.oldvalue !== null && r.oldvalue !== undefined
+					? String(r.oldvalue)
+					: ""
+			).slice(0, 30);
+			const newVal = (
+				r.newvalue !== null && r.newvalue !== undefined
+					? String(r.newvalue)
+					: ""
+			).slice(0, 30);
+			md += `| ${r.date} | ${author} | ${role} | \`${field}\` | ${oldVal} | ${newVal} |\n`;
+		}
+
+		return textResult(md);
+	} catch (err: unknown) {
+		const msg = err instanceof Error ? err.message : String(err);
+		return textResult(
+			`❌ Failed to query system notes for record ID ${recordId}: ${msg}`,
+			true,
+		);
+	}
+}
+
+async function handleSuitecloudUpload(
+	args: Record<string, unknown>,
+	oauthManager: OAuthManager,
+	defaultProjectRoot: string,
+): Promise<ToolResponse> {
+	const parsed = SuitecloudUploadArgsSchema.safeParse(args);
+	if (!parsed.success) {
+		return textResult(
+			`❌ Invalid arguments: ${parsed.error.issues[0]?.message}`,
+			true,
+		);
+	}
+	const {
+		paths,
+		projectPath: customProjectPath,
+		confirmed,
+		confirmationToken,
+		allowProduction,
+	} = parsed.data;
+
+	const currentAccountId = (await oauthManager.getAccountId()) || "UNKNOWN";
+	const isProd = !isSandboxAccount(currentAccountId);
+
+	// Resolve project directory
+	const startDir = customProjectPath || defaultProjectRoot;
+	const resolvedProjectRoot =
+		suitecloudRunnerService.findSdfProjectRoot(startDir) || startDir;
+
+	// Check local file existence and inspect
+	const inspection = suitecloudRunnerService.inspectLocalFile(
+		resolvedProjectRoot,
+		paths,
+	);
+
+	// Safety check 1: If file doesn't exist, fail immediately
+	if (!inspection.exists) {
+		return textResult(
+			`❌ Local file inspection failed: ${inspection.error}`,
+			true,
+		);
+	}
+
+	// Safety check 2: Production environment block
+	if (isProd && !allowProduction) {
+		return textResult(
+			`🚨 **CRITICAL PRODUCTION SAFETY BLOCK**\n\n` +
+				`Target NetSuite account is **PRODUCTION** (\`${currentAccountId}\`).\n` +
+				`Direct file upload to production via MCP is blocked to prevent accidental overwrites.\n\n` +
+				`If you are 100% sure and authorized to upload to Production, you must explicitly set \`allowProduction: true\` alongside \`confirmed: true\`.`,
+			true,
+		);
+	}
+
+	// Phase 1: If not confirmed or missing token, generate preview and wait for explicit confirmation
+	if (!confirmed || !confirmationToken) {
+		const token = suitecloudRunnerService.generateToken({
+			paths,
+			accountId: currentAccountId,
+			projectPath: resolvedProjectRoot,
+		});
+
+		const fileSizeKb =
+			inspection.sizeBytes !== undefined
+				? (inspection.sizeBytes / 1024).toFixed(2)
+				: "Unknown";
+		const envType = isProd ? "🚨 PRODUCTION" : "🛡️ SANDBOX";
+
+		let previewMd = `## 🔒 SuiteCloud File Upload Security Confirmation Required\n\n`;
+		previewMd += `An upload request has been initiated. To prevent unintended code changes or overwrites, **your explicit confirmation is required** before executing:\n\n`;
+		previewMd += `### 📋 Execution Details\n`;
+		previewMd += `| Parameter | Value |\n|---|---|\n`;
+		previewMd += `| **File Cabinet Path** | \`${paths}\` |\n`;
+		previewMd += `| **Local File Location** | \`${inspection.localFullPath}\` (${fileSizeKb} KB) |\n`;
+		previewMd += `| **Target Account** | \`${currentAccountId.toUpperCase()}\` (${envType}) |\n`;
+		previewMd += `| **SDF Project Root** | \`${resolvedProjectRoot}\` |\n`;
+		previewMd += `| **Command to Run** | \`npx suitecloud file:upload --paths "${paths}"\` |\n\n`;
+		previewMd += `### 🛑 Security Gate Instructions\n`;
+		previewMd += `- **Please review the file path and target account carefully.**\n`;
+		previewMd += `- To confirm and execute, please reply with **"确认"** or tell the assistant to proceed.\n`;
+		previewMd += `- Confirmation Token (valid for 5 minutes): \`${token}\`\n\n`;
+		previewMd += `*(No changes have been made to your NetSuite account)*`;
+
+		return textResult(previewMd);
+	}
+
+	// Phase 2: User has confirmed! Validate token first.
+	const tokenValidation = suitecloudRunnerService.consumeToken(
+		confirmationToken,
+		{
+			paths,
+			accountId: currentAccountId,
+		},
+	);
+
+	if (!tokenValidation.valid) {
+		return textResult(
+			`❌ Confirmation verification failed: ${tokenValidation.reason}\n\n` +
+				`Please re-run without 'confirmed' to generate a fresh confirmation token.`,
+			true,
+		);
+	}
+
+	// Execute the actual upload via CLI
+	const execResult = await suitecloudRunnerService.executeUpload(
+		resolvedProjectRoot,
+		paths,
+	);
+
+	if (!execResult.success) {
+		let errorMd = `❌ **SuiteCloud Upload Failed (Time: ${execResult.executionTimeMs}ms)**\n\n`;
+		errorMd += `### CLI Error Output:\n\`\`\`\n${execResult.stderr || execResult.stdout}\n\`\`\`\n\n`;
+		errorMd += `💡 **Troubleshooting Tips:**\n`;
+		errorMd += `1. Ensure you have authenticated with SuiteCloud CLI (\`npx suitecloud account:setup\` or manageauth).\n`;
+		errorMd += `2. Ensure the active SuiteCloud auth ID matches account \`${currentAccountId}\`.\n`;
+		errorMd += `3. Check that the path \`${paths}\` is registered in \`deploy.xml\` or FileCabinet structure.`;
+		return textResult(errorMd, true);
+	}
+
+	let successMd = `✅ **SuiteCloud File Upload Succeeded (Time: ${execResult.executionTimeMs}ms)**\n\n`;
+	successMd += `- **Uploaded Path**: \`${paths}\`\n`;
+	successMd += `- **Target Account**: \`${currentAccountId.toUpperCase()}\`\n`;
+	successMd += `- **Local File**: \`${inspection.localFullPath}\`\n\n`;
+	if (execResult.stdout.trim().length > 0) {
+		successMd += `### CLI Output:\n\`\`\`\n${execResult.stdout.trim()}\n\`\`\`\n`;
+	}
+
+	return textResult(successMd);
 }
 
 /** Normalize standard parameters (recordType, tableName, table_name, record_type, table). */
@@ -691,6 +1163,25 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
 			}
 			if (name === "netsuite_get_script_logs") {
 				return await handleGetScriptLogs(safeArgs, mcpTools);
+			}
+			if (name === "netsuite_inspect_record") {
+				return await handleInspectRecord(safeArgs, mcpTools);
+			}
+			if (name === "netsuite_get_record_definition") {
+				return await handleGetRecordDefinition(safeArgs);
+			}
+			if (name === "netsuite_get_query_template") {
+				return await handleGetQueryTemplate(safeArgs);
+			}
+			if (name === "netsuite_get_system_notes") {
+				return await handleGetSystemNotes(safeArgs, mcpTools);
+			}
+			if (name === "netsuite_suitecloud_upload") {
+				return await handleSuitecloudUpload(
+					safeArgs,
+					oauthManager,
+					deps.projectRoot,
+				);
 			}
 
 			// --- Fast metadata discovery for ns_getSuiteQLMetadata without recordType ---

@@ -53,10 +53,12 @@ These official Oracle NetSuite skills are loaded from the global configuration (
 > 2. **Strict Zero Guesswork & Zero Hallucination:** NEVER guess or fabricate non-existent tables or fields (e.g. `LotNumberedAssemblyItemLocations` or `transaction.createdfrom`). NEVER provide naive, unverified, or slow/destructive advice.
 > 3. **Mandatory Citation:** Every technical recommendation, table selection, or SuiteScript pattern MUST cite its official source (`📖 官方出处：[...]`).
 
-### Write Operations Control
+### Write Operations & Code Upload Control
 
 > [!IMPORTANT]
-> Write operations (`ns_createRecord`, `ns_updateRecord`) are strictly disabled in **Production environments**. They are **fully enabled in Sandbox/Test environments** (account IDs containing `_SB` or starting with `TSTDRV`). Environment detection is centralized in `src/utils/environment.ts` via `isSandboxAccount()`.
+> 1. **Record Write Operations (`ns_createRecord`, `ns_updateRecord`)**: Strictly disabled in **Production environments**. They are **fully enabled in Sandbox/Test environments** (account IDs containing `_SB` or starting with `TSTDRV`). Environment detection is centralized in `src/utils/environment.ts` via `isSandboxAccount()`.
+> 2. **Code & Asset Uploads (`netsuite_suitecloud_upload`)**: Strictly enforces the **Two-Phase Confirmation Gate**. AI agents are strictly prohibited from uploading files without explicit user consent. Direct file uploads to Production are blocked unless explicit user authorization and `allowProduction: true` are provided.
+
 
 ### SuiteQL Protocol & Error-Driven Correction Rules
 

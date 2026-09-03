@@ -74,12 +74,32 @@ In your thinking/reasoning process before calling `ns_runCustomSuiteQL`, you MUS
 
 ---
 
-## GATE 3: SuiteScript Code Development (No Memory Coding)
+## GATE 3: SuiteScript Code Development, Debugging & Safe File Upload (No Memory Coding)
 
+### 1. Pre-Development Reconnaissance
 Before writing or modifying ANY SuiteScript (2.1), SuiteFlow, or SDF XML:
 1. **Analyze First:** Inspect existing project files with `view_file` / `grep_search`.
-2. **Mandatory Official Docs Verification:** Query Context7 (`resolve-library-id` ➔ `query-docs`) and read relevant skills (e.g. `netsuite://skills/netsuite-sdf-safe-guide`). Verify exact method signatures, governance units, entry points, and error codes.
-3. **Zero Placeholder Rule:** Implement complete, production-grade code without `// TODO` omissions. Explicitly cite the SAFE Guide principle or SuiteScript API reference.
+2. **Official Records & Field Verification:**
+   - Call `netsuite_get_record_definition` to verify genuine standard field IDs and data types across all 272 NetSuite record types. Strictly avoid guessing field IDs.
+   - For existing transactions/entities in the current account, call `netsuite_inspect_record` to view actual populated values, custom body fields (`custbody_*`), custom record fields (`custrecord_*`), and line items (`custcol_*`).
+3. **Mandatory Official Docs Verification:** Query Context7 (`resolve-library-id` ➔ `query-docs`) and read relevant skills (e.g. `netsuite://skills/netsuite-sdf-safe-guide`). Verify exact method signatures, governance units, entry points, and error codes.
+4. **Zero Placeholder Rule:** Implement complete, production-grade code without `// TODO` omissions. Explicitly cite the SAFE Guide principle or SuiteScript API reference.
+
+### 2. Runtime Debugging & Error Diagnostics
+- Call `netsuite_get_script_logs` to retrieve recent runtime errors (`ERROR`, `EMERGENCY`) along with diagnostic stack summaries.
+- Check record change history using `netsuite_get_system_notes` (standalone query avoiding timeouts).
+- Use standard MCP Prompts (`/prompt review_suitescript`, `/prompt debug_script_error`) to review governance budgets and analyze stack traces.
+
+### 3. 🔒 MANDATORY Two-Phase Confirmation Gate for File Upload (`netsuite_suitecloud_upload`)
+AI agents are **STRICTLY PROHIBITED** from executing `npx suitecloud file:upload` without explicit user consent:
+1. **Phase 1 (Preview & Intercept):**
+   - Call `netsuite_suitecloud_upload` with `paths` (leaving `confirmed: false`).
+   - The tool will perform a dry-run inspection of local file existence, size, target account, and generate a 5-minute single-use `confirmationToken`.
+   - Present the formatted execution preview card to the user in chat. **STOP calling tools and await user instruction.**
+2. **Phase 2 (User-Authorized Commit):**
+   - **ONLY** when the user explicitly replies "确认" / "proceed" in the chat, re-invoke `netsuite_suitecloud_upload` with `confirmed: true` and the `confirmationToken`.
+3. **Production Protection:**
+   - Direct file uploads to Production environments are hard-blocked by default. Uploading to Production requires explicit user instruction AND setting `allowProduction: true`.
 
 ---
 
@@ -107,10 +127,19 @@ When encountering NetSuite authorization/permission errors (e.g., `INSUFFICIENT_
 # WORKFLOW & TOOL SELECTION SOP
 
 ## Tool Priority Hierarchy
-1. **P1 Standard Reports:** `ns_listAllReports` ➔ `ns_runReport` (for financial/functional reporting)
-2. **P2 Saved Searches:** `ns_listSavedSearches` ➔ `ns_runSavedSearch` (when existing search covers data)
-3. **P3 Record Operations:** `ns_getRecordTypeMetadata` ➔ `ns_getRecord` / `ns_createRecord` / `ns_updateRecord`
-4. **P4 SuiteQL (Last Resort):** `ns_getSuiteQLMetadata` ➔ `ns_runCustomSuiteQL`
+1. **P0 Developer Inspection & Diagnostics:**
+   - `netsuite_get_record_definition`: Verify official standard fields across 272 record types.
+   - `netsuite_inspect_record`: Inspect live record details, custom fields (`custbody_*`, `custrecord_*`), and sublists.
+   - `netsuite_get_system_notes`: Audit field change history and author notes.
+   - `netsuite_get_script_logs`: Inspect script execution errors and stack traces.
+2. **P1 Standard Reports:** `ns_listAllReports` ➔ `ns_runReport` (for financial/functional reporting)
+3. **P2 Saved Searches:** `ns_listSavedSearches` ➔ `ns_runSavedSearch` (when existing search covers data)
+4. **P3 Record Operations:** `ns_getRecordTypeMetadata` ➔ `ns_getRecord` / `ns_createRecord` / `ns_updateRecord`
+5. **P4 SuiteQL (Querying Data):**
+   - First check curated templates: `netsuite_get_query_template` (golden patterns for lines, lineage, stock, etc.)
+   - If writing custom SQL: `ns_getSuiteQLMetadata` ➔ `ns_runCustomSuiteQL`
+6. **P5 SuiteCloud File Upload:** `netsuite_suitecloud_upload` (strictly following the 🔒 Two-Phase Confirmation Gate)
+
 
 ### ⚡ Parallel Batch Execution Mandate (`netsuite_batch_execute`)
 - **MANDATORY FOR MULTI-ITEM OPERATIONS:** Whenever querying or operating on **≥ 2 independent items** in a turn (e.g. multiple record IDs, multiple table schemas, multiple record links, or independent SuiteQL queries), you **MUST call `netsuite_batch_execute`** with the array of tasks to execute concurrently, instead of firing separate single-tool calls serially.

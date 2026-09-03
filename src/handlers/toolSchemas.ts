@@ -138,6 +138,148 @@ export const GetScriptLogsArgsSchema = z.object({
 });
 export type GetScriptLogsArgs = z.infer<typeof GetScriptLogsArgsSchema>;
 
+export const InspectRecordArgsSchema = z.object({
+	recordType: z
+		.string()
+		.trim()
+		.min(1, "recordType is required")
+		.toLowerCase()
+		.describe(
+			"Record type (e.g. salesorder, invoice, customer, item, customrecord_xxx).",
+		),
+	recordId: z
+		.string()
+		.trim()
+		.min(1, "recordId is required")
+		.describe(
+			"Record internal numeric ID (e.g. '12345') or document number / tranid (e.g. 'SO1002').",
+		),
+	includeLines: z
+		.boolean()
+		.optional()
+		.default(true)
+		.describe("Whether to include line item details (default: true)."),
+	nonEmptyOnly: z
+		.boolean()
+		.optional()
+		.default(true)
+		.describe(
+			"Whether to filter out null/empty fields to keep output compact and clean (default: true).",
+		),
+});
+export type InspectRecordArgs = z.infer<typeof InspectRecordArgsSchema>;
+
+export const GetRecordDefinitionArgsSchema = z.object({
+	recordType: z
+		.string()
+		.trim()
+		.min(1, "recordType is required")
+		.toLowerCase()
+		.describe(
+			"Record type name (e.g. salesorder, customer, item, invoice, vendor).",
+		),
+	keyword: z
+		.string()
+		.trim()
+		.optional()
+		.describe("Optional keyword to filter field names, labels, or help text."),
+});
+export type GetRecordDefinitionArgs = z.infer<
+	typeof GetRecordDefinitionArgsSchema
+>;
+
+export const GetQueryTemplateArgsSchema = z.object({
+	templateId: z
+		.string()
+		.trim()
+		.optional()
+		.describe(
+			"Specific template ID (e.g. 'transaction_lines', 'transaction_lineage_downstream', 'multi_location_stock', 'script_error_logs', 'system_notes_standalone', 'gl_impact_lines').",
+		),
+	category: z
+		.enum([
+			"transactions",
+			"inventory",
+			"system_debug",
+			"accounting",
+			"relationships",
+		])
+		.optional()
+		.describe("Filter templates by domain category."),
+	search: z
+		.string()
+		.trim()
+		.optional()
+		.describe(
+			"Search keyword across template names, descriptions, and SQL patterns.",
+		),
+});
+export type GetQueryTemplateArgs = z.infer<typeof GetQueryTemplateArgsSchema>;
+
+export const GetSystemNotesArgsSchema = z.object({
+	recordId: z
+		.string()
+		.trim()
+		.min(1, "recordId is required")
+		.describe("Record internal ID or document number (tranid)."),
+	recordType: z
+		.string()
+		.trim()
+		.toLowerCase()
+		.optional()
+		.describe(
+			"Optional record type (e.g. salesorder, invoice, customer). Helps resolve tranid.",
+		),
+	limit: z
+		.number()
+		.int()
+		.optional()
+		.transform((v) => (v !== undefined ? Math.min(Math.max(v, 1), 100) : 30))
+		.describe(
+			"Maximum number of system notes to return. Default: 30, Max: 100.",
+		),
+});
+export type GetSystemNotesArgs = z.infer<typeof GetSystemNotesArgsSchema>;
+
+export const SuitecloudUploadArgsSchema = z.object({
+	paths: z
+		.string()
+		.trim()
+		.min(1, "paths is required")
+		.describe(
+			"File Cabinet path(s) to upload (e.g. '/SuiteScripts/my_script.js').",
+		),
+	projectPath: z
+		.string()
+		.trim()
+		.optional()
+		.describe(
+			"Optional path to the SDF project root directory. Defaults to detecting upwards from the current directory.",
+		),
+	confirmed: z
+		.boolean()
+		.optional()
+		.default(false)
+		.describe(
+			"Confirmation flag. Must be explicitly set to true by the user after reviewing the preview.",
+		),
+	confirmationToken: z
+		.string()
+		.trim()
+		.optional()
+		.describe(
+			"One-time security token returned by the preview step. Required when confirmed is true.",
+		),
+	allowProduction: z
+		.boolean()
+		.optional()
+		.default(false)
+		.describe(
+			"Safety flag to allow upload to production accounts. Must be explicitly true if target account is production.",
+		),
+});
+export type SuitecloudUploadArgs = z.infer<typeof SuitecloudUploadArgsSchema>;
+
 // ---------------------------------------------------------------------------
 // Static Tool Schema Definitions (local tools)
 // ---------------------------------------------------------------------------
@@ -303,6 +445,154 @@ export const SCRIPT_LOGS_TOOL = {
 	},
 };
 
+export const INSPECT_RECORD_TOOL = {
+	name: "netsuite_inspect_record",
+	description:
+		"Deeply inspect a real NetSuite record's populated fields and line items in the current environment. Eliminates null/empty noise, separates system header fields from custom fields (custbody_*, custcol_*, custrecord_*), and formats a clean developer-friendly overview. Ideal for writing SuiteScript and SuiteQL.",
+	inputSchema: {
+		type: "object" as const,
+		properties: {
+			recordType: {
+				type: "string",
+				description:
+					"Record type (e.g. salesorder, invoice, customer, item, purchaseorder, customrecord_xxx).",
+			},
+			recordId: {
+				type: "string",
+				description:
+					"Record internal numeric ID (e.g. '12345') or document number / tranid (e.g. 'SO1002').",
+			},
+			includeLines: {
+				type: "boolean",
+				description: "Whether to include line item details (default: true).",
+			},
+			nonEmptyOnly: {
+				type: "boolean",
+				description:
+					"Whether to filter out null/empty fields to keep output compact and clean (default: true).",
+			},
+		},
+		required: ["recordType", "recordId"],
+	},
+};
+
+export const GET_RECORD_DEFINITION_TOOL = {
+	name: "netsuite_get_record_definition",
+	description:
+		"Lookup official standard field definitions, types, required flags, and help texts for 272 NetSuite record types from Oracle SuiteScript Records Reference. Zero guesswork.",
+	inputSchema: {
+		type: "object" as const,
+		properties: {
+			recordType: {
+				type: "string",
+				description:
+					"Record type name (e.g. salesorder, customer, item, invoice, vendor).",
+			},
+			keyword: {
+				type: "string",
+				description:
+					"Optional keyword to filter field names, labels, or help text.",
+			},
+		},
+		required: ["recordType"],
+	},
+};
+
+export const GET_QUERY_TEMPLATE_TOOL = {
+	name: "netsuite_get_query_template",
+	description:
+		"Get verified, production-ready SuiteQL query templates sourced from Oracle SAFE Guide 2025.2 and Tim Dietrich Query Library. Avoids common pitfalls like missing mainline='F', joining SystemNote, or table hallucination.",
+	inputSchema: {
+		type: "object" as const,
+		properties: {
+			templateId: {
+				type: "string",
+				description:
+					"Specific template ID (e.g. 'transaction_lines', 'transaction_lineage_downstream', 'multi_location_stock', 'script_error_logs', 'system_notes_standalone', 'gl_impact_lines').",
+			},
+			category: {
+				type: "string",
+				enum: [
+					"transactions",
+					"inventory",
+					"system_debug",
+					"accounting",
+					"relationships",
+				],
+				description: "Filter templates by domain category.",
+			},
+			search: {
+				type: "string",
+				description:
+					"Search keyword across template names, descriptions, and SQL patterns.",
+			},
+		},
+	},
+};
+
+export const GET_SYSTEM_NOTES_TOOL = {
+	name: "netsuite_get_system_notes",
+	description:
+		"Investigate audit trail and field modification history for a specific record. Uses high-performance standalone query adhering to SAFE Guide Pitfall 11 to prevent query timeouts. Identifies who changed what, when, and old vs new values.",
+	inputSchema: {
+		type: "object" as const,
+		properties: {
+			recordId: {
+				type: "string",
+				description: "Record internal ID or document number (tranid).",
+			},
+			recordType: {
+				type: "string",
+				description:
+					"Optional record type (e.g. salesorder, invoice, customer).",
+			},
+			limit: {
+				type: "integer",
+				description:
+					"Maximum number of system notes to return. Default: 30, Max: 100.",
+			},
+		},
+		required: ["recordId"],
+	},
+};
+
+export const SUITECLOUD_UPLOAD_TOOL = {
+	name: "netsuite_suitecloud_upload",
+	description:
+		"Upload script or asset files to NetSuite File Cabinet using SuiteCloud CLI ('npx suitecloud file:upload'). " +
+		"🔒 MANDATORY USER CONFIRMATION GATE: Calling without confirmed=true generates a safety preview with local file details, target account verification, and a 5-minute single-use confirmation token. Execution strictly requires confirmed=true and the valid token.",
+	inputSchema: {
+		type: "object" as const,
+		properties: {
+			paths: {
+				type: "string",
+				description:
+					"File Cabinet path to upload (e.g. '/SuiteScripts/my_script.js').",
+			},
+			projectPath: {
+				type: "string",
+				description:
+					"Optional SDF project root path. Auto-detected if omitted.",
+			},
+			confirmed: {
+				type: "boolean",
+				description:
+					"Must be true after user explicitly confirms upload in chat.",
+			},
+			confirmationToken: {
+				type: "string",
+				description: "Security token returned by the preview step.",
+			},
+			allowProduction: {
+				type: "boolean",
+				description:
+					"Explicit permission required if uploading to a production account.",
+			},
+		},
+		required: ["paths"],
+	},
+};
+
 // ---------------------------------------------------------------------------
 // Tool description enhancement suffixes
 // ---------------------------------------------------------------------------
@@ -407,4 +697,9 @@ export const LOCAL_TOOLS = [
 	STATUS_TOOL,
 	BATCH_EXECUTE_TOOL,
 	SCRIPT_LOGS_TOOL,
+	INSPECT_RECORD_TOOL,
+	GET_RECORD_DEFINITION_TOOL,
+	GET_QUERY_TEMPLATE_TOOL,
+	GET_SYSTEM_NOTES_TOOL,
+	SUITECLOUD_UPLOAD_TOOL,
 ];

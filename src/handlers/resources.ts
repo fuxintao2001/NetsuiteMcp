@@ -2,6 +2,8 @@ import fs from "node:fs/promises";
 import { basename, join } from "node:path";
 import type { Server } from "@modelcontextprotocol/server";
 import { getSkillsDir } from "../utils/environment.js";
+import { recordsReferenceService } from "../utils/recordsReference.js";
+import { SUITEQL_TEMPLATES } from "../utils/suiteqlTemplates.js";
 
 // ---------------------------------------------------------------------------
 // Helper: Parse YAML frontmatter simply
@@ -78,6 +80,21 @@ export function registerResourceHandlers(
 					"query patterns like ScriptNote log queries.",
 				mimeType: "text/markdown",
 			},
+			{
+				uri: "netsuite://queries/golden-templates",
+				name: "Curated SuiteQL Query Template Library",
+				description:
+					"Production-ready SuiteQL templates from Oracle SAFE Guide and Tim Dietrich. " +
+					"Includes transaction lines, lineage, multi-location stock, script error logs, and system notes.",
+				mimeType: "text/markdown",
+			},
+			{
+				uri: "netsuite://records/reference",
+				name: "Oracle NetSuite Official 272 Records Definition Index",
+				description:
+					"Index of all 272 standard NetSuite record types available in SuiteScript records reference.",
+				mimeType: "text/markdown",
+			},
 		];
 
 		const skillsDir = getSkillsDir(projectRoot);
@@ -142,6 +159,51 @@ export function registerResourceHandlers(
 					],
 				};
 			}
+		}
+
+		if (uri === "netsuite://queries/golden-templates") {
+			let md = `# Curated SuiteQL Query Template Library\n\n`;
+			md += `Sourced from Oracle SAFE Guide (2025.2) and Tim Dietrich SuiteQL Library.\n\n`;
+			for (const t of SUITEQL_TEMPLATES) {
+				md += `## ${t.name} (\`${t.id}\`)\n`;
+				md += `**Category**: \`${t.category}\` | **Source**: ${t.officialSource}\n\n`;
+				md += `> ${t.description}\n\n`;
+				md += `\`\`\`sql\n${t.sqlTemplate}\n\`\`\`\n\n`;
+				md += `### Best Practices:\n`;
+				for (const bp of t.bestPractices) {
+					md += `- ${bp}\n`;
+				}
+				md += `\n---\n\n`;
+			}
+
+			return {
+				contents: [
+					{
+						uri,
+						mimeType: "text/markdown",
+						text: md,
+					},
+				],
+			};
+		}
+
+		if (uri === "netsuite://records/reference") {
+			const types = recordsReferenceService.listRecordTypes();
+			let md = `# Oracle NetSuite Official 272 Records Definition Index\n\n`;
+			md += `Total records available: **${types.length}**\n\n`;
+			md += `Use the tool \`netsuite_get_record_definition\` with \`{ recordType: '...' }\` to view complete field metadata for any type below.\n\n`;
+			md += `### Supported Record Types:\n`;
+			md += types.map((t) => `- \`${t}\``).join("\n");
+
+			return {
+				contents: [
+					{
+						uri,
+						mimeType: "text/markdown",
+						text: md,
+					},
+				],
+			};
 		}
 
 		if (uri.startsWith("netsuite://skills/")) {

@@ -777,6 +777,123 @@ describe("MCP Handler Wires", () => {
 				expect(res.content[0].text).toContain("Failed to query script logs");
 			});
 		});
+
+		describe("Developer Tools Wiring", () => {
+			it("should handle netsuite_get_record_definition successfully", async () => {
+				const callFn = registeredHandlers.get("tools/call");
+				const res = await callFn?.({
+					params: {
+						name: "netsuite_get_record_definition",
+						arguments: { recordType: "salesorder" },
+					},
+				});
+
+				expect(res.content[0].text).toContain("Official Records Definition");
+			});
+
+			it("should handle netsuite_get_query_template with templateId", async () => {
+				const callFn = registeredHandlers.get("tools/call");
+				const res = await callFn?.({
+					params: {
+						name: "netsuite_get_query_template",
+						arguments: { templateId: "transaction_lines" },
+					},
+				});
+
+				expect(res.content[0].text).toContain(
+					"SuiteQL Template: Transaction Line Items",
+				);
+				expect(res.content[0].text).toContain("tl.mainline = 'F'");
+			});
+
+			it("should handle netsuite_get_query_template list and search", async () => {
+				const callFn = registeredHandlers.get("tools/call");
+				const res = await callFn?.({
+					params: {
+						name: "netsuite_get_query_template",
+						arguments: { category: "transactions" },
+					},
+				});
+
+				expect(res.content[0].text).toContain("Curated SuiteQL Templates");
+				expect(res.content[0].text).toContain("transaction_lines");
+			});
+
+			it("should handle netsuite_inspect_record successfully", async () => {
+				const callFn = registeredHandlers.get("tools/call");
+				mockMCPTools.executeTool.mockResolvedValueOnce({
+					id: "12345",
+					tranid: "SO1002",
+					trandate: "2026-03-01",
+					custbody_test_flag: "T",
+					item: [{ item: "100", quantity: 2, custcol_test_col: "abc" }],
+				});
+
+				const res = await callFn?.({
+					params: {
+						name: "netsuite_inspect_record",
+						arguments: { recordType: "salesorder", recordId: "12345" },
+					},
+				});
+
+				expect(res.content[0].text).toContain("NetSuite Record Inspection");
+				expect(res.content[0].text).toContain("custbody_test_flag");
+				expect(res.content[0].text).toContain("Sublists & Lines Summary");
+			});
+
+			it("should handle netsuite_get_system_notes successfully", async () => {
+				const callFn = registeredHandlers.get("tools/call");
+				mockMCPTools.executeTool.mockResolvedValueOnce({
+					data: [
+						{
+							date: "2026-03-01 10:00:00",
+							field: "status",
+							oldvalue: "Pending Approval",
+							newvalue: "Pending Fulfillment",
+							author_name: "Admin User",
+							role_name: "Administrator",
+						},
+					],
+				});
+
+				const res = await callFn?.({
+					params: {
+						name: "netsuite_get_system_notes",
+						arguments: { recordId: "12345" },
+					},
+				});
+
+				expect(res.content[0].text).toContain("System Notes Audit Trail");
+				expect(res.content[0].text).toContain("Admin User");
+				expect(res.content[0].text).toContain("Pending Fulfillment");
+			});
+
+			it("should intercept upload without confirmation and return security preview token", async () => {
+				const callFn = registeredHandlers.get("tools/call");
+				mockOAuthManager.getAccountId.mockResolvedValueOnce("9260916_sb1");
+
+				// Create dummy file in testRoot
+				const dummyScript = path.join(testRoot, "dummy.js");
+				await fs.writeFile(dummyScript, "console.log('hello');");
+
+				const res = await callFn?.({
+					params: {
+						name: "netsuite_suitecloud_upload",
+						arguments: {
+							paths: dummyScript,
+							projectPath: testRoot,
+							confirmed: false,
+						},
+					},
+				});
+
+				expect(res.content[0].text).toContain(
+					"SuiteCloud File Upload Security Confirmation Required",
+				);
+				expect(res.content[0].text).toContain("Confirmation Token");
+				expect(res.content[0].text).toContain("No changes have been made");
+			});
+		});
 	});
 
 	describe("Resources Handler Wiring", () => {
@@ -797,6 +914,30 @@ describe("MCP Handler Wires", () => {
 
 			expect(res.contents[0].uri).toBe("netsuite://guides/suiteql");
 			expect(res.contents[0].text).toContain("SuiteQL Guidelines");
+		});
+
+		it("should read golden-templates resource successfully", async () => {
+			const readFn = registeredHandlers.get("resources/read");
+			const res = await readFn?.({
+				params: { uri: "netsuite://queries/golden-templates" },
+			});
+
+			expect(res.contents[0].uri).toBe("netsuite://queries/golden-templates");
+			expect(res.contents[0].text).toContain(
+				"Curated SuiteQL Query Template Library",
+			);
+		});
+
+		it("should read records/reference resource successfully", async () => {
+			const readFn = registeredHandlers.get("resources/read");
+			const res = await readFn?.({
+				params: { uri: "netsuite://records/reference" },
+			});
+
+			expect(res.contents[0].uri).toBe("netsuite://records/reference");
+			expect(res.contents[0].text).toContain(
+				"Official 272 Records Definition Index",
+			);
 		});
 	});
 });
