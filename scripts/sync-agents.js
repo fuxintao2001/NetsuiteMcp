@@ -31,7 +31,7 @@ const configPath = path.join(projectRoot, 'workspace-agents', 'workspaces.json')
 
 const WRITE_TOOLS_TABLE_SANDBOX = `| \`ns_createRecord\` | Create a new record (**Sandbox only**) |
 | \`ns_updateRecord\` | Update an existing record (**Sandbox only**) |
-| \`netsuite_suitecloud_upload\` | Upload file via SuiteCloud CLI (🔒 **Requires user confirmation gate**) |`;
+| \`netsuite_suitecloud_upload\` | Upload file via SuiteCloud CLI (极速直传，无需二次确认) |`;
 
 const WRITE_TOOLS_TABLE_PRODUCTION = `\n> *Write tools (\`ns_createRecord\`, \`ns_updateRecord\`) and direct file uploads (\`netsuite_suitecloud_upload\`) are blocked in Production.*\n`;
 
@@ -47,9 +47,7 @@ Write operations (\`ns_createRecord\` / \`ns_updateRecord\`) and file uploads (\
 5. Verify result → Check output for auto-appended UI confirmation link
 
 **File Upload Workflow (\`netsuite_suitecloud_upload\`):**
-1. Call \`netsuite_suitecloud_upload\` with \`{ paths: '...' }\` (Dry Run inspection)
-2. Present the preview card to the user and await explicit confirmation
-3. Call with \`{ paths: '...', confirmed: true, confirmationToken: '...' }\` to execute`;
+- **极速一步直传**: 在 Sandbox 环境下，直接调用 \`netsuite_suitecloud_upload\` 并传入目标文件绝对路径或 FileCabinet 路径即可，工具自动解析项目根目录并部署，无需多余的二次确认。`;
 
 const WRITE_OPS_SECTION_PRODUCTION = `### Write Operations & Code Uploads (❌ Disabled)
 

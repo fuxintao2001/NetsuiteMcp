@@ -90,16 +90,11 @@ Before writing or modifying ANY SuiteScript (2.1), SuiteFlow, or SDF XML:
 - Check record change history using `netsuite_get_system_notes` (standalone query avoiding timeouts).
 - Use standard MCP Prompts (`/prompt review_suitescript`, `/prompt debug_script_error`) to review governance budgets and analyze stack traces.
 
-### 3. 🔒 MANDATORY Two-Phase Confirmation Gate for File Upload (`netsuite_suitecloud_upload`)
-AI agents are **STRICTLY PROHIBITED** from executing `npx suitecloud file:upload` without explicit user consent:
-1. **Phase 1 (Preview & Intercept):**
-   - Call `netsuite_suitecloud_upload` with `paths` (leaving `confirmed: false`).
-   - The tool will perform a dry-run inspection of local file existence, size, target account, and generate a 5-minute single-use `confirmationToken`.
-   - Present the formatted execution preview card to the user in chat. **STOP calling tools and await user instruction.**
-2. **Phase 2 (User-Authorized Commit):**
-   - **ONLY** when the user explicitly replies "确认" / "proceed" in the chat, re-invoke `netsuite_suitecloud_upload` with `confirmed: true` and the `confirmationToken`.
-3. **Production Protection:**
-   - Direct file uploads to Production environments are hard-blocked by default. Uploading to Production requires explicit user instruction AND setting `allowProduction: true`.
+### 3. SuiteCloud File Upload (`netsuite_suitecloud_upload`)
+- **Sandbox 环境 (极简一步直传)**:
+  在 Sandbox 环境中，当用户发出文件上传请求时，AI 助手**直接调用** `netsuite_suitecloud_upload` 执行上传并回报部署结果，**禁止增加冗余的预览卡片与确认等待环节**。工具支持传入绝对文件路径或 File Cabinet 相对路径，会自动解析项目根目录。
+- **Production 生产环境 (严格安全拦截与两阶段门禁)**:
+  生产环境严禁直接上传。默认拦截；如需上传必须由用户明确指示，并显式设置 `allowProduction: true` 配合两阶段确认令牌（`confirmationToken`）完成门禁校验。
 
 ---
 
@@ -138,7 +133,7 @@ When encountering NetSuite authorization/permission errors (e.g., `INSUFFICIENT_
 5. **P4 SuiteQL (Querying Data):**
    - First check curated templates: `netsuite_get_query_template` (golden patterns for lines, lineage, stock, etc.)
    - If writing custom SQL: `ns_getSuiteQLMetadata` ➔ `ns_runCustomSuiteQL`
-6. **P5 SuiteCloud File Upload:** `netsuite_suitecloud_upload` (strictly following the 🔒 Two-Phase Confirmation Gate)
+6. **P5 SuiteCloud File Upload:** `netsuite_suitecloud_upload` (Sandbox 极速直传；Production 实施两阶段安全门禁)
 
 
 ### ⚡ Parallel Batch Execution Mandate (`netsuite_batch_execute`)

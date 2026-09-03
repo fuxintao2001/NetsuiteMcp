@@ -90,6 +90,39 @@ export class SuiteCloudRunnerService {
 	}
 
 	/**
+	 * Direct execution by confirmation token (e.g. from one-click browser link).
+	 */
+	async executeByToken(token: string): Promise<{
+		success: boolean;
+		message: string;
+		details?: UploadExecutionResult;
+		payload?: ConfirmationPayload;
+	}> {
+		this.cleanupExpiredTokens();
+		const record = this.pendingTokens.get(token);
+		if (!record) {
+			return {
+				success: false,
+				message:
+					"Confirmation token is invalid or has expired (valid for 5 minutes).",
+			};
+		}
+
+		// Consume immediately (single-use)
+		this.pendingTokens.delete(token);
+
+		const result = await this.executeUpload(record.projectPath, record.paths);
+		return {
+			success: result.success,
+			message: result.success
+				? "File uploaded successfully"
+				: "Upload command failed",
+			details: result,
+			payload: record,
+		};
+	}
+
+	/**
 	 * Search upwards for SDF project root containing manifest.xml or suitecloud.config.js
 	 */
 	findSdfProjectRoot(startDir: string): string | null {
@@ -110,22 +143,52 @@ export class SuiteCloudRunnerService {
 	}
 
 	/**
+	 * Normalize path to NetSuite FileCabinet format (e.g. '/SuiteScripts/foo.js').
+	 * Handles absolute local paths, paths containing 'FileCabinet/', or relative paths.
+	 */
+	normalizeFileCabinetPath(inputPath: string): string {
+		const normalized = inputPath.replace(/\\/g, "/").trim();
+		const fcIndex = normalized.indexOf("FileCabinet/");
+		if (fcIndex !== -1) {
+			const sub = normalized.substring(fcIndex + "FileCabinet/".length);
+			return sub.startsWith("/") ? sub : `/${sub}`;
+		}
+		if (
+			normalized.startsWith("/SuiteScripts") ||
+			normalized.startsWith("/Templates") ||
+			normalized.startsWith("/Web Site Hosting Files")
+		) {
+			return normalized;
+		}
+		if (
+			normalized.startsWith("SuiteScripts/") ||
+			normalized.startsWith("Templates/") ||
+			normalized.startsWith("Web Site Hosting Files/")
+		) {
+			return `/${normalized}`;
+		}
+		return normalized.startsWith("/") ? normalized : `/${normalized}`;
+	}
+
+	/**
 	 * Inspect local file mapped to the File Cabinet path
 	 */
 	inspectLocalFile(
 		projectRoot: string,
 		fileCabinetPath: string,
 	): FileInspectionResult {
-		const cleanPath = fileCabinetPath.startsWith("/")
-			? fileCabinetPath.slice(1)
-			: fileCabinetPath;
+		const normFcPath = this.normalizeFileCabinetPath(fileCabinetPath);
+		const cleanPath = normFcPath.startsWith("/")
+			? normFcPath.slice(1)
+			: normFcPath;
 
 		const candidates = [
+			path.isAbsolute(fileCabinetPath) ? fileCabinetPath : null,
 			path.join(projectRoot, "src", "FileCabinet", cleanPath),
 			path.join(projectRoot, "FileCabinet", cleanPath),
 			path.join(projectRoot, cleanPath),
-			path.resolve(fileCabinetPath),
-		];
+			path.resolve(projectRoot, fileCabinetPath),
+		].filter(Boolean) as string[];
 
 		for (const candidate of candidates) {
 			if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {

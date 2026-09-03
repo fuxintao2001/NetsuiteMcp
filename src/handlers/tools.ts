@@ -4,6 +4,7 @@ import {
 	ProtocolErrorCode,
 	type Server,
 } from "@modelcontextprotocol/server";
+import path from "node:path";
 import type { NetSuiteMCPTools } from "../mcp/tools.js";
 import type { OAuthManager } from "../oauth/manager.js";
 import { processParallelBatch } from "../utils/batchProcessor.js";
@@ -613,6 +614,7 @@ async function handleSuitecloudUpload(
 	const {
 		paths,
 		projectPath: customProjectPath,
+		dryRun,
 		confirmed,
 		confirmationToken,
 		allowProduction,
@@ -621,8 +623,21 @@ async function handleSuitecloudUpload(
 	const currentAccountId = (await oauthManager.getAccountId()) || "UNKNOWN";
 	const isProd = !isSandboxAccount(currentAccountId);
 
-	// Resolve project directory
-	const startDir = customProjectPath || defaultProjectRoot;
+	// Normalize FileCabinet path
+	const normalizedFcPath =
+		suitecloudRunnerService.normalizeFileCabinetPath(paths);
+
+	// Resolve project directory: if not specified and paths is absolute, try detecting upwards
+	let startDir = customProjectPath;
+	if (!startDir) {
+		if (path.isAbsolute(paths)) {
+			startDir =
+				suitecloudRunnerService.findSdfProjectRoot(path.dirname(paths)) ||
+				defaultProjectRoot;
+		} else {
+			startDir = defaultProjectRoot;
+		}
+	}
 	const resolvedProjectRoot =
 		suitecloudRunnerService.findSdfProjectRoot(startDir) || startDir;
 
@@ -640,70 +655,79 @@ async function handleSuitecloudUpload(
 		);
 	}
 
-	// Safety check 2: Production environment block
-	if (isProd && !allowProduction) {
-		return textResult(
-			`🚨 **CRITICAL PRODUCTION SAFETY BLOCK**\n\n` +
-				`Target NetSuite account is **PRODUCTION** (\`${currentAccountId}\`).\n` +
-				`Direct file upload to production via MCP is blocked to prevent accidental overwrites.\n\n` +
-				`If you are 100% sure and authorized to upload to Production, you must explicitly set \`allowProduction: true\` alongside \`confirmed: true\`.`,
-			true,
+	const fileSizeKb =
+		inspection.sizeBytes !== undefined
+			? (inspection.sizeBytes / 1024).toFixed(2)
+			: "Unknown";
+
+	// Safety check 2: Production environment block & two-phase confirmation gate
+	if (isProd) {
+		if (!allowProduction) {
+			return textResult(
+				`🚨 **CRITICAL PRODUCTION SAFETY BLOCK**\n\n` +
+					`Target NetSuite account is **PRODUCTION** (\`${currentAccountId}\`).\n` +
+					`Direct file upload to production via MCP is blocked to prevent accidental overwrites.\n\n` +
+					`If you are 100% sure and authorized to upload to Production, you must explicitly set \`allowProduction: true\` alongside \`confirmed: true\`.`,
+				true,
+			);
+		}
+
+		if (!confirmed || !confirmationToken) {
+			const token = suitecloudRunnerService.generateToken({
+				paths: normalizedFcPath,
+				accountId: currentAccountId,
+				projectPath: resolvedProjectRoot,
+			});
+
+			let previewMd = `## 🔒 SuiteCloud Production File Upload Security Confirmation Required\n\n`;
+			previewMd += `An upload request to **PRODUCTION** has been initiated. To prevent unintended code changes or overwrites, **your explicit confirmation is required** before executing:\n\n`;
+			previewMd += `### 📋 Execution Details\n`;
+			previewMd += `| Parameter | Value |\n|---|---|\n`;
+			previewMd += `| **File Cabinet Path** | \`${normalizedFcPath}\` |\n`;
+			previewMd += `| **Local File Location** | \`${inspection.localFullPath}\` (${fileSizeKb} KB) |\n`;
+			previewMd += `| **Target Account** | \`${currentAccountId.toUpperCase()}\` (🚨 PRODUCTION) |\n`;
+			previewMd += `| **SDF Project Root** | \`${resolvedProjectRoot}\` |\n`;
+			previewMd += `| **Command to Run** | \`npx suitecloud file:upload --paths "${normalizedFcPath}"\` |\n\n`;
+			previewMd += `### 🔘 生产环境授权确认（可直接点击下方链接，无需手动输入）：\n`;
+			previewMd += `👉 **[【👉 点击此处立即授权并执行上传 (Click to Confirm Upload)】](http://localhost:3000/confirm-upload?token=${token})**\n\n`;
+			previewMd += `*(在 IDE 或浏览器中点击上方链接，后台将立即执行上传并返回结果；或者直接在下方的确认弹窗中选择同意)*\n\n`;
+			previewMd += `*(No changes have been made to your NetSuite account yet)*`;
+
+			return textResult(previewMd);
+		}
+
+		// Phase 2 in Production: Validate token
+		const tokenValidation = suitecloudRunnerService.consumeToken(
+			confirmationToken,
+			{
+				paths: normalizedFcPath,
+				accountId: currentAccountId,
+			},
 		);
-	}
 
-	// Phase 1: If not confirmed or missing token, generate preview and wait for explicit confirmation
-	if (!confirmed || !confirmationToken) {
-		const token = suitecloudRunnerService.generateToken({
-			paths,
-			accountId: currentAccountId,
-			projectPath: resolvedProjectRoot,
-		});
-
-		const fileSizeKb =
-			inspection.sizeBytes !== undefined
-				? (inspection.sizeBytes / 1024).toFixed(2)
-				: "Unknown";
-		const envType = isProd ? "🚨 PRODUCTION" : "🛡️ SANDBOX";
-
-		let previewMd = `## 🔒 SuiteCloud File Upload Security Confirmation Required\n\n`;
-		previewMd += `An upload request has been initiated. To prevent unintended code changes or overwrites, **your explicit confirmation is required** before executing:\n\n`;
-		previewMd += `### 📋 Execution Details\n`;
+		if (!tokenValidation.valid) {
+			return textResult(
+				`❌ Confirmation verification failed: ${tokenValidation.reason}\n\n` +
+					`Please re-run without 'confirmed' to generate a fresh confirmation token.`,
+				true,
+			);
+		}
+	} else if (dryRun) {
+		// In Sandbox: optional preview if dryRun is true
+		let previewMd = `## 🔍 SuiteCloud File Upload Preview (Dry Run)\n\n`;
 		previewMd += `| Parameter | Value |\n|---|---|\n`;
-		previewMd += `| **File Cabinet Path** | \`${paths}\` |\n`;
+		previewMd += `| **File Cabinet Path** | \`${normalizedFcPath}\` |\n`;
 		previewMd += `| **Local File Location** | \`${inspection.localFullPath}\` (${fileSizeKb} KB) |\n`;
-		previewMd += `| **Target Account** | \`${currentAccountId.toUpperCase()}\` (${envType}) |\n`;
+		previewMd += `| **Target Account** | \`${currentAccountId.toUpperCase()}\` (🛡️ SANDBOX) |\n`;
 		previewMd += `| **SDF Project Root** | \`${resolvedProjectRoot}\` |\n`;
-		previewMd += `| **Command to Run** | \`npx suitecloud file:upload --paths "${paths}"\` |\n\n`;
-		previewMd += `### 🛑 Security Gate Instructions\n`;
-		previewMd += `- **Please review the file path and target account carefully.**\n`;
-		previewMd += `- To confirm and execute, please reply with **"确认"** or tell the assistant to proceed.\n`;
-		previewMd += `- Confirmation Token (valid for 5 minutes): \`${token}\`\n\n`;
-		previewMd += `*(No changes have been made to your NetSuite account)*`;
-
+		previewMd += `| **Command to Run** | \`npx suitecloud file:upload --paths "${normalizedFcPath}"\` |\n`;
 		return textResult(previewMd);
 	}
 
-	// Phase 2: User has confirmed! Validate token first.
-	const tokenValidation = suitecloudRunnerService.consumeToken(
-		confirmationToken,
-		{
-			paths,
-			accountId: currentAccountId,
-		},
-	);
-
-	if (!tokenValidation.valid) {
-		return textResult(
-			`❌ Confirmation verification failed: ${tokenValidation.reason}\n\n` +
-				`Please re-run without 'confirmed' to generate a fresh confirmation token.`,
-			true,
-		);
-	}
-
-	// Execute the actual upload via CLI
+	// In Sandbox (or verified Production), execute the upload directly!
 	const execResult = await suitecloudRunnerService.executeUpload(
 		resolvedProjectRoot,
-		paths,
+		normalizedFcPath,
 	);
 
 	if (!execResult.success) {
@@ -712,12 +736,12 @@ async function handleSuitecloudUpload(
 		errorMd += `💡 **Troubleshooting Tips:**\n`;
 		errorMd += `1. Ensure you have authenticated with SuiteCloud CLI (\`npx suitecloud account:setup\` or manageauth).\n`;
 		errorMd += `2. Ensure the active SuiteCloud auth ID matches account \`${currentAccountId}\`.\n`;
-		errorMd += `3. Check that the path \`${paths}\` is registered in \`deploy.xml\` or FileCabinet structure.`;
+		errorMd += `3. Check that the path \`${normalizedFcPath}\` is registered in \`deploy.xml\` or FileCabinet structure.`;
 		return textResult(errorMd, true);
 	}
 
 	let successMd = `✅ **SuiteCloud File Upload Succeeded (Time: ${execResult.executionTimeMs}ms)**\n\n`;
-	successMd += `- **Uploaded Path**: \`${paths}\`\n`;
+	successMd += `- **Uploaded Path**: \`${normalizedFcPath}\`\n`;
 	successMd += `- **Target Account**: \`${currentAccountId.toUpperCase()}\`\n`;
 	successMd += `- **Local File**: \`${inspection.localFullPath}\`\n\n`;
 	if (execResult.stdout.trim().length > 0) {

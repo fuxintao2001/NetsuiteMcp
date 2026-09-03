@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { suitecloudRunnerService } from "../utils/suitecloudRunner.js";
 import { registerResourceHandlers } from "./resources.js";
 import { registerToolHandlers } from "./tools.js";
 
@@ -868,7 +869,7 @@ describe("MCP Handler Wires", () => {
 				expect(res.content[0].text).toContain("Pending Fulfillment");
 			});
 
-			it("should intercept upload without confirmation and return security preview token", async () => {
+			it("should execute upload directly in sandbox without confirmation tokens", async () => {
 				const callFn = registeredHandlers.get("tools/call");
 				mockOAuthManager.getAccountId.mockResolvedValueOnce("9260916_sb1");
 
@@ -876,22 +877,101 @@ describe("MCP Handler Wires", () => {
 				const dummyScript = path.join(testRoot, "dummy.js");
 				await fs.writeFile(dummyScript, "console.log('hello');");
 
+				const execSpy = vi
+					.spyOn(suitecloudRunnerService, "executeUpload")
+					.mockResolvedValueOnce({
+						success: true,
+						stdout: "Upload complete.",
+						stderr: "",
+						executionTimeMs: 120,
+					});
+
 				const res = await callFn?.({
 					params: {
 						name: "netsuite_suitecloud_upload",
 						arguments: {
 							paths: dummyScript,
 							projectPath: testRoot,
-							confirmed: false,
+						},
+					},
+				});
+
+				expect(execSpy).toHaveBeenCalled();
+				expect(res.content[0].text).toContain(
+					"SuiteCloud File Upload Succeeded",
+				);
+				expect(res.content[0].text).toContain("9260916_SB1");
+				execSpy.mockRestore();
+			});
+
+			it("should return dry-run preview in sandbox when dryRun is true", async () => {
+				const callFn = registeredHandlers.get("tools/call");
+				mockOAuthManager.getAccountId.mockResolvedValueOnce("9260916_sb1");
+
+				const dummyScript = path.join(testRoot, "dummy_dry.js");
+				await fs.writeFile(dummyScript, "console.log('dry');");
+
+				const res = await callFn?.({
+					params: {
+						name: "netsuite_suitecloud_upload",
+						arguments: {
+							paths: dummyScript,
+							projectPath: testRoot,
+							dryRun: true,
 						},
 					},
 				});
 
 				expect(res.content[0].text).toContain(
-					"SuiteCloud File Upload Security Confirmation Required",
+					"SuiteCloud File Upload Preview (Dry Run)",
 				);
-				expect(res.content[0].text).toContain("Confirmation Token");
-				expect(res.content[0].text).toContain("No changes have been made");
+				expect(res.content[0].text).toContain("SANDBOX");
+			});
+
+			it("should block upload to production without allowProduction", async () => {
+				const callFn = registeredHandlers.get("tools/call");
+				mockOAuthManager.getAccountId.mockResolvedValueOnce("9260916");
+
+				const dummyScript = path.join(testRoot, "prod.js");
+				await fs.writeFile(dummyScript, "console.log('prod');");
+
+				const res = await callFn?.({
+					params: {
+						name: "netsuite_suitecloud_upload",
+						arguments: {
+							paths: dummyScript,
+							projectPath: testRoot,
+						},
+					},
+				});
+
+				expect(res.content[0].text).toContain(
+					"CRITICAL PRODUCTION SAFETY BLOCK",
+				);
+			});
+
+			it("should require confirmation token in production even with allowProduction", async () => {
+				const callFn = registeredHandlers.get("tools/call");
+				mockOAuthManager.getAccountId.mockResolvedValueOnce("9260916");
+
+				const dummyScript = path.join(testRoot, "prod_allow.js");
+				await fs.writeFile(dummyScript, "console.log('prod');");
+
+				const res = await callFn?.({
+					params: {
+						name: "netsuite_suitecloud_upload",
+						arguments: {
+							paths: dummyScript,
+							projectPath: testRoot,
+							allowProduction: true,
+						},
+					},
+				});
+
+				expect(res.content[0].text).toContain(
+					"SuiteCloud Production File Upload Security Confirmation Required",
+				);
+				expect(res.content[0].text).toContain("confirm-upload?token=");
 			});
 		});
 	});

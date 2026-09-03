@@ -247,28 +247,35 @@ export const SuitecloudUploadArgsSchema = z.object({
 		.trim()
 		.min(1, "paths is required")
 		.describe(
-			"File Cabinet path(s) to upload (e.g. '/SuiteScripts/my_script.js').",
+			"File Cabinet path or local file path to upload (e.g. '/SuiteScripts/my_script.js' or full local path).",
 		),
 	projectPath: z
 		.string()
 		.trim()
 		.optional()
 		.describe(
-			"Optional path to the SDF project root directory. Defaults to detecting upwards from the current directory.",
+			"Optional path to the SDF project root directory. Defaults to detecting upwards from paths or current directory.",
+		),
+	dryRun: z
+		.boolean()
+		.optional()
+		.default(false)
+		.describe(
+			"Optional dry-run flag. If true, generates execution preview without uploading.",
 		),
 	confirmed: z
 		.boolean()
 		.optional()
 		.default(false)
 		.describe(
-			"Confirmation flag. Must be explicitly set to true by the user after reviewing the preview.",
+			"Confirmation flag. In Production, must be explicitly true after reviewing the preview.",
 		),
 	confirmationToken: z
 		.string()
 		.trim()
 		.optional()
 		.describe(
-			"One-time security token returned by the preview step. Required when confirmed is true.",
+			"One-time security token returned by the preview step (required in Production).",
 		),
 	allowProduction: z
 		.boolean()
@@ -560,28 +567,33 @@ export const SUITECLOUD_UPLOAD_TOOL = {
 	name: "netsuite_suitecloud_upload",
 	description:
 		"Upload script or asset files to NetSuite File Cabinet using SuiteCloud CLI ('npx suitecloud file:upload'). " +
-		"🔒 MANDATORY USER CONFIRMATION GATE: Calling without confirmed=true generates a safety preview with local file details, target account verification, and a 5-minute single-use confirmation token. Execution strictly requires confirmed=true and the valid token.",
+		"In Sandbox, uploads execute directly without confirmation prompts. In Production, requires allowProduction=true and two-phase user confirmation for safety.",
 	inputSchema: {
 		type: "object" as const,
 		properties: {
 			paths: {
 				type: "string",
 				description:
-					"File Cabinet path to upload (e.g. '/SuiteScripts/my_script.js').",
+					"File Cabinet path or local file path to upload (e.g. '/SuiteScripts/my_script.js').",
 			},
 			projectPath: {
 				type: "string",
 				description:
 					"Optional SDF project root path. Auto-detected if omitted.",
 			},
+			dryRun: {
+				type: "boolean",
+				description:
+					"Optional. If true, inspects local file and returns execution preview without uploading.",
+			},
 			confirmed: {
 				type: "boolean",
 				description:
-					"Must be true after user explicitly confirms upload in chat.",
+					"Required in Production after user confirms upload.",
 			},
 			confirmationToken: {
 				type: "string",
-				description: "Security token returned by the preview step.",
+				description: "Security token returned by the preview step in Production.",
 			},
 			allowProduction: {
 				type: "boolean",

@@ -88,4 +88,27 @@ describe("SuiteCloudRunnerService", () => {
 		// Clean up
 		fs.rmSync(tmpDir, { recursive: true, force: true });
 	});
+
+	it("should normalize file cabinet paths correctly", () => {
+		expect(
+			suitecloudRunnerService.normalizeFileCabinetPath(
+				"/Users/foo/project/src/FileCabinet/SuiteScripts/test.js",
+			),
+		).toBe("/SuiteScripts/test.js");
+		expect(
+			suitecloudRunnerService.normalizeFileCabinetPath(
+				"src/FileCabinet/SuiteScripts/sub/test.js",
+			),
+		).toBe("/SuiteScripts/sub/test.js");
+		expect(
+			suitecloudRunnerService.normalizeFileCabinetPath(
+				"SuiteScripts/test.js",
+			),
+		).toBe("/SuiteScripts/test.js");
+		expect(
+			suitecloudRunnerService.normalizeFileCabinetPath(
+				"/SuiteScripts/test.js",
+			),
+		).toBe("/SuiteScripts/test.js");
+	});
 });
