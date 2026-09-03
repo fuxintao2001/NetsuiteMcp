@@ -84,7 +84,9 @@ function generateKeepalivePlist(
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key>
-    <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin</string>
+    <string>/Library/Java/JavaVirtualMachines/zulu-17.jdk/Contents/Home/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/opt/homebrew/sbin</string>
+    <key>JAVA_HOME</key>
+    <string>/Library/Java/JavaVirtualMachines/zulu-17.jdk/Contents/Home</string>
   </dict>
 </dict>
 </plist>
@@ -121,7 +123,9 @@ function generateServerPlist(
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key>
-    <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin</string>
+    <string>/Library/Java/JavaVirtualMachines/zulu-17.jdk/Contents/Home/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/opt/homebrew/sbin</string>
+    <key>JAVA_HOME</key>
+    <string>/Library/Java/JavaVirtualMachines/zulu-17.jdk/Contents/Home</string>
     <key>NODE_ENV</key>
     <string>production</string>
   </dict>
