@@ -9,7 +9,10 @@ describe("SuiteCloudRunnerService", () => {
 		fs.mkdirSync(path.join(tmpDir, "src", "FileCabinet", "SuiteScripts"), {
 			recursive: true,
 		});
-		fs.writeFileSync(path.join(tmpDir, "suitecloud.config.js"), "module.exports={};");
+		fs.writeFileSync(
+			path.join(tmpDir, "suitecloud.config.js"),
+			"module.exports={};",
+		);
 		fs.writeFileSync(path.join(tmpDir, "project.json"), "{}");
 		fs.writeFileSync(path.join(tmpDir, "src", "manifest.xml"), "<manifest/>");
 
@@ -61,14 +64,10 @@ describe("SuiteCloudRunnerService", () => {
 			),
 		).toBe("/SuiteScripts/sub/test.js");
 		expect(
-			suitecloudRunnerService.normalizeFileCabinetPath(
-				"SuiteScripts/test.js",
-			),
+			suitecloudRunnerService.normalizeFileCabinetPath("SuiteScripts/test.js"),
 		).toBe("/SuiteScripts/test.js");
 		expect(
-			suitecloudRunnerService.normalizeFileCabinetPath(
-				"/SuiteScripts/test.js",
-			),
+			suitecloudRunnerService.normalizeFileCabinetPath("/SuiteScripts/test.js"),
 		).toBe("/SuiteScripts/test.js");
 	});
 });

@@ -24,7 +24,6 @@ export interface UploadExecutionResult {
  * SuiteCloud CLI execution and SDF file resolution service.
  */
 export class SuiteCloudRunnerService {
-
 	/**
 	 * Search upwards for SDF project root containing suitecloud.config.js, project.json, or manifest.xml
 	 */
@@ -205,7 +204,11 @@ export class SuiteCloudRunnerService {
 				executionTimeMs: Date.now() - startTime,
 			};
 		} catch (err: unknown) {
-			const execErr = err as { stdout?: string; stderr?: string; message?: string };
+			const execErr = err as {
+				stdout?: string;
+				stderr?: string;
+				message?: string;
+			};
 			const outputText = [execErr.stderr, execErr.stdout, execErr.message]
 				.filter(Boolean)
 				.map((s) => String(s).trim())

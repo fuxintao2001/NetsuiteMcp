@@ -945,9 +945,7 @@ describe("MCP Handler Wires", () => {
 					},
 				});
 
-				expect(res.content[0].text).toContain(
-					"生产环境安全拦截",
-				);
+				expect(res.content[0].text).toContain("生产环境安全拦截");
 			});
 
 			it("should execute upload directly in production when allowProduction is true", async () => {
