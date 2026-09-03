@@ -57,6 +57,44 @@ function getPaths() {
 	};
 }
 
+function buildEnvironmentVariablesXml(
+	extraVars: Record<string, string> = {},
+): string {
+	const systemPaths = [
+		"/opt/homebrew/bin",
+		"/opt/homebrew/sbin",
+		"/usr/local/bin",
+		"/usr/bin",
+		"/bin",
+		"/usr/sbin",
+		"/sbin",
+	];
+	const currentPaths = process.env.PATH ? process.env.PATH.split(":") : [];
+	const mergedPathSet = new Set<string>();
+
+	for (const p of [...currentPaths, ...systemPaths]) {
+		if (p && p.trim().length > 0) {
+			mergedPathSet.add(p.trim());
+		}
+	}
+	const finalPath = Array.from(mergedPathSet).join(":");
+
+	let xml = "    <key>PATH</key>\n";
+	xml += `    <string>${finalPath}</string>\n`;
+
+	if (process.env.JAVA_HOME) {
+		xml += "    <key>JAVA_HOME</key>\n";
+		xml += `    <string>${process.env.JAVA_HOME}</string>\n`;
+	}
+
+	for (const [k, v] of Object.entries(extraVars)) {
+		xml += `    <key>${k}</key>\n`;
+		xml += `    <string>${v}</string>\n`;
+	}
+
+	return xml;
+}
+
 function generateKeepalivePlist(
 	nodePath: string,
 	scriptPath: string,
@@ -83,11 +121,7 @@ function generateKeepalivePlist(
   <string>${logPath}</string>
   <key>EnvironmentVariables</key>
   <dict>
-    <key>PATH</key>
-    <string>/Library/Java/JavaVirtualMachines/zulu-17.jdk/Contents/Home/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/opt/homebrew/sbin</string>
-    <key>JAVA_HOME</key>
-    <string>/Library/Java/JavaVirtualMachines/zulu-17.jdk/Contents/Home</string>
-  </dict>
+${buildEnvironmentVariablesXml()}  </dict>
 </dict>
 </plist>
 `;
@@ -122,13 +156,7 @@ function generateServerPlist(
   <string>${logPath}</string>
   <key>EnvironmentVariables</key>
   <dict>
-    <key>PATH</key>
-    <string>/Library/Java/JavaVirtualMachines/zulu-17.jdk/Contents/Home/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/opt/homebrew/sbin</string>
-    <key>JAVA_HOME</key>
-    <string>/Library/Java/JavaVirtualMachines/zulu-17.jdk/Contents/Home</string>
-    <key>NODE_ENV</key>
-    <string>production</string>
-  </dict>
+${buildEnvironmentVariablesXml({ NODE_ENV: "production" })}  </dict>
 </dict>
 </plist>
 `;

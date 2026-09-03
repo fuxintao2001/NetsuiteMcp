@@ -1,10 +1,6 @@
 import path from "node:path";
 import type { CallToolResult, Tool } from "@modelcontextprotocol/server";
-import {
-	ProtocolError,
-	ProtocolErrorCode,
-	type Server,
-} from "@modelcontextprotocol/server";
+import { ProtocolError, type Server } from "@modelcontextprotocol/server";
 import type { NetSuiteMCPTools } from "../mcp/tools.js";
 import type { OAuthManager } from "../oauth/manager.js";
 import { processParallelBatch } from "../utils/batchProcessor.js";
@@ -741,6 +737,11 @@ function normalizeStandardArgs(
 async function handleBatchExecute(
 	args: Record<string, unknown>,
 	deps: ToolHandlerDeps,
+	onProgress?: (
+		completed: number,
+		total: number,
+		message?: string,
+	) => Promise<void>,
 ): Promise<ToolResponse> {
 	const parsed = BatchExecuteArgsSchema.safeParse(args);
 	if (!parsed.success) {
@@ -752,7 +753,8 @@ async function handleBatchExecute(
 	const { tasks } = parsed.data;
 	const { mcpTools, oauthManager, resolveCustomRecordRectype } = deps;
 
-	const accountId = await oauthManager.getAccountId();
+	const accountId =
+		(await oauthManager.getAccountId()) || process.env.NETSUITE_ACCOUNT_ID;
 	const isSandbox = accountId ? isSandboxAccount(accountId) : false;
 
 	const batchResult = await processParallelBatch(
@@ -864,6 +866,16 @@ async function handleBatchExecute(
 			return parsedResult;
 		},
 		5,
+		async (completed, total, result) => {
+			if (onProgress) {
+				const task = tasks[result.index];
+				await onProgress(
+					completed,
+					total,
+					`Executed ${task?.toolName || "tool"} (${completed}/${total})`,
+				);
+			}
+		},
 	);
 
 	return textResult(
@@ -973,25 +985,88 @@ async function appendRecordLink(
 }
 
 // ---------------------------------------------------------------------------
-// Tool description enhancement helpers
+// Tool description & annotation enhancement helpers
 // ---------------------------------------------------------------------------
 
-/** Append suffix to a tool's description string. */
+/**
+ * Generate standard MCP tool annotations.
+ * - readOnlyHint: Indicates tool produces no side effects or data mutations.
+ * - destructiveHint: Indicates tool mutates or deletes data.
+ * - idempotentHint: Indicates calling repeatedly with identical arguments produces identical results.
+ */
+export function getToolAnnotations(name: string): Record<string, boolean> {
+	const READ_ONLY_TOOLS = new Set([
+		"ns_runCustomSuiteQL",
+		"ns_getRecord",
+		"ns_getRecordTypeMetadata",
+		"ns_getSuiteQLMetadata",
+		"ns_runReport",
+		"ns_listAllReports",
+		"ns_listSavedSearches",
+		"ns_runSavedSearch",
+		"ns_getSubsidiaries",
+		"ns_getAccountingBooks",
+		"ns_getAccountingContexts",
+		"ns_getNexusIds",
+		"netsuite_status",
+		"netsuite_get_record_link",
+		"netsuite_get_script_logs",
+		"netsuite_inspect_record",
+		"netsuite_get_record_definition",
+		"netsuite_get_query_template",
+		"netsuite_get_system_notes",
+	]);
+
+	const DESTRUCTIVE_TOOLS = new Set([
+		"ns_createRecord",
+		"ns_updateRecord",
+		"netsuite_suitecloud_upload",
+		"netsuite_logout",
+	]);
+
+	const IDEMPOTENT_TOOLS = new Set([
+		...READ_ONLY_TOOLS,
+		"netsuite_refresh_cache",
+		"netsuite_logout",
+	]);
+
+	const isReadOnly = READ_ONLY_TOOLS.has(name);
+	const isDestructive = DESTRUCTIVE_TOOLS.has(name);
+	const isIdempotent = IDEMPOTENT_TOOLS.has(name);
+
+	return {
+		readOnlyHint: isReadOnly,
+		...(isDestructive ? { destructiveHint: true } : {}),
+		...(isIdempotent ? { idempotentHint: true } : {}),
+	};
+}
+
+/** Append suffix to a tool's description string and attach MCP annotations. */
 function enhanceDescription(
 	tool: Record<string, unknown>,
 	suffix: string,
 ): Record<string, unknown> {
+	const toolName = (tool.name as string) || "";
 	const desc = (tool.description as string) || "";
-	return { ...tool, description: desc ? `${desc}${suffix}` : suffix };
+	const annotations = getToolAnnotations(toolName);
+	return {
+		...tool,
+		description: desc ? `${desc}${suffix}` : suffix,
+		annotations,
+	};
 }
 
-/** Enhance fetched NetSuite tool descriptions with SuiteQL rules and parameter-level guidance. */
+/** Enhance fetched NetSuite tool descriptions with SuiteQL rules, annotations and parameter-level guidance. */
 function enhanceToolDescriptions(
 	tools: Array<Record<string, unknown>>,
 ): Array<Record<string, unknown>> {
 	return tools.map((t) => {
+		const toolName = (t.name as string) || "";
+		const annotations = getToolAnnotations(toolName);
+		let enhanced: Record<string, unknown> = { ...t, annotations };
+
 		if (t.name === "ns_runCustomSuiteQL") {
-			const enhanced = enhanceDescription(t, SUITEQL_RULES_SUFFIX);
+			enhanced = enhanceDescription(enhanced, SUITEQL_RULES_SUFFIX);
 			if (enhanced.inputSchema && typeof enhanced.inputSchema === "object") {
 				const schema = { ...(enhanced.inputSchema as Record<string, unknown>) };
 				if (schema.properties && typeof schema.properties === "object") {
@@ -1010,7 +1085,7 @@ function enhanceToolDescriptions(
 			return enhanced;
 		}
 		if (t.name === "ns_getSuiteQLMetadata") {
-			const enhanced = enhanceDescription(t, METADATA_RULES_SUFFIX);
+			enhanced = enhanceDescription(enhanced, METADATA_RULES_SUFFIX);
 			if (enhanced.inputSchema && typeof enhanced.inputSchema === "object") {
 				const schema = { ...(enhanced.inputSchema as Record<string, unknown>) };
 				const props = {
@@ -1026,7 +1101,7 @@ function enhanceToolDescriptions(
 			}
 			return enhanced;
 		}
-		return t;
+		return enhanced;
 	});
 }
 
@@ -1106,6 +1181,32 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
 			(args || {}) as Record<string, unknown>,
 		);
 
+		const reqMeta = (
+			request.params as { _meta?: { progressToken?: string | number } }
+		)._meta;
+		const progressToken = reqMeta?.progressToken;
+
+		const reportProgress = async (
+			progress: number,
+			total?: number,
+			message?: string,
+		): Promise<void> => {
+			if (progressToken === undefined || progressToken === null) return;
+			try {
+				await server.notification({
+					method: "notifications/progress",
+					params: {
+						progressToken,
+						progress,
+						...(total !== undefined ? { total } : {}),
+						...(message ? { message } : {}),
+					},
+				});
+			} catch {
+				// Notification failure is non-fatal
+			}
+		};
+
 		try {
 			// --- Tools that do NOT require authentication ---
 			if (name === "netsuite_authenticate") {
@@ -1139,7 +1240,7 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
 				);
 			}
 			if (name === "netsuite_batch_execute") {
-				return await handleBatchExecute(safeArgs, deps);
+				return await handleBatchExecute(safeArgs, deps, reportProgress);
 			}
 			if (name === "netsuite_get_script_logs") {
 				return await handleGetScriptLogs(safeArgs, mcpTools);
@@ -1176,13 +1277,16 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
 				}
 			}
 
-			// --- Block write operations in production ---
+			// --- Dual-Gate Defense: Strictly block write operations in production ---
 			if (name === "ns_createRecord" || name === "ns_updateRecord") {
-				const accountId = await oauthManager.getAccountId();
-				if (accountId && !isSandboxAccount(accountId)) {
-					throw new ProtocolError(
-						ProtocolErrorCode.InvalidRequest,
-						`Write operations are disabled in production environments: ${name}`,
+				const accountId =
+					(await oauthManager.getAccountId()) ||
+					process.env.NETSUITE_ACCOUNT_ID;
+				if (!accountId || !isSandboxAccount(accountId)) {
+					return textResult(
+						`⛔ [Production Safety Violation] Operation '${name}' is strictly blocked in Production environment (${accountId || "unknown"}). ` +
+							`Record create and update operations are only permitted in Sandbox / Test environments (accounts containing '_SB' or 'TSTDRV').`,
+						true,
 					);
 				}
 			}
@@ -1191,8 +1295,26 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
 			let result: unknown;
 			let executeError: unknown = null;
 
+			if (name === "ns_runCustomSuiteQL") {
+				await reportProgress(1, 3, "Validating & optimizing SuiteQL query...");
+			}
+
 			try {
+				if (name === "ns_runCustomSuiteQL") {
+					await reportProgress(
+						2,
+						3,
+						"Executing SuiteQL query against NetSuite...",
+					);
+				}
 				result = await mcpTools.executeTool(name, safeArgs);
+				if (name === "ns_runCustomSuiteQL") {
+					await reportProgress(
+						3,
+						3,
+						"Formatting & slimming response payload...",
+					);
+				}
 			} catch (err: unknown) {
 				if (
 					name === "ns_getRecordTypeMetadata" ||

@@ -66,3 +66,23 @@ export function getSkillsDir(projectRoot?: string): string {
 	}
 	return globalPath;
 }
+
+/**
+ * Get standard configuration directory for NetSuite MCP (~/.config/netsuite-mcp).
+ */
+export function getDefaultConfigDir(): string {
+	if (process.env.NETSUITE_CONFIG_DIR) {
+		return path.resolve(process.env.NETSUITE_CONFIG_DIR);
+	}
+	return path.join(os.homedir(), ".config", "netsuite-mcp");
+}
+
+/**
+ * Get standard sessions storage directory (~/.config/netsuite-mcp/sessions).
+ */
+export function getDefaultSessionsDir(): string {
+	if (process.env.NETSUITE_SESSIONS_DIR) {
+		return path.resolve(process.env.NETSUITE_SESSIONS_DIR);
+	}
+	return path.join(getDefaultConfigDir(), "sessions");
+}

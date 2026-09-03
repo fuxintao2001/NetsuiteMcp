@@ -24,30 +24,46 @@ export async function processParallelBatch<TIn, TOut>(
 	items: TIn[],
 	taskFn: (item: TIn, index: number) => Promise<TOut>,
 	concurrency = 5,
+	onProgress?: (
+		completed: number,
+		total: number,
+		result: BatchTaskResult<TOut>,
+	) => void | Promise<void>,
 ): Promise<BatchRunResult<TOut>> {
 	const limit = pLimit(concurrency);
 	const startTime = Date.now();
+	let completedCount = 0;
 
 	const individualResults = await Promise.all(
 		items.map((item, index) =>
 			limit(async () => {
 				const itemStart = Date.now();
+				let taskResult: BatchTaskResult<TOut>;
 				try {
 					const res = await taskFn(item, index);
-					return {
+					taskResult = {
 						index,
 						success: true,
 						durationMs: Date.now() - itemStart,
 						result: res,
 					};
 				} catch (err: unknown) {
-					return {
+					taskResult = {
 						index,
 						success: false,
 						durationMs: Date.now() - itemStart,
 						error: err instanceof Error ? err.message : String(err),
 					};
 				}
+				completedCount++;
+				if (onProgress) {
+					try {
+						await onProgress(completedCount, items.length, taskResult);
+					} catch {
+						// Progress notification errors should not abort execution
+					}
+				}
+				return taskResult;
 			}),
 		),
 	);

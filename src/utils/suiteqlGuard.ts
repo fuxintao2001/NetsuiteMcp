@@ -1,9 +1,7 @@
-/**
- * SuiteQL Safety Checklist & Validation Guard.
- * Enforces read-only SELECT/WITH queries, prevents SQL injection hazards,
- * multi-statement execution, comments obfuscation, and DDL/DML mutation attempts
- * while respecting string literals (e.g. preventing false positives on 'DROP SHIPPING').
- */
+import pkg from "node-sql-parser";
+
+const { Parser } = pkg;
+const sqlParser = new Parser();
 
 export class SuiteQLValidationError extends Error {
 	constructor(message: string) {
@@ -136,7 +134,10 @@ export function hasPaginationClause(sqlQuery: string): boolean {
 }
 
 /**
- * Ensures a SuiteQL query has pagination. If missing, appends FETCH FIRST N ROWS ONLY.
+ * Ensures a SuiteQL query has pagination.
+ * If missing:
+ * - For UNION / compound queries: wraps safely in outer query `SELECT * FROM (...) WHERE ROWNUM <= N`
+ * - For standard SELECT queries: appends `FETCH FIRST N ROWS ONLY`
  */
 export function ensureSuiteQLPagination(
 	sqlQuery: string,
@@ -146,6 +147,26 @@ export function ensureSuiteQLPagination(
 	if (hasPaginationClause(trimmed)) {
 		return trimmed;
 	}
+
+	const { maskedSql } = maskStringLiterals(trimmed);
+
+	// Try parsing AST with node-sql-parser
+	try {
+		const ast = sqlParser.astify(trimmed);
+		if (ast && typeof ast === "object") {
+			const astObj = ast as unknown as Record<string, unknown>;
+			// Check if it is a compound query (UNION, UNION ALL, INTERSECT, etc.)
+			if (astObj.set_op || astObj._next) {
+				return `SELECT * FROM (${trimmed}) WHERE ROWNUM <= ${defaultLimit}`;
+			}
+		}
+	} catch {
+		// Fallback to masked regex analysis if AST parsing encounters dialect specifics (e.g. BUILTIN.DF)
+		if (/\bUNION\b/i.test(maskedSql)) {
+			return `SELECT * FROM (${trimmed}) WHERE ROWNUM <= ${defaultLimit}`;
+		}
+	}
+
 	return `${trimmed} FETCH FIRST ${defaultLimit} ROWS ONLY`;
 }
 

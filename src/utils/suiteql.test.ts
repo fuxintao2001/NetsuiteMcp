@@ -81,6 +81,15 @@ describe("SuiteQL, Search & Query Utilities", () => {
 				const alreadyHas = "SELECT id FROM customer WHERE ROWNUM <= 10";
 				expect(ensureSuiteQLPagination(alreadyHas, 50)).toBe(alreadyHas);
 			});
+
+			it("should safely wrap UNION compound queries with outer subquery pagination", () => {
+				const unionQuery =
+					"SELECT id FROM customer UNION ALL SELECT id FROM vendor";
+				const paginated = ensureSuiteQLPagination(unionQuery, 100);
+				expect(paginated).toBe(
+					"SELECT * FROM (SELECT id FROM customer UNION ALL SELECT id FROM vendor) WHERE ROWNUM <= 100",
+				);
+			});
 		});
 
 		describe("validateSuiteQL", () => {

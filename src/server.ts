@@ -1,6 +1,5 @@
 import "./utils/envLoader.js";
 import fs from "node:fs/promises";
-import path from "node:path";
 import { type ServerType, serve } from "@hono/node-server";
 import { createMcpHandler, Server } from "@modelcontextprotocol/server";
 import type { Context } from "hono";
@@ -12,92 +11,21 @@ import { registerToolHandlers } from "./handlers/tools.js";
 import { NetSuiteMCPTools } from "./mcp/tools.js";
 import { OAuthManager } from "./oauth/manager.js";
 import { cacheService } from "./utils/cache.js";
+import {
+	type AppAccountConfig,
+	type AppConfig,
+	loadAppConfig,
+	resolveSessionPath,
+} from "./utils/config.js";
 import { getKnownClientId } from "./utils/constants.js";
 import { resolveCustomRecordRectype } from "./utils/metadata.js";
 import { RedisCacheProvider } from "./utils/redisCacheProvider.js";
 import type { RedisLockProvider } from "./utils/redisLock.js";
 
-interface AccountConfig {
-	accountId: string;
-	clientId: string;
-	sessionPath: string;
-	callbackPort: number;
-}
-
-const ACCOUNT_CONFIGS: Record<string, AccountConfig> = {
-	"5848789": {
-		accountId: "5848789",
-		clientId:
-			process.env.NETSUITE_CLIENT_ID_5848789 ||
-			process.env.NETSUITE_CLIENT_ID ||
-			getKnownClientId("5848789") ||
-			"",
-		sessionPath:
-			process.env.NETSUITE_SESSION_PATH_5848789 ||
-			path.join(process.env.HOME || "", ".gemini/antigravity/sessions/5848789"),
-		callbackPort: 8080,
-	},
-	"5848789_sb1": {
-		accountId: "5848789-sb1",
-		clientId:
-			process.env.NETSUITE_CLIENT_ID_5848789_SB1 ||
-			process.env.NETSUITE_CLIENT_ID ||
-			getKnownClientId("5848789_sb1") ||
-			"",
-		sessionPath:
-			process.env.NETSUITE_SESSION_PATH_5848789_SB1 ||
-			path.join(
-				process.env.HOME || "",
-				".gemini/antigravity/sessions/5848789_sb1",
-			),
-		callbackPort: 8081,
-	},
-	"9260916": {
-		accountId: "9260916",
-		clientId:
-			process.env.NETSUITE_CLIENT_ID_9260916 ||
-			process.env.NETSUITE_CLIENT_ID ||
-			getKnownClientId("9260916") ||
-			"",
-		sessionPath:
-			process.env.NETSUITE_SESSION_PATH_9260916 ||
-			path.join(process.env.HOME || "", ".gemini/antigravity/sessions/9260916"),
-		callbackPort: 8082,
-	},
-	"9260916_sb1": {
-		accountId: "9260916-sb1",
-		clientId:
-			process.env.NETSUITE_CLIENT_ID_9260916_SB1 ||
-			process.env.NETSUITE_CLIENT_ID ||
-			getKnownClientId("9260916_sb1") ||
-			"",
-		sessionPath:
-			process.env.NETSUITE_SESSION_PATH_9260916_SB1 ||
-			path.join(
-				process.env.HOME || "",
-				".gemini/antigravity/sessions/9260916_sb1",
-			),
-		callbackPort: 8083,
-	},
-	"9260916_sb3": {
-		accountId: "9260916-sb3",
-		clientId:
-			process.env.NETSUITE_CLIENT_ID_9260916_SB3 ||
-			process.env.NETSUITE_CLIENT_ID ||
-			getKnownClientId("9260916_sb3") ||
-			"",
-		sessionPath:
-			process.env.NETSUITE_SESSION_PATH_9260916_SB3 ||
-			path.join(
-				process.env.HOME || "",
-				".gemini/antigravity/sessions/9260916_sb3",
-			),
-		callbackPort: 8084,
-	},
-};
-
 class NetSuiteHTTPServer {
 	public app: Hono;
+	public readonly appConfig: AppConfig;
+	public readonly accountConfigs: Record<string, AppAccountConfig>;
 	private serverInstance: ServerType | null = null;
 	private cacheProvider: RedisCacheProvider;
 	private handlers: Map<string, ReturnType<typeof createMcpHandler>> =
@@ -106,8 +34,10 @@ class NetSuiteHTTPServer {
 
 	private lockProvider: RedisLockProvider | null = null;
 
-	constructor() {
-		this.cacheProvider = new RedisCacheProvider();
+	constructor(configFilePath?: string) {
+		this.appConfig = loadAppConfig(configFilePath);
+		this.accountConfigs = this.appConfig.accounts;
+		this.cacheProvider = new RedisCacheProvider(this.appConfig.redisUrl);
 		this.app = new Hono();
 		this.setupRoutes();
 	}
@@ -117,7 +47,7 @@ class NetSuiteHTTPServer {
 		this.app.get("/health", (c: Context) => {
 			return c.json({
 				status: "ok",
-				accounts: Object.keys(ACCOUNT_CONFIGS),
+				accounts: Object.keys(this.accountConfigs),
 				redis: this.lockProvider ? "connected" : "disconnected",
 			});
 		});
@@ -133,28 +63,26 @@ class NetSuiteHTTPServer {
 
 			// Dynamic fallback for unconfigured account or lazy initialization
 			if (!handler) {
-				const configured = ACCOUNT_CONFIGS[accountKey];
+				const configured = this.accountConfigs[accountKey];
 				const envAccountId =
 					configured?.accountId ||
 					process.env.NETSUITE_ACCOUNT_ID ||
 					accountKey;
 				const clientId =
 					configured?.clientId ||
+					getKnownClientId(accountKey) ||
 					process.env.NETSUITE_CLIENT_ID ||
 					"default_client_id";
 				const sessionPath =
 					configured?.sessionPath ||
-					process.env.NETSUITE_SESSION_PATH ||
-					path.join(
-						process.env.HOME || "",
-						`.gemini/antigravity/sessions/${accountKey}`,
-					);
+					resolveSessionPath(accountKey, undefined, this.appConfig.sessionsDir);
 				const callbackPort =
 					configured?.callbackPort ||
-					parseInt(process.env.OAUTH_CALLBACK_PORT || "8080", 10);
+					this.appConfig.defaultCallbackPort ||
+					8080;
 
 				await fs.mkdir(sessionPath, { recursive: true });
-				const cfg: AccountConfig = {
+				const cfg: AppAccountConfig = {
 					accountId: envAccountId,
 					clientId,
 					sessionPath,
@@ -179,14 +107,14 @@ class NetSuiteHTTPServer {
 
 	private getOrCreateOAuthManager(
 		accountKey: string,
-		cfg: AccountConfig,
+		cfg: AppAccountConfig,
 		lockProvider: RedisLockProvider | null,
 	): OAuthManager {
 		let manager = this.oauthManagers.get(accountKey);
 		if (!manager) {
 			manager = new OAuthManager({
-				storagePath: cfg.sessionPath,
-				callbackPort: cfg.callbackPort,
+				...(cfg.sessionPath ? { storagePath: cfg.sessionPath } : {}),
+				...(cfg.callbackPort ? { callbackPort: cfg.callbackPort } : {}),
 				lockProvider: lockProvider,
 			});
 			// Start proactive token refresh scheduler in HTTP Server mode
@@ -199,7 +127,7 @@ class NetSuiteHTTPServer {
 
 	private createServerInstance(
 		accountKey: string,
-		cfg: AccountConfig,
+		cfg: AppAccountConfig,
 		lockProvider: RedisLockProvider | null,
 	): Server {
 		const oauthManager = this.getOrCreateOAuthManager(
@@ -304,8 +232,10 @@ class NetSuiteHTTPServer {
 		this.lockProvider = this.cacheProvider.createLockProvider();
 
 		// Pre-create McpHandlers and OAuthManagers for all configured accounts
-		for (const [key, cfg] of Object.entries(ACCOUNT_CONFIGS)) {
-			await fs.mkdir(cfg.sessionPath, { recursive: true });
+		for (const [key, cfg] of Object.entries(this.accountConfigs)) {
+			if (cfg.sessionPath) {
+				await fs.mkdir(cfg.sessionPath, { recursive: true });
+			}
 
 			// Initialize OAuthManager & start proactive refresh for pre-configured accounts
 			const manager = this.getOrCreateOAuthManager(key, cfg, this.lockProvider);
@@ -342,8 +272,15 @@ class NetSuiteHTTPServer {
 					`🚀 NetSuite MCP Streamable HTTP Server (Hono) running on http://localhost:${port}`,
 				);
 				console.error(`📡 Active endpoints:`);
-				for (const key of Object.keys(ACCOUNT_CONFIGS)) {
-					console.error(`   - http://localhost:${port}/mcp/${key}/sse`);
+				const keys = Object.keys(this.accountConfigs);
+				if (keys.length === 0) {
+					console.error(
+						"   (No pre-configured accounts. Dynamic /mcp/:accountId available)",
+					);
+				} else {
+					for (const key of keys) {
+						console.error(`   - http://localhost:${port}/mcp/${key}/sse`);
+					}
 				}
 			},
 		);

@@ -129,6 +129,28 @@ describe("MCP Handler Wires", () => {
 			expect(names).toContain("netsuite_get_record_link");
 		});
 
+		it("should attach standard MCP annotations to tools", async () => {
+			mockOAuthManager.getAccountId.mockResolvedValue("9260916-sb1");
+			const listFn = registeredHandlers.get("tools/list");
+
+			const result = await listFn?.();
+			const getRecordTool = result.tools.find(
+				(t: any) => t.name === "ns_getRecord",
+			);
+			const createRecordTool = result.tools.find(
+				(t: any) => t.name === "ns_createRecord",
+			);
+
+			expect(getRecordTool?.annotations).toEqual({
+				readOnlyHint: true,
+				idempotentHint: true,
+			});
+			expect(createRecordTool?.annotations).toEqual({
+				readOnlyHint: false,
+				destructiveHint: true,
+			});
+		});
+
 		it("should filter out write tools when in Production environment", async () => {
 			mockOAuthManager.getAccountId.mockResolvedValue("123456");
 			const listFn = registeredHandlers.get("tools/list");
@@ -139,6 +161,23 @@ describe("MCP Handler Wires", () => {
 			expect(names).not.toContain("ns_createRecord");
 			expect(names).not.toContain("ns_updateRecord");
 			expect(names).toContain("ns_getRecord");
+		});
+
+		it("should enforce Dual-Gate Defense on tools/call for write operations in Production", async () => {
+			mockOAuthManager.getAccountId.mockResolvedValue("123456"); // Production
+			const callFn = registeredHandlers.get("tools/call");
+
+			const res = await callFn?.({
+				params: {
+					name: "ns_createRecord",
+					arguments: { recordType: "customer" },
+				},
+			});
+
+			expect(res.isError).toBe(true);
+			expect(res.content[0].text).toContain(
+				"⛔ [Production Safety Violation] Operation 'ns_createRecord' is strictly blocked in Production environment",
+			);
 		});
 
 		it("should return unauthenticated toolset when session is invalid", async () => {

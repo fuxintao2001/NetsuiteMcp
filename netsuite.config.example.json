@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "defaultCallbackPort": 8080,
+  "sessionsDir": "~/.config/netsuite-mcp/sessions",
+  "redisUrl": "redis://127.0.0.1:6379",
+  "accounts": {
+    "sandbox": {
+      "accountId": "1234567-sb1",
+      "clientId": "your-sandbox-oauth-client-id",
+      "callbackPort": 8080
+    },
+    "production": {
+      "accountId": "1234567",
+      "clientId": "your-production-oauth-client-id",
+      "callbackPort": 8080
+    }
+  }
+}
