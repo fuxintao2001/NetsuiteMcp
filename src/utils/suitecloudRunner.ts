@@ -1,17 +1,9 @@
 import { exec } from "node:child_process";
-import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
 
 const execAsync = promisify(exec);
-
-export interface ConfirmationPayload {
-	paths: string;
-	accountId: string;
-	projectPath: string;
-	createdAt: number;
-}
 
 export interface FileInspectionResult {
 	exists: boolean;
@@ -29,98 +21,9 @@ export interface UploadExecutionResult {
 }
 
 /**
- * SuiteCloud CLI execution and confirmation security service.
+ * SuiteCloud CLI execution and SDF file resolution service.
  */
 export class SuiteCloudRunnerService {
-	private pendingTokens: Map<string, ConfirmationPayload> = new Map();
-	private readonly TOKEN_TTL_MS = 5 * 60 * 1000; // 5 minutes
-
-	/**
-	 * Generate a 5-minute single-use confirmation token tied to paths and account.
-	 */
-	generateToken(payload: {
-		paths: string;
-		accountId: string;
-		projectPath: string;
-	}): string {
-		this.cleanupExpiredTokens();
-		const token = randomUUID();
-		this.pendingTokens.set(token, {
-			...payload,
-			createdAt: Date.now(),
-		});
-		return token;
-	}
-
-	/**
-	 * Validate and consume a confirmation token. Single use only.
-	 */
-	consumeToken(
-		token: string,
-		current: { paths: string; accountId: string },
-	): { valid: boolean; reason?: string } {
-		this.cleanupExpiredTokens();
-		const record = this.pendingTokens.get(token);
-		if (!record) {
-			return {
-				valid: false,
-				reason: "Confirmation token is invalid or has expired.",
-			};
-		}
-
-		// Consume immediately (single-use)
-		this.pendingTokens.delete(token);
-
-		if (record.paths !== current.paths) {
-			return {
-				valid: false,
-				reason: "Upload paths do not match the previewed confirmation token.",
-			};
-		}
-
-		if (record.accountId.toLowerCase() !== current.accountId.toLowerCase()) {
-			return {
-				valid: false,
-				reason:
-					"Target account ID does not match the previewed confirmation token.",
-			};
-		}
-
-		return { valid: true };
-	}
-
-	/**
-	 * Direct execution by confirmation token (e.g. from one-click browser link).
-	 */
-	async executeByToken(token: string): Promise<{
-		success: boolean;
-		message: string;
-		details?: UploadExecutionResult;
-		payload?: ConfirmationPayload;
-	}> {
-		this.cleanupExpiredTokens();
-		const record = this.pendingTokens.get(token);
-		if (!record) {
-			return {
-				success: false,
-				message:
-					"Confirmation token is invalid or has expired (valid for 5 minutes).",
-			};
-		}
-
-		// Consume immediately (single-use)
-		this.pendingTokens.delete(token);
-
-		const result = await this.executeUpload(record.projectPath, record.paths);
-		return {
-			success: result.success,
-			message: result.success
-				? "File uploaded successfully"
-				: "Upload command failed",
-			details: result,
-			payload: record,
-		};
-	}
 
 	/**
 	 * Search upwards for SDF project root containing suitecloud.config.js, project.json, or manifest.xml
@@ -315,15 +218,6 @@ export class SuiteCloudRunnerService {
 				stderr: outputText,
 				executionTimeMs: Date.now() - startTime,
 			};
-		}
-	}
-
-	private cleanupExpiredTokens(): void {
-		const now = Date.now();
-		for (const [token, record] of this.pendingTokens.entries()) {
-			if (now - record.createdAt > this.TOKEN_TTL_MS) {
-				this.pendingTokens.delete(token);
-			}
 		}
 	}
 }

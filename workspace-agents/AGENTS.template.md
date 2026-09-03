@@ -93,8 +93,8 @@ Before writing or modifying ANY SuiteScript (2.1), SuiteFlow, or SDF XML:
 ### 3. SuiteCloud File Upload (`netsuite_suitecloud_upload`)
 - **Sandbox 环境 (极简一步直传)**:
   在 Sandbox 环境中，当用户发出文件上传请求时，AI 助手**直接调用** `netsuite_suitecloud_upload` 执行上传并回报部署结果，**禁止增加冗余的预览卡片与确认等待环节**。工具支持传入绝对文件路径或 File Cabinet 相对路径，会自动解析项目根目录。
-- **Production 生产环境 (严格安全拦截与两阶段门禁)**:
-  生产环境严禁直接上传。默认拦截；如需上传必须由用户明确指示，并显式设置 `allowProduction: true` 配合两阶段确认令牌（`confirmationToken`）完成门禁校验。
+- **Production 生产环境 (用户授权即直传)**:
+  生产环境防止意外误传：默认拦截；只要用户明确指示或授权上传到生产环境，AI 助手直接携带 `allowProduction: true` 即可一步执行上传部署，**无需繁琐的临时令牌与二次确认链接**。
 
 ---
 
@@ -133,7 +133,7 @@ When encountering NetSuite authorization/permission errors (e.g., `INSUFFICIENT_
 5. **P4 SuiteQL (Querying Data):**
    - First check curated templates: `netsuite_get_query_template` (golden patterns for lines, lineage, stock, etc.)
    - If writing custom SQL: `ns_getSuiteQLMetadata` ➔ `ns_runCustomSuiteQL`
-6. **P5 SuiteCloud File Upload:** `netsuite_suitecloud_upload` (Sandbox 极速直传；Production 实施两阶段安全门禁)
+6. **P5 SuiteCloud File Upload:** `netsuite_suitecloud_upload` (Sandbox 直接极速上传；Production 经用户授权后带 allowProduction: true 直传)
 
 
 ### ⚡ Parallel Batch Execution Mandate (`netsuite_batch_execute`)

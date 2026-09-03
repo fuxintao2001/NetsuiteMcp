@@ -33,7 +33,7 @@ const WRITE_TOOLS_TABLE_SANDBOX = `| \`ns_createRecord\` | Create a new record (
 | \`ns_updateRecord\` | Update an existing record (**Sandbox only**) |
 | \`netsuite_suitecloud_upload\` | Upload file via SuiteCloud CLI (极速直传，无需二次确认) |`;
 
-const WRITE_TOOLS_TABLE_PRODUCTION = `\n> *Write tools (\`ns_createRecord\`, \`ns_updateRecord\`) and direct file uploads (\`netsuite_suitecloud_upload\`) are blocked in Production.*\n`;
+const WRITE_TOOLS_TABLE_PRODUCTION = `\n> *Write tools (\`ns_createRecord\`, \`ns_updateRecord\`) are blocked in Production. \`netsuite_suitecloud_upload\` requires explicit user authorization with allowProduction: true.*\n`;
 
 const WRITE_OPS_SECTION_SANDBOX = `### Write Operations & Code Uploads (✅ Enabled)
 
@@ -49,10 +49,11 @@ Write operations (\`ns_createRecord\` / \`ns_updateRecord\`) and file uploads (\
 **File Upload Workflow (\`netsuite_suitecloud_upload\`):**
 - **极速一步直传**: 在 Sandbox 环境下，直接调用 \`netsuite_suitecloud_upload\` 并传入目标文件绝对路径或 FileCabinet 路径即可，工具自动解析项目根目录并部署，无需多余的二次确认。`;
 
-const WRITE_OPS_SECTION_PRODUCTION = `### Write Operations & Code Uploads (❌ Disabled)
+const WRITE_OPS_SECTION_PRODUCTION = `### Write Operations & Code Uploads (🔒 Protected)
 
-> [!CAUTION]
-> \`ns_createRecord\`, \`ns_updateRecord\`, and direct \`netsuite_suitecloud_upload\` are **disabled** in this Production environment to protect data and code integrity. Use read tools (\`ns_getRecord\`, \`netsuite_inspect_record\`) for safe access. To perform write operations, switch to a Sandbox workspace.`;
+> [!WARNING]
+> \`ns_createRecord\` 和 \`ns_updateRecord\` 在 Production 生产环境被禁用以保护数据安全。
+> 代码文件上传 (\`netsuite_suitecloud_upload\`) 默认受安全拦截保护：若需部署到生产环境，在用户明确授权后，设置 \`allowProduction: true\` 即可一步直接上传，无需复杂的临时令牌。`;
 
 
 // ---------------------------------------------------------------------------

@@ -263,26 +263,12 @@ export const SuitecloudUploadArgsSchema = z.object({
 		.describe(
 			"Optional dry-run flag. If true, generates execution preview without uploading.",
 		),
-	confirmed: z
-		.boolean()
-		.optional()
-		.default(false)
-		.describe(
-			"Confirmation flag. In Production, must be explicitly true after reviewing the preview.",
-		),
-	confirmationToken: z
-		.string()
-		.trim()
-		.optional()
-		.describe(
-			"One-time security token returned by the preview step (required in Production).",
-		),
 	allowProduction: z
 		.boolean()
 		.optional()
 		.default(false)
 		.describe(
-			"Safety flag to allow upload to production accounts. Must be explicitly true if target account is production.",
+			"Explicit user authorization flag required when uploading to a Production account. Set to true once user authorizes.",
 		),
 });
 export type SuitecloudUploadArgs = z.infer<typeof SuitecloudUploadArgsSchema>;
@@ -566,8 +552,8 @@ export const GET_SYSTEM_NOTES_TOOL = {
 export const SUITECLOUD_UPLOAD_TOOL = {
 	name: "netsuite_suitecloud_upload",
 	description:
-		"Upload script or asset files to NetSuite File Cabinet using SuiteCloud CLI ('npx suitecloud file:upload'). " +
-		"In Sandbox, uploads execute directly without confirmation prompts. In Production, requires allowProduction=true and two-phase user confirmation for safety.",
+		"Upload script or asset files to NetSuite File Cabinet using SuiteCloud CLI ('suitecloud file:upload'). " +
+		"In Sandbox, uploads execute directly. In Production, requires allowProduction=true when user authorizes upload to Production.",
 	inputSchema: {
 		type: "object" as const,
 		properties: {
@@ -586,19 +572,10 @@ export const SUITECLOUD_UPLOAD_TOOL = {
 				description:
 					"Optional. If true, inspects local file and returns execution preview without uploading.",
 			},
-			confirmed: {
-				type: "boolean",
-				description:
-					"Required in Production after user confirms upload.",
-			},
-			confirmationToken: {
-				type: "string",
-				description: "Security token returned by the preview step in Production.",
-			},
 			allowProduction: {
 				type: "boolean",
 				description:
-					"Explicit permission required if uploading to a production account.",
+					"Explicit user authorization required if uploading to a Production account.",
 			},
 		},
 		required: ["paths"],

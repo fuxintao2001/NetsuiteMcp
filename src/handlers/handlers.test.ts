@@ -946,16 +946,25 @@ describe("MCP Handler Wires", () => {
 				});
 
 				expect(res.content[0].text).toContain(
-					"CRITICAL PRODUCTION SAFETY BLOCK",
+					"生产环境安全拦截",
 				);
 			});
 
-			it("should require confirmation token in production even with allowProduction", async () => {
+			it("should execute upload directly in production when allowProduction is true", async () => {
 				const callFn = registeredHandlers.get("tools/call");
 				mockOAuthManager.getAccountId.mockResolvedValueOnce("9260916");
 
 				const dummyScript = path.join(testRoot, "prod_allow.js");
 				await fs.writeFile(dummyScript, "console.log('prod');");
+
+				const execSpy = vi
+					.spyOn(suitecloudRunnerService, "executeUpload")
+					.mockResolvedValueOnce({
+						success: true,
+						stdout: "Prod upload complete.",
+						stderr: "",
+						executionTimeMs: 200,
+					});
 
 				const res = await callFn?.({
 					params: {
@@ -968,10 +977,12 @@ describe("MCP Handler Wires", () => {
 					},
 				});
 
+				expect(execSpy).toHaveBeenCalled();
 				expect(res.content[0].text).toContain(
-					"SuiteCloud Production File Upload Security Confirmation Required",
+					"SuiteCloud File Upload Succeeded",
 				);
-				expect(res.content[0].text).toContain("confirm-upload?token=");
+				expect(res.content[0].text).toContain("9260916");
+				execSpy.mockRestore();
 			});
 		});
 	});

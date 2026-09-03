@@ -16,7 +16,6 @@ import { getKnownClientId } from "./utils/constants.js";
 import { resolveCustomRecordRectype } from "./utils/metadata.js";
 import { RedisCacheProvider } from "./utils/redisCacheProvider.js";
 import type { RedisLockProvider } from "./utils/redisLock.js";
-import { suitecloudRunnerService } from "./utils/suitecloudRunner.js";
 
 interface AccountConfig {
 	accountId: string;
@@ -121,77 +120,6 @@ class NetSuiteHTTPServer {
 				accounts: Object.keys(ACCOUNT_CONFIGS),
 				redis: this.lockProvider ? "connected" : "disconnected",
 			});
-		});
-
-		// One-click web confirmation endpoint for SuiteCloud file uploads
-		this.app.get("/confirm-upload", async (c: Context) => {
-			const token = c.req.query("token");
-			if (!token) {
-				return c.html(
-					`<!DOCTYPE html>
-					<html>
-					<head><meta charset="utf-8"><title>NetSuite MCP - 错误</title></head>
-					<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 40px; background: #fff5f5; color: #991b1b;">
-						<h2>❌ 错误：缺少确认令牌 (Confirmation Token)</h2>
-						<p>请返回 IDE 或客户端重新发起上传。</p>
-					</body>
-					</html>`,
-					400,
-				);
-			}
-
-			const result = await suitecloudRunnerService.executeByToken(token);
-
-			if (!result.success) {
-				return c.html(
-					`<!DOCTYPE html>
-					<html>
-					<head><meta charset="utf-8"><title>NetSuite MCP - 上传失败</title></head>
-					<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 40px; background: #fff5f5; color: #991b1b; line-height: 1.5;">
-						<h2>❌ SuiteCloud 文件上传失败 / 令牌无效</h2>
-						<p><strong>原因:</strong> ${result.message}</p>
-						${
-							result.details
-								? `<pre style="background: #fee2e2; padding: 16px; border-radius: 8px; overflow-x: auto; color: #7f1d1d;">${result.details.stderr || result.details.stdout}</pre>`
-								: ""
-						}
-						<p style="margin-top: 24px;"><a href="javascript:window.close()" style="color: #2563eb; text-decoration: none; font-weight: 500;">✕ 关闭此页面</a></p>
-					</body>
-					</html>`,
-					400,
-				);
-			}
-
-			return c.html(
-				`<!DOCTYPE html>
-				<html>
-				<head><meta charset="utf-8"><title>NetSuite MCP - 上传成功</title></head>
-				<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 40px; background: #f0fdf4; color: #166534; line-height: 1.6;">
-					<div style="max-width: 680px; margin: 0 auto; background: #ffffff; border: 1px solid #bbf7d0; border-radius: 12px; padding: 32px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);">
-						<div style="display: flex; align-items: center; margin-bottom: 20px;">
-							<span style="font-size: 32px; margin-right: 12px;">✅</span>
-							<h2 style="margin: 0; color: #15803d; font-size: 24px;">SuiteCloud 文件上传成功！</h2>
-						</div>
-						<p style="color: #374151; font-size: 15px;">文件已成功部署至 NetSuite File Cabinet。</p>
-						<table style="width: 100%; margin: 20px 0; border-collapse: collapse; font-size: 14px;">
-							<tr><td style="padding: 8px 0; color: #6b7280; width: 140px;"><strong>目标路径:</strong></td><td style="color: #111827; font-family: monospace;">${result.payload?.paths}</td></tr>
-							<tr><td style="padding: 8px 0; color: #6b7280;"><strong>目标账号:</strong></td><td style="color: #111827;">${result.payload?.accountId?.toUpperCase()}</td></tr>
-							<tr><td style="padding: 8px 0; color: #6b7280;"><strong>执行耗时:</strong></td><td style="color: #111827;">${result.details?.executionTimeMs} ms</td></tr>
-						</table>
-						${
-							result.details?.stdout
-								? `<div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; margin-top: 20px;">
-										<pre style="margin: 0; font-size: 13px; color: #334155; white-space: pre-wrap;">${result.details.stdout}</pre>
-									</div>`
-								: ""
-						}
-						<div style="margin-top: 28px; text-align: right;">
-							<button onclick="window.close()" style="background: #16a34a; color: #ffffff; border: none; padding: 10px 20px; border-radius: 6px; font-weight: 600; cursor: pointer;">完成并关闭页面</button>
-						</div>
-					</div>
-				</body>
-				</html>`,
-			);
 		});
 
 		const handleMcpRoute = async (c: Context) => {

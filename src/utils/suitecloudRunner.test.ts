@@ -4,62 +4,22 @@ import { describe, expect, it } from "vitest";
 import { suitecloudRunnerService } from "./suitecloudRunner.js";
 
 describe("SuiteCloudRunnerService", () => {
-	it("should generate a valid confirmation token and consume it successfully", () => {
-		const payload = {
-			paths: "/SuiteScripts/my_script.js",
-			accountId: "9260916_sb1",
-			projectPath: "/some/project",
-		};
-
-		const token = suitecloudRunnerService.generateToken(payload);
-		expect(typeof token).toBe("string");
-		expect(token.length).toBeGreaterThan(10);
-
-		// Consume the token successfully
-		const res = suitecloudRunnerService.consumeToken(token, {
-			paths: "/SuiteScripts/my_script.js",
-			accountId: "9260916_sb1",
+	it("should find SDF project root correctly with priority for suitecloud.config.js", () => {
+		const tmpDir = path.join(process.cwd(), "temp-test-root-sdf");
+		fs.mkdirSync(path.join(tmpDir, "src", "FileCabinet", "SuiteScripts"), {
+			recursive: true,
 		});
+		fs.writeFileSync(path.join(tmpDir, "suitecloud.config.js"), "module.exports={};");
+		fs.writeFileSync(path.join(tmpDir, "project.json"), "{}");
+		fs.writeFileSync(path.join(tmpDir, "src", "manifest.xml"), "<manifest/>");
 
-		expect(res.valid).toBe(true);
+		const rootFromNested = suitecloudRunnerService.findSdfProjectRoot(
+			path.join(tmpDir, "src", "FileCabinet", "SuiteScripts"),
+		);
+		expect(rootFromNested).toBe(tmpDir);
 
-		// Second consumption should fail (single-use anti-replay)
-		const secondTry = suitecloudRunnerService.consumeToken(token, {
-			paths: "/SuiteScripts/my_script.js",
-			accountId: "9260916_sb1",
-		});
-		expect(secondTry.valid).toBe(false);
-		expect(secondTry.reason).toContain("invalid or has expired");
-	});
-
-	it("should reject token if paths or account do not match", () => {
-		const token = suitecloudRunnerService.generateToken({
-			paths: "/SuiteScripts/script_a.js",
-			accountId: "9260916_sb1",
-			projectPath: "/some/project",
-		});
-
-		// Mismatched path
-		const pathMismatch = suitecloudRunnerService.consumeToken(token, {
-			paths: "/SuiteScripts/script_b.js",
-			accountId: "9260916_sb1",
-		});
-		expect(pathMismatch.valid).toBe(false);
-		expect(pathMismatch.reason).toContain("Upload paths do not match");
-
-		// New token for account mismatch test
-		const token2 = suitecloudRunnerService.generateToken({
-			paths: "/SuiteScripts/script_a.js",
-			accountId: "9260916_sb1",
-			projectPath: "/some/project",
-		});
-
-		const accMismatch = suitecloudRunnerService.consumeToken(token2, {
-			paths: "/SuiteScripts/script_a.js",
-			accountId: "1234567_sb1",
-		});
-		expect(accMismatch.valid).toBe(false);
-		expect(accMismatch.reason).toContain("Target account ID does not match");
+		// Clean up
+		fs.rmSync(tmpDir, { recursive: true, force: true });
 	});
 
 	it("should inspect local files correctly", () => {

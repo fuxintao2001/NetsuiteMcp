@@ -615,8 +615,6 @@ async function handleSuitecloudUpload(
 		paths,
 		projectPath: customProjectPath,
 		dryRun,
-		confirmed,
-		confirmationToken,
 		allowProduction,
 	} = parsed.data;
 
@@ -660,71 +658,29 @@ async function handleSuitecloudUpload(
 			? (inspection.sizeBytes / 1024).toFixed(2)
 			: "Unknown";
 
-	// Safety check 2: Production environment block & two-phase confirmation gate
-	if (isProd) {
-		if (!allowProduction) {
-			return textResult(
-				`🚨 **CRITICAL PRODUCTION SAFETY BLOCK**\n\n` +
-					`Target NetSuite account is **PRODUCTION** (\`${currentAccountId}\`).\n` +
-					`Direct file upload to production via MCP is blocked to prevent accidental overwrites.\n\n` +
-					`If you are 100% sure and authorized to upload to Production, you must explicitly set \`allowProduction: true\` alongside \`confirmed: true\`.`,
-				true,
-			);
-		}
-
-		if (!confirmed || !confirmationToken) {
-			const token = suitecloudRunnerService.generateToken({
-				paths: normalizedFcPath,
-				accountId: currentAccountId,
-				projectPath: resolvedProjectRoot,
-			});
-
-			let previewMd = `## 🔒 SuiteCloud Production File Upload Security Confirmation Required\n\n`;
-			previewMd += `An upload request to **PRODUCTION** has been initiated. To prevent unintended code changes or overwrites, **your explicit confirmation is required** before executing:\n\n`;
-			previewMd += `### 📋 Execution Details\n`;
-			previewMd += `| Parameter | Value |\n|---|---|\n`;
-			previewMd += `| **File Cabinet Path** | \`${normalizedFcPath}\` |\n`;
-			previewMd += `| **Local File Location** | \`${inspection.localFullPath}\` (${fileSizeKb} KB) |\n`;
-			previewMd += `| **Target Account** | \`${currentAccountId.toUpperCase()}\` (🚨 PRODUCTION) |\n`;
-			previewMd += `| **SDF Project Root** | \`${resolvedProjectRoot}\` |\n`;
-			previewMd += `| **Command to Run** | \`npx suitecloud file:upload --paths "${normalizedFcPath}"\` |\n\n`;
-			previewMd += `### 🔘 生产环境授权确认（可直接点击下方链接，无需手动输入）：\n`;
-			previewMd += `👉 **[【👉 点击此处立即授权并执行上传 (Click to Confirm Upload)】](http://localhost:3000/confirm-upload?token=${token})**\n\n`;
-			previewMd += `*(在 IDE 或浏览器中点击上方链接，后台将立即执行上传并返回结果；或者直接在下方的确认弹窗中选择同意)*\n\n`;
-			previewMd += `*(No changes have been made to your NetSuite account yet)*`;
-
-			return textResult(previewMd);
-		}
-
-		// Phase 2 in Production: Validate token
-		const tokenValidation = suitecloudRunnerService.consumeToken(
-			confirmationToken,
-			{
-				paths: normalizedFcPath,
-				accountId: currentAccountId,
-			},
+	// Safety check 2: Production environment block
+	if (isProd && !allowProduction) {
+		return textResult(
+			`🚨 **生产环境安全拦截 (Production Safety Block)**\n\n` +
+				`当前目标 NetSuite 账号为**生产环境** (\`${currentAccountId.toUpperCase()}\`)。\n` +
+				`为防止误操作覆盖生产代码，需获得用户明确授权。\n\n` +
+				`若用户已明确指示上传到生产环境，请设置 \`allowProduction: true\` 重新调用此工具，即可直接一步执行上传。`,
+			true,
 		);
+	}
 
-		if (!tokenValidation.valid) {
-			return textResult(
-				`❌ Confirmation verification failed: ${tokenValidation.reason}\n\n` +
-					`Please re-run without 'confirmed' to generate a fresh confirmation token.`,
-				true,
-			);
-		}
-	} else if (dryRun) {
-		// In Sandbox: optional preview if dryRun is true
+	if (dryRun) {
 		let previewMd = `## 🔍 SuiteCloud File Upload Preview (Dry Run)\n\n`;
 		previewMd += `| Parameter | Value |\n|---|---|\n`;
 		previewMd += `| **File Cabinet Path** | \`${normalizedFcPath}\` |\n`;
 		previewMd += `| **Local File Location** | \`${inspection.localFullPath}\` (${fileSizeKb} KB) |\n`;
-		previewMd += `| **Target Account** | \`${currentAccountId.toUpperCase()}\` (🛡️ SANDBOX) |\n`;
+		previewMd += `| **Target Account** | \`${currentAccountId.toUpperCase()}\` (${isProd ? "🚨 PRODUCTION" : "🛡️ SANDBOX"}) |\n`;
 		previewMd += `| **SDF Project Root** | \`${resolvedProjectRoot}\` |\n`;
-		previewMd += `| **Command to Run** | \`npx suitecloud file:upload --paths "${normalizedFcPath}"\` |\n`;
+		previewMd += `| **Command to Run** | \`suitecloud file:upload --paths "${normalizedFcPath}"\` |\n`;
 		return textResult(previewMd);
 	}
 
-	// In Sandbox (or verified Production), execute the upload directly!
+	// In Sandbox (or authorized Production), execute the upload directly!
 	const execResult = await suitecloudRunnerService.executeUpload(
 		resolvedProjectRoot,
 		normalizedFcPath,
