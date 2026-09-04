@@ -29,21 +29,21 @@ const configPath = path.join(projectRoot, 'workspace-agents', 'workspaces.json')
 // Conditional Content Blocks
 // ---------------------------------------------------------------------------
 
-const WRITE_TOOLS_TABLE_SANDBOX = `| 工具 | 权限与说明 |
+const WRITE_TOOLS_TABLE_SANDBOX = `| Tool | Permissions & Behavior |
 |:---|:---|
-| \`ns_createRecord\` | 创建新记录 (**Sandbox 专属**) |
-| \`ns_updateRecord\` | 更新现有记录 (**Sandbox 专属**) |
-| \`netsuite_suitecloud_upload\` | 通过 SuiteCloud CLI 极速直传部署代码文件 |`;
+| \`ns_createRecord\` | Create a new record (**Sandbox only**) |
+| \`ns_updateRecord\` | Update an existing record (**Sandbox only**) |
+| \`netsuite_suitecloud_upload\` | Deploy code via SuiteCloud CLI (one-step direct upload) |`;
 
-const WRITE_TOOLS_TABLE_PRODUCTION = `> 🔒 **生产环境安全保护**: 记录写操作工具 (\`ns_createRecord\`, \`ns_updateRecord\`) 已被系统级代码严格禁用。代码上传 (\`netsuite_suitecloud_upload\`) 默认受保护，需用户明确指示并携带 \`allowProduction: true\` 部署。`;
+const WRITE_TOOLS_TABLE_PRODUCTION = `> 🔒 **Production Safety Guard**: Mutation tools (\`ns_createRecord\`, \`ns_updateRecord\`) are strictly blocked by code-level runtime guards. Code upload (\`netsuite_suitecloud_upload\`) requires explicit user authorization with \`allowProduction: true\`.`;
 
-const WRITE_OPS_SECTION_SANDBOX = `### 写操作与代码部署 (✅ 沙箱已开放)
-1. **记录变更**: 先通过 \`ns_getRecordTypeMetadata\` 核对字段约束 ➔ 构建规范 JSON ➔ 调用 \`ns_createRecord\` 或 \`ns_updateRecord\`。
-2. **文件上传**: 沙箱环境下直接调用 \`netsuite_suitecloud_upload\` 部署目标文件，工具自动解析项目根目录，无需多余确认环节。`;
+const WRITE_OPS_SECTION_SANDBOX = `### Write Operations & Code Deployment (✅ Sandbox Enabled)
+1. **Record Mutations**: Inspect schema via \`ns_getRecordTypeMetadata\` ➔ Build valid JSON ➔ Execute \`ns_createRecord\` or \`ns_updateRecord\`.
+2. **File Uploads**: In Sandbox, call \`netsuite_suitecloud_upload\` directly with absolute or FileCabinet path. Deploys without extra confirmation steps.`;
 
-const WRITE_OPS_SECTION_PRODUCTION = `### 写操作与代码部署 (🔒 生产只读保护)
+const WRITE_OPS_SECTION_PRODUCTION = `### Write Operations & Code Deployment (🔒 Production Read-Only)
 > [!WARNING]
-> 生产环境严格禁止记录写入。代码部署需用户明确授权并在工具调用中携带 \`allowProduction: true\`。`;
+> Record mutations are strictly prohibited in Production. Code deployment requires explicit user authorization and \`allowProduction: true\`.`;
 
 
 // ---------------------------------------------------------------------------

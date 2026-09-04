@@ -78,7 +78,9 @@ dim1Cases.push({
 });
 
 // Case 1.2: 知识按需加载路由表完整度
-const hasRouter = templateContent.includes('知识按需加载路由表') || templateContent.includes('On-Demand Dispatcher');
+const hasRouter = templateContent.includes('知识按需加载路由表') || 
+                  templateContent.includes('On-Demand Dispatcher') ||
+                  templateContent.includes('ON-DEMAND SKILLS & KNOWLEDGE ROUTER');
 const requiredKeywords = [
   'netsuite_get_query_template',
   'golden-templates',
@@ -251,7 +253,7 @@ dim3Cases.push({
 
 // Case 3.4: 批量并发执行引擎规范 (Batch Execution Mandate)
 const hasBatchInstruction = templateContent.includes('netsuite_batch_execute') && 
-                            templateContent.includes('≥ 2 个独立项目');
+                            (templateContent.includes('≥ 2') || templateContent.includes('independent items'));
 dim3Cases.push({
   id: 'D3-4',
   name: '并行批处理调度引擎约束 (Batch Execution Mandate)',
@@ -449,7 +451,11 @@ const prodWsPath = path.join(config.workspaces[0].projectPath, 'AGENTS.md');
 let prodHasReadOnlyNotice = false;
 if (fs.existsSync(prodWsPath)) {
   const prodText = fs.readFileSync(prodWsPath, 'utf-8');
-  prodHasReadOnlyNotice = prodText.includes('生产只读保护') || prodText.includes('生产环境严格禁止记录写入');
+  prodHasReadOnlyNotice = prodText.includes('生产只读保护') || 
+                          prodText.includes('生产环境严格禁止记录写入') ||
+                          prodText.includes('Production Read-Only') ||
+                          prodText.includes('Production Safety Guard') ||
+                          prodText.includes('strictly prohibited in Production');
 }
 dim6Cases.push({
   id: 'D6-2',
