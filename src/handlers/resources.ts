@@ -54,6 +54,22 @@ function parseFrontmatter(content: string): {
 	return result;
 }
 
+interface SkillResourceItem {
+	uri: string;
+	name: string;
+	description: string;
+	mimeType: string;
+}
+
+let cachedSkillsResources: SkillResourceItem[] | null = null;
+let lastCacheTime = 0;
+const SKILLS_CACHE_TTL_MS = 60_000; // 1 minute TTL
+
+export function invalidateSkillsResourcesCache(): void {
+	cachedSkillsResources = null;
+	lastCacheTime = 0;
+}
+
 // ---------------------------------------------------------------------------
 // MCP Resource Handlers
 // ---------------------------------------------------------------------------
@@ -97,29 +113,39 @@ export function registerResourceHandlers(
 			},
 		];
 
-		const skillsDir = getSkillsDir(projectRoot);
-		try {
-			const entries = await fs.readdir(skillsDir, { withFileTypes: true });
-			for (const entry of entries) {
-				if (entry.isDirectory()) {
-					const skillMdPath = join(skillsDir, entry.name, "SKILL.md");
-					try {
-						const content = await fs.readFile(skillMdPath, "utf-8");
-						const meta = parseFrontmatter(content);
-						resources.push({
-							uri: `netsuite://skills/${entry.name}`,
-							name: meta.name || entry.name,
-							description:
-								meta.description || `SuiteCloud Agent Skill: ${entry.name}`,
-							mimeType: "text/markdown",
-						});
-					} catch {
-						// SKILL.md doesn't exist or is not readable - skip
+		const now = Date.now();
+		if (!cachedSkillsResources || now - lastCacheTime > SKILLS_CACHE_TTL_MS) {
+			const skillsDir = getSkillsDir(projectRoot);
+			const skillList: SkillResourceItem[] = [];
+			try {
+				const entries = await fs.readdir(skillsDir, { withFileTypes: true });
+				for (const entry of entries) {
+					if (entry.isDirectory()) {
+						const skillMdPath = join(skillsDir, entry.name, "SKILL.md");
+						try {
+							const content = await fs.readFile(skillMdPath, "utf-8");
+							const meta = parseFrontmatter(content);
+							skillList.push({
+								uri: `netsuite://skills/${entry.name}`,
+								name: meta.name || entry.name,
+								description:
+									meta.description || `SuiteCloud Agent Skill: ${entry.name}`,
+								mimeType: "text/markdown",
+							});
+						} catch {
+							// SKILL.md doesn't exist or is not readable - skip
+						}
 					}
 				}
+				cachedSkillsResources = skillList;
+				lastCacheTime = now;
+			} catch {
+				// skills/ directory might not exist yet - ignore
 			}
-		} catch {
-			// skills/ directory might not exist yet - ignore
+		}
+
+		if (cachedSkillsResources) {
+			resources.push(...cachedSkillsResources);
 		}
 
 		return { resources };

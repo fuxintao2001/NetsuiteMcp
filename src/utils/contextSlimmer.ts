@@ -205,6 +205,15 @@ export function formatSuiteQLToCompactMarkdown(result: unknown): string {
 		return "No rows returned.";
 	}
 
+	// Safety truncation cap to prevent context explosion on massive queries
+	const MAX_DISPLAY_ROWS = 100;
+	const totalInputRows = dataRows.length;
+	let wasTruncated = false;
+	if (dataRows.length > MAX_DISPLAY_ROWS) {
+		dataRows = dataRows.slice(0, MAX_DISPLAY_ROWS);
+		wasTruncated = true;
+	}
+
 	let output = "";
 	if (totalResults !== undefined && totalResults !== dataRows.length) {
 		output += `*Total Results: ${totalResults} (Showing ${dataRows.length} rows)*\n\n`;
@@ -225,6 +234,10 @@ export function formatSuiteQLToCompactMarkdown(result: unknown): string {
 			return String(val).replace(/\|/g, "\\|").replace(/\n/g, " ");
 		});
 		output += `| ${rowValues.join(" | ")} |\n`;
+	}
+
+	if (wasTruncated) {
+		output += `\n\n*(Showing top ${MAX_DISPLAY_ROWS} of ${totalInputRows} rows. Use ROWNUM or filters to narrow results)*`;
 	}
 
 	return output.trim();
