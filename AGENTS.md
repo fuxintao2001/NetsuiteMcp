@@ -6,85 +6,50 @@ This repository contains the source code for the **NetSuite MCP Server** (`@suit
 
 ---
 
-## 📚 Skills Index
-
-Detailed knowledge is organized into Antigravity Skills. Read the corresponding skill when working in that area.
-
-### Oracle SuiteCloud Agent Skills
-
-These official Oracle NetSuite skills are loaded from the global configuration (`~/.gemini/config/skills/`) and exposed as MCP Resources under `netsuite://skills/<skill-name>`.
-
-| Skill | Domain |
-|:---|:---|
-| `netsuite-ai-connector-instructions` | AI Connector guardrails, tool selection order, SuiteQL safety checklist, output formatting |
-| `netsuite-finance-analyst` | Financial analysis, period-close, variance review, executive reporting |
-| `netsuite-owasp-secure-coding` | OWASP Top 10 for SuiteScript — injection, encoding, CSP, API hardening |
-| `netsuite-sdf-project-documentation` | SDF project documentation generation (README, architecture diagrams, runbooks) |
-| `netsuite-sdf-roles-and-permissions` | SDF role/permission XML configuration and validation |
-| `netsuite-sdf-safe-guide` | SDF SAFE Guide — 12 principles, 14 script types, governance, security, 140+ pitfalls |
-| `netsuite-suitescript-learning` | Interactive SuiteScript learning system (6 modes + SAFE Guide integration) |
-| `netsuite-suitescript-records-reference` | SuiteScript record/field reference (272 record types) |
-| `netsuite-suitescript-upgrade` | SuiteScript 1.0 → 2.1 migration (125+ API mappings, 34 object conversions) |
-| `netsuite-uif-spa-reference` | UIF SPA component development (`@uif-js/core` + `@uif-js/component` API) |
-
----
-
 ## ⚙️ Development & Testing Commands
 
 | Command | Description |
 |---|---|
 | `npm run build` | Clean build (`rimraf dist && tsc`) |
 | `npm run lint` | Run Biome linter & formatter check (`biome check src`) |
-| `npm test` | Run all Jest tests |
-| `npm run start` | Start the server in production mode (runs from `dist/`) |
+| `npm test` | Run all Vitest unit tests |
 | `npm run dev` | Start the server in development mode (via `tsx`) |
 | `npm run fetch-skills` | Download latest Oracle SuiteCloud Agent Skills |
 | `npm run sync-agents` | Sync AGENTS.md template to all client workspaces (`--dry-run` to preview) |
+| `npm run score` | Run 360° architecture & on-demand benchmark scoring suite |
 
 ---
 
-## 🔒 Critical Rules (Always Active)
+## 📚 On-Demand Skills & Knowledge Routing (渐进式按需加载)
 
-### 👑 Official Documentation Absolute Highest Priority
+Detailed domain knowledge is decoupled into Antigravity Skills (`~/.gemini/config/skills/`) and MCP Resources (`netsuite://...`). **Read via `view_file` on demand only when working in that specific domain**:
 
-> [!CAUTION]
-> **Oracle NetSuite Official Authoritative Documentation (Oracle Help Center, SuiteAnswers, SuiteAnalytics Records Catalog, Oracle SAFE Guide 2025.2) HAS ABSOLUTE HIGHEST PRIORITY OVER ALL OTHER SOURCES.**
-> 1. **Conflict Resolution:** If any third-party tutorial, legacy code habit, developer speculation, or general LLM pre-training intuition conflicts with official NetSuite documentation, **YOU MUST UNCONDITIONALLY FOLLOW OFFICIAL DOCUMENTATION**.
-> 2. **Strict Zero Guesswork & Zero Hallucination:** NEVER guess or fabricate non-existent tables or fields (e.g. `LotNumberedAssemblyItemLocations` or `transaction.createdfrom`). NEVER provide naive, unverified, or slow/destructive advice.
-> 3. **Mandatory Citation:** Every technical recommendation, table selection, or SuiteScript pattern MUST cite its official source (`📖 官方出处：[...]`).
+| Domain Scenario | On-Demand Target | Primary Purpose |
+|:---|:---|:---|
+| **AI Connector SOP & SuiteQL** | `netsuite-ai-connector-instructions`<br>`netsuite://queries/golden-templates` | Tool selection hierarchy, SuiteQL safety checklist, number & link formatting |
+| **SAFE Guide & SuiteScript 2.1** | `netsuite-sdf-safe-guide` | SAFE Guide 12 principles, 14 script types, governance, 140+ pitfalls |
+| **272 Records & Fields Dictionary** | `netsuite-suitescript-records-reference`<br>`netsuite://records/reference` | Official standard record types, field IDs, required fields, and search attributes |
+| **Financial Analysis & Period-Close**| `netsuite-finance-analyst` | Financial statements, period-close, variance review, executive reporting |
+| **SuiteScript 1.0 → 2.1 Upgrade** | `netsuite-suitescript-upgrade` | 125+ API mappings, 34 object conversions, breaking behavioral changes |
+| **OWASP & Secure Coding** | `netsuite-owasp-secure-coding` | Injection prevention, encoding, CSP, SuiteScript API hardening |
+| **UIF SPA Components** | `netsuite-uif-spa-reference` | `@uif-js/core` and `@uif-js/component` component development |
+| **SDF Roles & Permissions** | `netsuite-sdf-roles-and-permissions` | Role permission XML configuration (`customrole*`, `permkey`, `permlevel`) |
 
-### Write Operations & Code Upload Control
+---
 
-> [!IMPORTANT]
-> 1. **Record Write Operations (`ns_createRecord`, `ns_updateRecord`)**: Strictly disabled in **Production environments**. They are **fully enabled in Sandbox/Test environments** (account IDs containing `_SB` or starting with `TSTDRV`). Environment detection is centralized in `src/utils/environment.ts` via `isSandboxAccount()`.
-> 2. **Code & Asset Uploads (`netsuite_suitecloud_upload`)**: Strictly enforces the **Two-Phase Confirmation Gate**. AI agents are strictly prohibited from uploading files without explicit user consent. Direct file uploads to Production are blocked unless explicit user authorization and `allowProduction: true` are provided.
+## 🔒 Critical Execution Rules (Always Active)
 
+### 1. 👑 Official Documentation Absolute Highest Priority
+- **Oracle NetSuite Official Authoritative Documentation** (Help Center, SuiteAnswers, Records Catalog, SAFE Guide 2025.2) unconditionally supersedes all third-party habits and LLM intuition.
+- **Strict Zero Hallucination**: NEVER fabricate non-existent tables or fields (e.g. `LotNumberedAssemblyItemLocations`, `transaction.createdfrom`, or `item.recordtype`). Every technical recommendation MUST cite its official source (`📖 官方出处：[...]`).
 
-### SuiteQL Protocol & Error-Driven Correction Rules
+### 2. Reconnaissance First & Error-Driven Self-Healing
+- Always call `ns_getSuiteQLMetadata` or `netsuite_get_record_definition` when record schema or columns are unverified.
+- Runtime validators (`suiteqlGuard.ts`) strictly block invalid syntax (`SELECT *`, `LIMIT/OFFSET`, missing `mainline`, unindexed table scans) and return structured diagnostic guidance. On validation or syntax errors, parse the diagnostic response, directly fix the query, and execute without blind retries.
 
-> [!IMPORTANT]
-> All SuiteQL queries generated by AI agents MUST strictly comply with:
-> 1. **Universal Chain-of-Verification (CoVe)**: Before generating SuiteQL, verify: (a) Genuine table/column existence, (b) Correct table layer (Header vs Line details, specialized view vs base table), (c) Dialect compliance (no `SELECT *`, `ROWNUM <= N` / `FETCH FIRST N ROWS ONLY`, `TO_DATE`, `BUILTIN.DF`), (d) Indexed driving filters (`trandate`, `type`, `id`, `tranid`, `entity`, `subsidiary`).
-> 2. **Reconnaissance First**: Call `ns_getSuiteQLMetadata` (with `recordType` for columns, or `keyword` for discovery) before executing queries against unfamiliar schemas.
-> 3. **Error-Driven Direct Correction (Syntax/Schema Only)**: On query syntax/schema error or empty results, parse the structured diagnostic response, inspect metadata via `ns_getSuiteQLMetadata` if needed, directly fix the query based on the error output, and execute the corrected query without blind retries. (Excludes permission errors).
+### 3. Environment Lock & Write Protection
+- **Record Write Operations (`ns_createRecord`, `ns_updateRecord`)**: Strictly disabled in Production environments; enabled in Sandbox/Test (`_SB`, `TSTDRV`). Managed via `src/utils/environment.ts`.
+- **Code & Asset Uploads (`netsuite_suitecloud_upload`)**: Direct uploads to Production are blocked unless explicit user authorization and `allowProduction: true` are provided.
 
-### Field Classification & Table Granularity Rules
-
-> [!IMPORTANT]
-> **Core Classification & Volume Guardrails:**
-> 1. **Item vs Transaction vs Entity Types**:
->    - `transaction`: uses `recordtype` (`custinvc`, `salesord`, etc.) or `type` (`CustInvc`, `SalesOrd`, etc.).
->    - `entity`: uses `recordtype` (`custjob`, `vendor`, `employee`, etc.).
->    - `item`: uses **`itemtype`** (`Assembly`, `InvtPart`, `NonInvtPart`, `Service`, `Kit`, etc.) and **`subtype`** (`Sale`, `Purchase`, `Resale`). **`item` NEVER HAS `recordtype`**.
-> 2. **High-Volume Tables & Joins**:
->    - Advanced BOM tables (`BomRevisionComponent`, `bomrevision`) and Transaction line tables (`transactionline`) contain hundreds of thousands to millions of rows.
->    - Never execute unindexed multi-table joins on custom fields (`custrecord_*`) without bounding primary keys (`id BETWEEN ...`) or using indexed driving filters.
-
-### Permission Hard-Stop & Zero-Hallucination Protocol
-
-> [!CAUTION]
-> When encountering NetSuite permission/authorization errors (e.g., `INSUFFICIENT_PERMISSION`, HTTP 403 Forbidden, `Permission Violation`, role access denied):
-> 1. **Immediate Hard Stop**: AI agents MUST immediately cease all further tasks, tool calls, and retries. DO NOT attempt self-healing loops or alternative query probing.
-> 2. **Strict Zero Hallucination**: AI agents are strictly prohibited from guessing, simulating, or fabricating any record data or query results.
-> 3. **Actionable User Guidance**: AI agents must report the exact failed record type/table name and specify the required NetSuite role permission configuration (under `Setup > Users/Roles > Manage Roles > Permissions`), waiting for the user to configure permissions before proceeding.
-
+### 4. Permission Hard-Stop & Zero-Hallucination
+- On NetSuite authorization/permission errors (`INSUFFICIENT_PERMISSION`, 403 Forbidden, `Permission Violation`), immediately cease all further tasks and tool calls. Never simulate fake data. Report the exact failed record type/table name and specify the required NetSuite role permission configuration.

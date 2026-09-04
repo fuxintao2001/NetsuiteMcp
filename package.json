@@ -22,7 +22,8 @@
     "daemon:run": "node scripts/daemon.js run",
     "lint": "biome check src",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "score": "tsx scripts/test-system-architecture-score.ts"
   },
   "keywords": [
     "netsuite",

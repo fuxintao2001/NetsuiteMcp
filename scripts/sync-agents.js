@@ -29,31 +29,21 @@ const configPath = path.join(projectRoot, 'workspace-agents', 'workspaces.json')
 // Conditional Content Blocks
 // ---------------------------------------------------------------------------
 
-const WRITE_TOOLS_TABLE_SANDBOX = `| \`ns_createRecord\` | Create a new record (**Sandbox only**) |
-| \`ns_updateRecord\` | Update an existing record (**Sandbox only**) |
-| \`netsuite_suitecloud_upload\` | Upload file via SuiteCloud CLI (极速直传，无需二次确认) |`;
+const WRITE_TOOLS_TABLE_SANDBOX = `| 工具 | 权限与说明 |
+|:---|:---|
+| \`ns_createRecord\` | 创建新记录 (**Sandbox 专属**) |
+| \`ns_updateRecord\` | 更新现有记录 (**Sandbox 专属**) |
+| \`netsuite_suitecloud_upload\` | 通过 SuiteCloud CLI 极速直传部署代码文件 |`;
 
-const WRITE_TOOLS_TABLE_PRODUCTION = `\n> *Write tools (\`ns_createRecord\`, \`ns_updateRecord\`) are blocked in Production. \`netsuite_suitecloud_upload\` requires explicit user authorization with allowProduction: true.*\n`;
+const WRITE_TOOLS_TABLE_PRODUCTION = `> 🔒 **生产环境安全保护**: 记录写操作工具 (\`ns_createRecord\`, \`ns_updateRecord\`) 已被系统级代码严格禁用。代码上传 (\`netsuite_suitecloud_upload\`) 默认受保护，需用户明确指示并携带 \`allowProduction: true\` 部署。`;
 
-const WRITE_OPS_SECTION_SANDBOX = `### Write Operations & Code Uploads (✅ Enabled)
+const WRITE_OPS_SECTION_SANDBOX = `### 写操作与代码部署 (✅ 沙箱已开放)
+1. **记录变更**: 先通过 \`ns_getRecordTypeMetadata\` 核对字段约束 ➔ 构建规范 JSON ➔ 调用 \`ns_createRecord\` 或 \`ns_updateRecord\`。
+2. **文件上传**: 沙箱环境下直接调用 \`netsuite_suitecloud_upload\` 部署目标文件，工具自动解析项目根目录，无需多余确认环节。`;
 
-Write operations (\`ns_createRecord\` / \`ns_updateRecord\`) and file uploads (\`netsuite_suitecloud_upload\`) are enabled in this Sandbox environment.
-
-**Record Write Workflow:**
-1. \`ns_getRecordTypeMetadata\` → verify record schema and field constraints
-2. For reference fields → use \`ns_selector_app\` or SuiteQL to look up valid IDs
-3. Build \`data\` as **stringified JSON** matching the schema exactly
-4. Call \`ns_createRecord\` or \`ns_updateRecord\`
-5. Verify result → Check output for auto-appended UI confirmation link
-
-**File Upload Workflow (\`netsuite_suitecloud_upload\`):**
-- **极速一步直传**: 在 Sandbox 环境下，直接调用 \`netsuite_suitecloud_upload\` 并传入目标文件绝对路径或 FileCabinet 路径即可，工具自动解析项目根目录并部署，无需多余的二次确认。`;
-
-const WRITE_OPS_SECTION_PRODUCTION = `### Write Operations & Code Uploads (🔒 Protected)
-
+const WRITE_OPS_SECTION_PRODUCTION = `### 写操作与代码部署 (🔒 生产只读保护)
 > [!WARNING]
-> \`ns_createRecord\` 和 \`ns_updateRecord\` 在 Production 生产环境被禁用以保护数据安全。
-> 代码文件上传 (\`netsuite_suitecloud_upload\`) 默认受安全拦截保护：若需部署到生产环境，在用户明确授权后，设置 \`allowProduction: true\` 即可一步直接上传，无需复杂的临时令牌。`;
+> 生产环境严格禁止记录写入。代码部署需用户明确授权并在工具调用中携带 \`allowProduction: true\`。`;
 
 
 // ---------------------------------------------------------------------------
