@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { PROMPT_DEFINITIONS, registerPromptHandlers } from "./prompts.js";
 
 describe("MCP Prompt Handlers", () => {
-	it("should register prompts/list and return prompt definitions", async () => {
+	it("should return empty prompts list by default to prevent polluting client slash menu", async () => {
 		let listHandler: any;
 		const fakeServer = {
 			setRequestHandler: vi.fn((method, handler) => {
@@ -11,20 +11,53 @@ describe("MCP Prompt Handlers", () => {
 			}),
 		} as unknown as Server;
 
-		registerPromptHandlers(fakeServer);
+		const originalEnv = process.env.ENABLE_MCP_PROMPTS;
+		delete process.env.ENABLE_MCP_PROMPTS;
+		try {
+			registerPromptHandlers(fakeServer);
 
-		expect(listHandler).toBeDefined();
-		const res = await listHandler();
-		expect(res.prompts).toEqual(PROMPT_DEFINITIONS);
-		expect(res.prompts.some((p: any) => p.name === "review_suitescript")).toBe(
-			true,
-		);
-		expect(res.prompts.some((p: any) => p.name === "debug_script_error")).toBe(
-			true,
-		);
-		expect(res.prompts.some((p: any) => p.name === "generate_suiteql")).toBe(
-			true,
-		);
+			expect(listHandler).toBeDefined();
+			const res = await listHandler();
+			expect(res.prompts).toEqual([]);
+		} finally {
+			if (originalEnv !== undefined) {
+				process.env.ENABLE_MCP_PROMPTS = originalEnv;
+			}
+		}
+	});
+
+	it("should return prompt definitions when ENABLE_MCP_PROMPTS is true", async () => {
+		let listHandler: any;
+		const fakeServer = {
+			setRequestHandler: vi.fn((method, handler) => {
+				if (method === "prompts/list") listHandler = handler;
+			}),
+		} as unknown as Server;
+
+		const originalEnv = process.env.ENABLE_MCP_PROMPTS;
+		process.env.ENABLE_MCP_PROMPTS = "true";
+		try {
+			registerPromptHandlers(fakeServer);
+
+			expect(listHandler).toBeDefined();
+			const res = await listHandler();
+			expect(res.prompts).toEqual(PROMPT_DEFINITIONS);
+			expect(
+				res.prompts.some((p: any) => p.name === "review_suitescript"),
+			).toBe(true);
+			expect(
+				res.prompts.some((p: any) => p.name === "debug_script_error"),
+			).toBe(true);
+			expect(res.prompts.some((p: any) => p.name === "generate_suiteql")).toBe(
+				true,
+			);
+		} finally {
+			if (originalEnv !== undefined) {
+				process.env.ENABLE_MCP_PROMPTS = originalEnv;
+			} else {
+				delete process.env.ENABLE_MCP_PROMPTS;
+			}
+		}
 	});
 
 	it("should render review_suitescript prompt message", async () => {

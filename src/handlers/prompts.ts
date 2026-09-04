@@ -73,9 +73,13 @@ export const PROMPT_DEFINITIONS: PromptDefinition[] = [
 
 export function registerPromptHandlers(server: Server): void {
 	// --- List Prompts ---
+	// Suppressed by default to prevent polluting IDE/client slash command menus with
+	// duplicate mcp:<server>:<prompt> entries across multiple active account instances.
+	// Can be explicitly enabled via ENABLE_MCP_PROMPTS=true.
 	server.setRequestHandler("prompts/list", async () => {
+		const isEnabled = process.env.ENABLE_MCP_PROMPTS === "true";
 		return {
-			prompts: PROMPT_DEFINITIONS,
+			prompts: isEnabled ? PROMPT_DEFINITIONS : [],
 		};
 	});
 
