@@ -1,6 +1,4 @@
 import crypto from "node:crypto";
-import fs from "node:fs/promises";
-import path from "node:path";
 import { openBrowser } from "../utils/browserLauncher.js";
 import { getKnownClientId } from "../utils/constants.js";
 import { formatNetSuiteAccountHost } from "../utils/environment.js";
@@ -16,56 +14,6 @@ import {
 	shouldRefreshToken,
 	TokenRefreshError,
 } from "./tokenExchange.js";
-
-/**
- * Acquire a cross-process file-based lock by creating a directory.
- * Autorecovers from stale locks after 20 seconds.
- */
-async function acquireLock(
-	lockPath: string,
-	timeoutMs = 25000,
-): Promise<boolean> {
-	const start = Date.now();
-	while (Date.now() - start < timeoutMs) {
-		try {
-			await fs.mkdir(lockPath);
-			return true;
-		} catch (err: unknown) {
-			const nodeErr = err as { code?: string };
-			if (nodeErr.code === "EEXIST") {
-				// Check lock age to prevent deadlocks from crashed processes
-				try {
-					const stats = await fs.stat(lockPath);
-					const age = Date.now() - stats.mtimeMs;
-					if (age > 20000) {
-						console.error(
-							`⚠️  Lock is stale (${Math.round(age / 1000)}s old), breaking lock: ${lockPath}`,
-						);
-						await fs.rmdir(lockPath);
-						continue; // Retry immediately after breaking lock
-					}
-				} catch {
-					// stats failed, maybe lock was just released
-				}
-				await new Promise((resolve) => setTimeout(resolve, 200));
-			} else {
-				throw err;
-			}
-		}
-	}
-	return false;
-}
-
-/**
- * Release a cross-process file-based lock by removing the directory.
- */
-async function releaseLock(lockPath: string): Promise<void> {
-	try {
-		await fs.rmdir(lockPath);
-	} catch {
-		// Ignore error if lock already deleted
-	}
-}
 
 interface OAuthManagerConfig {
 	storagePath?: string;
@@ -257,24 +205,14 @@ export class OAuthManager {
 				session?.config?.accountId || session?.tokens?.accountId || "unknown";
 			const lockResource = `token_refresh:${accountId}`;
 			let lockId: unknown = null;
-			const lockPath = path.join(this.storage.getStoragePath(), "session.lock");
-			let fileLockAcquired = false;
 
 			try {
-				// Acquire Redis distributed lock (preferred) or fall back to file lock
+				// Acquire Redis distributed lock
 				if (this.lockProvider) {
 					lockId = await this.lockProvider.acquire(lockResource);
 					if (!lockId) {
 						throw new TokenRefreshError(
 							"Failed to acquire Redis lock for token refresh",
-							true,
-						);
-					}
-				} else {
-					fileLockAcquired = await acquireLock(lockPath);
-					if (!fileLockAcquired) {
-						throw new TokenRefreshError(
-							"Failed to acquire session lock for token refresh",
 							true,
 						);
 					}
@@ -358,8 +296,6 @@ export class OAuthManager {
 			} finally {
 				if (lockId && this.lockProvider) {
 					await this.lockProvider.release(lockResource, lockId);
-				} else if (fileLockAcquired) {
-					await releaseLock(lockPath);
 				}
 				this.refreshPromise = null;
 			}
@@ -504,8 +440,6 @@ export class OAuthManager {
 		let session = await this.storage.load();
 		if (!session?.tokens?.refresh_token) return;
 
-		const lockPath = path.join(this.storage.getStoragePath(), "session.lock");
-		let lockAcquired = false;
 		let lockId: unknown = null;
 		const lockResource = `token_refresh:${session?.config?.accountId || session?.tokens?.accountId || "unknown"}`;
 
@@ -518,14 +452,6 @@ export class OAuthManager {
 					if (!lockId) {
 						throw new TokenRefreshError(
 							"Failed to acquire Redis lock for auto-recovery",
-							true,
-						);
-					}
-				} else {
-					lockAcquired = await acquireLock(lockPath);
-					if (!lockAcquired) {
-						throw new TokenRefreshError(
-							"Failed to acquire session lock for auto-recovery",
 							true,
 						);
 					}
@@ -599,9 +525,6 @@ export class OAuthManager {
 					if (lockId && this.lockProvider) {
 						await this.lockProvider.release(lockResource, lockId);
 						lockId = null;
-					} else if (lockAcquired) {
-						await releaseLock(lockPath);
-						lockAcquired = false;
 					}
 					await new Promise((resolve) => setTimeout(resolve, delay));
 
@@ -625,9 +548,6 @@ export class OAuthManager {
 				if (lockId && this.lockProvider) {
 					await this.lockProvider.release(lockResource, lockId);
 					lockId = null;
-				} else if (lockAcquired) {
-					await releaseLock(lockPath);
-					lockAcquired = false;
 				}
 			}
 		}

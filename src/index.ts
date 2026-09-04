@@ -1,7 +1,6 @@
 #!/usr/bin/env node
-
 import "./utils/envLoader.js";
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import http from "node:http";
 import https from "node:https";
 import { dirname, join } from "node:path";
@@ -80,25 +79,10 @@ class NetSuiteMCPServer {
 		this.cacheProvider = new RedisCacheProvider(redisUrl);
 		cacheService.configure(this.cacheProvider);
 
-		const localLegacySession = envConfig.NETSUITE_ACCOUNT_ID
-			? join(
-					projectRoot,
-					"sessions",
-					envConfig.NETSUITE_ACCOUNT_ID.toLowerCase(),
-				)
-			: join(projectRoot, "sessions");
-
-		const standardSessionPath = resolveSessionPath(
+		const sessionsPath = resolveSessionPath(
 			envConfig.NETSUITE_ACCOUNT_ID,
 			envConfig.NETSUITE_SESSION_PATH,
 		);
-
-		// Prefer existing local legacy sessions if present, otherwise use standard path
-		const sessionsPath =
-			!envConfig.NETSUITE_SESSION_PATH &&
-			existsSync(join(localLegacySession, "session.json"))
-				? localLegacySession
-				: standardSessionPath;
 
 		this.oauthManager = new OAuthManager({
 			storagePath: sessionsPath,

@@ -2,16 +2,14 @@
 
 An enterprise-grade Model Context Protocol (MCP) server providing AI agents with secure, high-performance access to Oracle NetSuite ERP data and SuiteCloud developer operations.
 
-Built for seamless integration with MCP clients including **Claude Code**, **Cursor IDE**, **Gemini CLI**, **Windsurf**, and **Roo Code**, as well as standalone HTTP/SSE microservices.
+Built for seamless integration with MCP clients including **Claude Code**, **Cursor IDE**, **Gemini CLI**, **Windsurf**, and **Roo Code**.
 
 ---
 
 ## 🌟 Key Capabilities
 
 - 🔐 **OAuth 2.0 PKCE Authentication**: Secure public-client authentication without client secrets. Proactive token rotation and auto-recovery survive server restarts.
-- ⚡ **Dual Transport Architecture**:
-  - **Stdio Transport**: Standard I/O communication for local IDEs and CLI coding agents.
-  - **Streamable HTTP Server (Hono)**: High-performance HTTP server with Server-Sent Events (SSE), multi-account routing (`/mcp/:accountId`), and health checks (`/health`).
+- ⚡ **Industry-Standard Stdio Transport**: Native standard I/O communication for local IDEs and CLI coding agents. Zero network port conflicts, zero SSRF attack surface, and automatic lifecycle management bound to your MCP client.
 - 🔒 **Distributed Cache & Concurrency Safety**: Pure Redis caching (`ioredis`) backed by Redlock distributed locks (`redlock`) to prevent concurrent token refresh race conditions across multi-worker environments.
 - 🛡️ **Runtime SQL Guardrails & Self-Healing (`suiteqlGuard`)**:
   - Hard-blocks dangerous wildcard projections (`SELECT *`) to preserve LLM token context.
@@ -25,11 +23,11 @@ Built for seamless integration with MCP clients including **Claude Code**, **Cur
 - 🗜️ **Context Slimming & Token Economy**:
   - Strips null/empty noise from NetSuite JSON payloads.
   - Automatically formats query results and metadata into dense, readable Markdown tables, cutting LLM context consumption by over 60%.
-- 📚 **Native MCP Resources & Prompts**:
+- 📚 **Native MCP Resources & Prompts (Out-of-the-Box)**:
   - Exposes 272 standard NetSuite record definitions (`netsuite://records/reference`).
   - Curated SuiteQL golden templates (`netsuite://queries/golden-templates`).
   - SuiteCloud Agent Skills integration (`netsuite://skills/*`).
-  - Specialized prompt templates for SuiteScript 2.1 code reviews, error stack trace debugging, and SuiteQL generation.
+  - Ready-to-use prompt templates for SuiteScript 2.1 code reviews, error stack trace debugging, and SuiteQL generation.
 - 🔄 **Daemon & Background Keepalive**:
   - Background scheduler proactively refreshes OAuth tokens before expiration.
   - Native macOS LaunchAgent daemon keeps tokens fresh 24/7 without manual user re-authentication.
@@ -41,17 +39,10 @@ Built for seamless integration with MCP clients including **Claude Code**, **Cur
 ```
                       MCP Clients
        (Claude Code / Cursor / Windsurf / Gemini CLI)
-               │                             │
-        stdio (JSON-RPC)              HTTP / SSE (Streamable)
-               │                             │
-               ▼                             ▼
-   ┌───────────────────────┐     ┌───────────────────────┐
-   │ Stdio Server Instance │     │  Hono HTTP Server     │
-   │      (dist/index.js)  │     │   (dist/server.js)    │
-   └───────────┬───────────┘     └───────────┬───────────┘
-               │                             │
-               └──────────────┬──────────────┘
-                              ▼
+                             │
+                      stdio (JSON-RPC)
+                             │
+                             ▼
 ┌─────────────────────────────────────────────────────────────┐
 │                      NetSuite MCP Core                      │
 │                                                             │
@@ -124,13 +115,11 @@ Built for seamless integration with MCP clients including **Claude Code**, **Cur
 - **`netsuite://records/reference`**: Complete catalog index of all 272 standard NetSuite record types.
 - **`netsuite://skills/{skillName}`**: Markdown manuals for bundled NetSuite SuiteCloud Agent Skills (e.g., `netsuite-ai-connector-instructions`, `netsuite-sdf-safe-guide`).
 
-### Prompts
+### Prompts (Ready-to-Use)
 
 - **`review_suitescript`**: Review SuiteScript 2.1 code against Oracle SAFE Guide principles, governance limits, OWASP security, and performance patterns.
 - **`debug_script_error`**: Analyze NetSuite runtime error stack traces, explain root causes, and provide actionable refactoring patches.
 - **`generate_suiteql`**: Generate production-ready SuiteQL queries adhering to SAFE Guide guidelines.
-
-*(Prompts are disabled by default to avoid cluttering IDE menus; set `ENABLE_MCP_PROMPTS=true` to enable.)*
 
 ---
 
@@ -186,9 +175,8 @@ Place `netsuite.config.json` in your project root or in `~/.config/netsuite-mcp/
 | `NETSUITE_ACCOUNT_ID` | NetSuite Account ID (e.g. `1234567` or `1234567_SB1`) | — |
 | `NETSUITE_CLIENT_ID` | OAuth 2.0 Client ID from the NetSuite Integration record | — |
 | `OAUTH_CALLBACK_PORT` | Local port for OAuth PKCE browser redirect callback | `8080` |
-| `NETSUITE_SESSION_PATH`| Directory where encrypted tokens and sessions are stored | `~/.config/netsuite-mcp/sessions/<account>` |
+| `NETSUITE_SESSION_PATH`| Directory where tokens and sessions are stored | `~/.config/netsuite-mcp/sessions/<account>` |
 | `REDIS_URL` | Redis connection URL for distributed cache and lock provider | `redis://127.0.0.1:6379` |
-| `ENABLE_MCP_PROMPTS` | Set to `true` to register prompt templates in MCP clients | `false` |
 
 ---
 
@@ -262,31 +250,12 @@ To work with multiple NetSuite accounts concurrently without session collisions:
 
 ---
 
-## 🌐 Streamable HTTP Server Mode (Hono)
-
-In addition to stdio transport, NetSuite MCP can run as an HTTP microservice powered by Hono and `@hono/node-server`:
-
-```bash
-# Development mode
-npm run dev:http
-
-# Production mode
-npm run build && npm run start:http
-```
-
-### Endpoints:
-- **`GET /health`**: Health check reporting server status, configured accounts, and Redis connectivity.
-- **`POST /mcp/:accountId`**: Standard MCP JSON-RPC protocol over HTTP.
-- **`GET /mcp/:accountId/sse`**: Streamable Server-Sent Events (SSE) transport for remote MCP clients.
-
----
-
 ## ⏰ Token Keepalive Daemon (macOS)
 
 Keep NetSuite OAuth 2.0 tokens active 24/7 in the background via a native macOS LaunchAgent:
 
 ```bash
-# Install and register the LaunchAgent daemon (runs keepalive every 25 minutes)
+# Install and register the LaunchAgent daemon (runs keepalive every 10 minutes)
 npm run daemon:install
 
 # Check daemon execution and plist status
@@ -301,7 +270,6 @@ npm run daemon:uninstall
 
 Logs are stored in:
 - `~/Library/Logs/netsuite-mcp-daemon.log`
-- `~/Library/Logs/netsuite-mcp-server.log`
 
 ---
 
@@ -313,7 +281,6 @@ Logs are stored in:
 | `npm test` | Run Vitest unit & integration test suite |
 | `npm run lint` | Run Biome linter & code formatter check |
 | `npm run dev` | Start stdio MCP server in development mode via `tsx` |
-| `npm run dev:http` | Start Hono HTTP/SSE server in development mode via `tsx` |
 | `npm run auth:all` | Interactive bulk OAuth authentication tool across all configured accounts |
 | `npm run fetch-skills` | Download official Oracle SuiteCloud Agent Skills |
 | `npm run sync-agents` | Sync AGENTS.md rules to connected client workspaces |
@@ -326,7 +293,8 @@ Logs are stored in:
 1. **Public Client PKCE**: Tokens are exchanged using cryptographically generated code verifiers and SHA-256 challenges. No client secrets are stored or transmitted.
 2. **Production Write Shield**: Destructive tools (`ns_createRecord`, `ns_updateRecord`) are guarded by both tool-filtering and runtime account-type inspection to prevent accidental updates in Production environments.
 3. **Session Quarantine**: Each NetSuite account maintains its own isolated token directory, preventing cross-tenant data leakage.
-4. **Least Privilege**: Configure the NetSuite Integration Role with only the permissions required for your team's workflow.
+4. **Zero Open Ports**: Stdio transport runs via local child process standard I/O, exposing no network listeners or endpoints.
+5. **Least Privilege**: Configure the NetSuite Integration Role with only the permissions required for your team's workflow.
 
 ---
 

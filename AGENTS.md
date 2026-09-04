@@ -2,7 +2,7 @@
 
 This repository contains the source code for the **NetSuite MCP Server** (`@suiteinsider/netsuite-mcp`). It exposes NetSuite functionalities to AI agents over the Model Context Protocol (MCP).
 
-**Tech Stack:** TypeScript (strict) · Node.js ≥ 18 (ESM) · OAuth 2.0 PKCE · Dual-layer cache (L1 in-memory + L2 file system)
+**Tech Stack:** TypeScript (strict) · Node.js ≥ 18 (ESM) · Stdio Transport · OAuth 2.0 PKCE · Redis 分布式缓存与 Redlock 分布式锁
 
 ---
 

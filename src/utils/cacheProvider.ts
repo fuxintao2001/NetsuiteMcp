@@ -45,21 +45,3 @@ export interface CacheProvider {
 	 */
 	getStats(): Promise<CacheStats>;
 }
-
-export class NoopCacheProvider implements CacheProvider {
-	async connect(): Promise<void> {}
-	async disconnect(): Promise<void> {}
-	async get<T>(): Promise<T | null> {
-		return null;
-	}
-	async set<_T>(): Promise<void> {}
-	async delete(): Promise<void> {}
-	async clearAccountCache(): Promise<void> {}
-	async getStats(): Promise<CacheStats> {
-		return {
-			provider: "noop",
-			connected: false,
-			keyCount: 0,
-		};
-	}
-}

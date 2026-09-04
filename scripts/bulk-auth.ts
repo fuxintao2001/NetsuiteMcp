@@ -6,7 +6,9 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { OAuthManager } from "../src/oauth/manager.js";
+import { resolveSessionPath } from "../src/utils/config.js";
 import { getKnownClientId } from "../src/utils/constants.js";
+import { getDefaultSessionsDir } from "../src/utils/environment.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -49,13 +51,7 @@ async function discoverAccounts(): Promise<AccountConfig[]> {
 				const accId = String(ws.accountId || "").trim();
 				if (!accId) continue;
 				const normKey = accId.toLowerCase().replace(/_/g, "-");
-				const sessionDir = path.join(
-					os.homedir(),
-					".gemini",
-					"antigravity",
-					"sessions",
-					accId.toLowerCase().replace(/-/g, "_"),
-				);
+				const sessionDir = resolveSessionPath(accId);
 				const clientId = getKnownClientId(accId) || "";
 				const callbackPort =
 					DEFAULT_CALLBACK_PORTS[normKey] ||
@@ -77,8 +73,7 @@ async function discoverAccounts(): Promise<AccountConfig[]> {
 	const sessionRoots = [
 		process.env.NETSUITE_SESSION_PATH,
 		process.env.DAEMON_SESSION_ROOTS,
-		path.join(os.homedir(), ".gemini", "antigravity", "sessions"),
-		path.join(projectRoot, "sessions"),
+		getDefaultSessionsDir(),
 	].filter(Boolean) as string[];
 
 	for (const root of sessionRoots) {
