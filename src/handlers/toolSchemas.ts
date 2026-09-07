@@ -243,25 +243,40 @@ export type GetSystemNotesArgs = z.infer<typeof GetSystemNotesArgsSchema>;
 
 export const SuitecloudUploadArgsSchema = z.object({
 	paths: z
-		.string()
-		.trim()
-		.min(1, "paths is required")
+		.union([
+			z.string().trim().min(1, "paths is required"),
+			z.array(z.string().trim().min(1)).min(1, "paths array cannot be empty"),
+		])
 		.describe(
-			"File Cabinet path or local file path to upload (e.g. '/SuiteScripts/my_script.js' or full local path).",
+			"File Cabinet path, local file path, directory, or array of paths to upload (e.g. '/SuiteScripts/my_script.js' or ['/SuiteScripts/a.js', '/SuiteScripts/b.js']).",
 		),
 	projectPath: z
 		.string()
 		.trim()
 		.optional()
 		.describe(
-			"Optional path to the SDF project root directory. Defaults to detecting upwards from paths or current directory.",
+			"Optional path to the SDF project root directory. Automatically detected from active account and workspace if omitted.",
+		),
+	authId: z
+		.string()
+		.trim()
+		.optional()
+		.describe(
+			"Optional SuiteCloud authentication ID (e.g. '9260916_SB1-Adm-Sand'). Automatically verified and matched to active account if omitted.",
 		),
 	dryRun: z
 		.boolean()
 		.optional()
 		.default(false)
 		.describe(
-			"Optional dry-run flag. If true, generates execution preview without uploading.",
+			"Optional dry-run flag. If true, inspects local files, validates syntax, and returns execution preview without uploading.",
+		),
+	skipValidation: z
+		.boolean()
+		.optional()
+		.default(false)
+		.describe(
+			"Optional. If true, skips pre-flight SuiteScript syntax and JSDoc annotation validation.",
 		),
 	allowProduction: z
 		.boolean()
@@ -272,6 +287,38 @@ export const SuitecloudUploadArgsSchema = z.object({
 		),
 });
 export type SuitecloudUploadArgs = z.infer<typeof SuitecloudUploadArgsSchema>;
+
+export const GetErrorSummaryArgsSchema = z.object({
+	days: z
+		.number()
+		.int()
+		.min(1)
+		.max(90)
+		.optional()
+		.default(7)
+		.describe("Number of days in the past to analyze (default: 7, max: 90)."),
+	tool: z
+		.string()
+		.trim()
+		.optional()
+		.describe(
+			"Optional: Filter errors by specific tool name (e.g. 'ns_runCustomSuiteQL').",
+		),
+	category: z
+		.enum([
+			"ARGUMENT_VALIDATION",
+			"SUITEQL_SYNTAX",
+			"PERMISSION_DENIED",
+			"RECORD_NOT_FOUND",
+			"PRODUCTION_WRITE_BLOCKED",
+			"NETWORK_OR_TIMEOUT",
+			"NETSUITE_API_ERROR",
+			"SYSTEM_EXCEPTION",
+		])
+		.optional()
+		.describe("Optional: Filter errors by category."),
+});
+export type GetErrorSummaryArgs = z.infer<typeof GetErrorSummaryArgsSchema>;
 
 // ---------------------------------------------------------------------------
 // Static Tool Schema Definitions (local tools)
@@ -553,24 +600,47 @@ export const SUITECLOUD_UPLOAD_TOOL = {
 	name: "netsuite_suitecloud_upload",
 	description:
 		"Upload script or asset files to NetSuite File Cabinet using SuiteCloud CLI ('suitecloud file:upload'). " +
+		"Supports single files, multiple paths, arrays, and directories. Auto-detects SDF project & matches Auth ID. " +
 		"In Sandbox, uploads execute directly. In Production, requires allowProduction=true when user authorizes upload to Production.",
 	inputSchema: {
 		type: "object" as const,
 		properties: {
 			paths: {
-				type: "string",
+				anyOf: [
+					{
+						type: "string",
+						description:
+							"File Cabinet path, local file path, directory, or space/comma-separated list of paths (e.g. '/SuiteScripts/my_script.js').",
+					},
+					{
+						type: "array",
+						items: { type: "string" },
+						description:
+							"Array of File Cabinet paths or local file paths (e.g. ['/SuiteScripts/a.js', '/SuiteScripts/b.js']).",
+					},
+				],
 				description:
-					"File Cabinet path or local file path to upload (e.g. '/SuiteScripts/my_script.js').",
+					"File Cabinet path, local path, directory, or array of paths to upload.",
 			},
 			projectPath: {
 				type: "string",
 				description:
-					"Optional SDF project root path. Auto-detected if omitted.",
+					"Optional SDF project root path. Automatically detected from active account workspace, environment, or file paths if omitted.",
+			},
+			authId: {
+				type: "string",
+				description:
+					"Optional SuiteCloud authentication ID (e.g. '9260916_SB1-Adm-Sand'). Automatically verified and matched to active account if omitted.",
 			},
 			dryRun: {
 				type: "boolean",
 				description:
-					"Optional. If true, inspects local file and returns execution preview without uploading.",
+					"Optional. If true, inspects local files, validates syntax, and returns execution preview without uploading.",
+			},
+			skipValidation: {
+				type: "boolean",
+				description:
+					"Optional. If true, skips pre-flight SuiteScript syntax and JSDoc annotation validation.",
 			},
 			allowProduction: {
 				type: "boolean",
@@ -579,6 +649,43 @@ export const SUITECLOUD_UPLOAD_TOOL = {
 			},
 		},
 		required: ["paths"],
+	},
+};
+
+export const GET_ERROR_SUMMARY_TOOL = {
+	name: "netsuite_get_error_summary",
+	description:
+		"Analyze and summarize historical NetSuite MCP tool execution errors from structured logs. " +
+		"Provides breakdown by tool and category, high-frequency error patterns, and actionable recommendations " +
+		"for optimizing tool schemas, SuiteQL queries, prompt guidance, and NetSuite permissions.",
+	inputSchema: {
+		type: "object" as const,
+		properties: {
+			days: {
+				type: "number",
+				description:
+					"Number of days of error logs to analyze (default: 7, max: 90).",
+			},
+			tool: {
+				type: "string",
+				description:
+					"Optional tool name filter (e.g. 'ns_runCustomSuiteQL', 'ns_getRecord').",
+			},
+			category: {
+				type: "string",
+				enum: [
+					"ARGUMENT_VALIDATION",
+					"SUITEQL_SYNTAX",
+					"PERMISSION_DENIED",
+					"RECORD_NOT_FOUND",
+					"PRODUCTION_WRITE_BLOCKED",
+					"NETWORK_OR_TIMEOUT",
+					"NETSUITE_API_ERROR",
+					"SYSTEM_EXCEPTION",
+				],
+				description: "Optional error category filter.",
+			},
+		},
 	},
 };
 
@@ -631,4 +738,5 @@ export const LOCAL_TOOLS = [
 	GET_QUERY_TEMPLATE_TOOL,
 	GET_SYSTEM_NOTES_TOOL,
 	SUITECLOUD_UPLOAD_TOOL,
+	GET_ERROR_SUMMARY_TOOL,
 ];

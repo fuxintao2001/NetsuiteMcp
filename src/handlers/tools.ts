@@ -30,9 +30,15 @@ import { suitecloudRunnerService } from "../utils/suitecloudRunner.js";
 import { formatSuiteQLErrorResponse } from "../utils/suiteqlGuard.js";
 
 import { suiteqlTemplateService } from "../utils/suiteqlTemplates.js";
+import { classifyError, recordToolError } from "../utils/toolErrorLogger.js";
+import {
+	formatSummaryToMarkdown,
+	summarizeToolErrors,
+} from "../utils/toolErrorSummarizer.js";
 import {
 	AUTH_TOOL,
 	BatchExecuteArgsSchema,
+	GetErrorSummaryArgsSchema,
 	GetQueryTemplateArgsSchema,
 	GetRecordDefinitionArgsSchema,
 	GetRecordLinkArgsSchema,
@@ -610,97 +616,215 @@ async function handleSuitecloudUpload(
 	const {
 		paths,
 		projectPath: customProjectPath,
+		authId: customAuthId,
 		dryRun,
+		skipValidation,
 		allowProduction,
 	} = parsed.data;
 
 	const currentAccountId = (await oauthManager.getAccountId()) || "UNKNOWN";
 	const isProd = !isSandboxAccount(currentAccountId);
 
-	// Normalize FileCabinet path
-	const normalizedFcPath =
-		suitecloudRunnerService.normalizeFileCabinetPath(paths);
-
-	// Resolve project directory: if not specified and paths is absolute, try detecting upwards
-	let startDir = customProjectPath;
-	if (!startDir) {
-		if (path.isAbsolute(paths)) {
-			startDir =
-				suitecloudRunnerService.findSdfProjectRoot(path.dirname(paths)) ||
-				defaultProjectRoot;
-		} else {
-			startDir = defaultProjectRoot;
-		}
+	// 1. Resolve Project Root
+	let firstPathCandidate = Array.isArray(paths) ? paths[0] : paths;
+	if (firstPathCandidate && typeof firstPathCandidate === "string") {
+		firstPathCandidate = firstPathCandidate.split(/[\s,]+/)[0];
 	}
-	const resolvedProjectRoot =
-		suitecloudRunnerService.findSdfProjectRoot(startDir) || startDir;
 
-	// Check local file existence and inspect
-	const inspection = suitecloudRunnerService.inspectLocalFile(
+	let candidateStartDir = customProjectPath;
+	if (
+		!candidateStartDir &&
+		firstPathCandidate &&
+		path.isAbsolute(firstPathCandidate)
+	) {
+		candidateStartDir = path.dirname(firstPathCandidate);
+	}
+	if (!candidateStartDir) {
+		candidateStartDir = defaultProjectRoot;
+	}
+
+	const resolvedProjectRoot =
+		suitecloudRunnerService.findSdfProjectRoot(
+			candidateStartDir,
+			currentAccountId,
+		) || candidateStartDir;
+
+	// 2. Resolve and inspect target files
+	const resolution = suitecloudRunnerService.resolveUploadFiles(
 		resolvedProjectRoot,
 		paths,
+		{ skipValidation },
 	);
 
-	// Safety check 1: If file doesn't exist, fail immediately
-	if (!inspection.exists) {
+	if (resolution.files.length === 0) {
 		return textResult(
-			`❌ Local file inspection failed: ${inspection.error}`,
+			`❌ 未找到待上传的文件。\n` +
+				`输入路径: ${JSON.stringify(paths)}\n` +
+				`解析工程根目录: \`${resolvedProjectRoot}\`\n` +
+				`提示: 请确认文件存在于项目的 FileCabinet 结构下，或直接传入文件的绝对路径。`,
 			true,
 		);
 	}
 
-	const fileSizeKb =
-		inspection.sizeBytes !== undefined
-			? (inspection.sizeBytes / 1024).toFixed(2)
-			: "Unknown";
+	// 3. Check for missing files
+	const missingFiles = resolution.files.filter((f) => !f.exists);
+	if (missingFiles.length > 0) {
+		let missingMd = `❌ **部分或全部本地文件未找到 (404 Not Found)**\n\n`;
+		missingMd += `SDF 项目根目录: \`${resolvedProjectRoot}\`\n\n`;
+		missingMd += `| 请求路径 | 状态 | 详情 |\n|---|---|---|\n`;
+		for (const mf of missingFiles) {
+			missingMd += `| \`${mf.fileCabinetPath || "未知"}\` | ❌ 不存在 | ${mf.error || "未在项目内定位到对应文件"} |\n`;
+		}
+		missingMd += `\n💡 **排查建议**：\n`;
+		missingMd += `1. 检查文件是否位于 \`${resolvedProjectRoot}/src/FileCabinet/\` 下。\n`;
+		missingMd += `2. 可显式指定 \`projectPath\` 参数，例如 \`projectPath: "/path/to/sdf_project"\`。\n`;
+		missingMd += `3. 也可以直接传入本地文件的绝对路径。`;
+		return textResult(missingMd, true);
+	}
 
-	// Safety check 2: Production environment block
+	// 4. Pre-flight Syntax & Validation Check (unless skipValidation)
+	const invalidFiles = resolution.files.filter((f) => f.syntaxValid === false);
+	if (invalidFiles.length > 0 && !skipValidation) {
+		let syntaxMd = `🚨 **SuiteScript 代码预检失败 (Pre-flight Syntax Error)**\n\n`;
+		syntaxMd += `在尝试上传前，检测到待上传的脚本存在明显的 JavaScript 语法错误，上传到 NetSuite 会导致脚本编译或运行时异常：\n\n`;
+		for (const inv of invalidFiles) {
+			syntaxMd += `### 📄 \`${inv.fileCabinetPath}\`\n`;
+			syntaxMd += `- **本地路径**: \`${inv.localFullPath}\`\n`;
+			syntaxMd += `- **语法错误**: \`${inv.syntaxError}\`\n\n`;
+		}
+		syntaxMd += `💡 **处理方式**：请先修正上述语法错误。若确定无需预检，可指定 \`skipValidation: true\` 强制跳过。`;
+		return textResult(syntaxMd, true);
+	}
+
+	// 5. SuiteCloud Auth ID Verification and Auto-Synchronization
+	const authSync = await suitecloudRunnerService.syncProjectAuthId(
+		resolvedProjectRoot,
+		currentAccountId,
+		customAuthId,
+	);
+
+	const effectiveAuthId =
+		authSync.matchedAuthId || authSync.configuredAuthId || "UNKNOWN";
+
+	// 6. Production Safety Check (Rule 3)
 	if (isProd && !allowProduction) {
-		return textResult(
-			`🚨 **生产环境安全拦截 (Production Safety Block)**\n\n` +
-				`当前目标 NetSuite 账号为**生产环境** (\`${currentAccountId.toUpperCase()}\`)。\n` +
-				`为防止误操作覆盖生产代码，需获得用户明确授权。\n\n` +
-				`若用户已明确指示上传到生产环境，请设置 \`allowProduction: true\` 重新调用此工具，即可直接一步执行上传。`,
-			true,
-		);
+		let prodMd = `🚨 **生产环境安全拦截 (Production Safety Block)**\n\n`;
+		prodMd += `当前目标 NetSuite 账号为**生产环境** (\`${currentAccountId.toUpperCase()}\`)。\n`;
+		prodMd += `为防止误操作覆盖生产代码，需获得用户明确授权。\n\n`;
+		prodMd += `### 待上传文件清单（共 ${resolution.files.length} 个文件，${(resolution.totalBytes / 1024).toFixed(2)} KB）：\n`;
+		for (const f of resolution.files) {
+			prodMd += `- \`${f.fileCabinetPath}\` (${f.sizeBytes !== undefined ? (f.sizeBytes / 1024).toFixed(2) : 0} KB)\n`;
+		}
+		prodMd += `\n若用户已明确指示上传到生产环境，请设置 \`allowProduction: true\` 重新调用此工具，即可直接一步执行上传。`;
+		return textResult(prodMd, true);
 	}
 
+	// Array of normalized FileCabinet paths
+	const uploadFcPaths = resolution.files.map((f) => f.fileCabinetPath || "");
+
+	// 7. Dry Run Preview
 	if (dryRun) {
 		let previewMd = `## 🔍 SuiteCloud File Upload Preview (Dry Run)\n\n`;
-		previewMd += `| Parameter | Value |\n|---|---|\n`;
-		previewMd += `| **File Cabinet Path** | \`${normalizedFcPath}\` |\n`;
-		previewMd += `| **Local File Location** | \`${inspection.localFullPath}\` (${fileSizeKb} KB) |\n`;
-		previewMd += `| **Target Account** | \`${currentAccountId.toUpperCase()}\` (${isProd ? "🚨 PRODUCTION" : "🛡️ SANDBOX"}) |\n`;
-		previewMd += `| **SDF Project Root** | \`${resolvedProjectRoot}\` |\n`;
-		previewMd += `| **Command to Run** | \`suitecloud file:upload --paths "${normalizedFcPath}"\` |\n`;
+		previewMd += `| 配置项 | 详情 |\n|---|---|\n`;
+		previewMd += `| **目标账号** | \`${currentAccountId.toUpperCase()}\` (${isProd ? "🚨 PRODUCTION" : "🛡️ SANDBOX"}) |\n`;
+		previewMd += `| **SDF 项目目录** | \`${resolvedProjectRoot}\` |\n`;
+		previewMd += `| **SuiteCloud Auth ID** | \`${effectiveAuthId}\` ${authSync.autoUpdated ? "(已自动对齐)" : ""} |\n`;
+		previewMd += `| **文件总数 / 总大小** | ${resolution.files.length} 个文件 / ${(resolution.totalBytes / 1024).toFixed(2)} KB |\n`;
+		previewMd += `| **执行命令预览** | \`suitecloud file:upload --paths "${uploadFcPaths.join(" ")}"\` |\n\n`;
+
+		previewMd += `### 📋 文件详情清单\n\n`;
+		previewMd += `| # | File Cabinet 目标路径 | 本地文件位置 | 大小 | 脚本类型 / API 版本 | 预检状态 |\n|---|---|---|---|---|---|\n`;
+		resolution.files.forEach((f, idx) => {
+			const sizeKb =
+				f.sizeBytes !== undefined ? (f.sizeBytes / 1024).toFixed(2) : "0";
+			const scriptInfo =
+				[f.scriptType, f.apiVersion ? `v${f.apiVersion}` : ""]
+					.filter(Boolean)
+					.join(" / ") || "-";
+			const status = f.syntaxValid === false ? "❌ 语法错误" : "✅ 正常";
+			previewMd += `| ${idx + 1} | \`${f.fileCabinetPath}\` | \`${f.localFullPath}\` | ${sizeKb} KB | ${scriptInfo} | ${status} |\n`;
+		});
+
+		if (authSync.warning) {
+			previewMd += `\n> [!WARNING]\n> ${authSync.warning}\n`;
+		}
+		if (resolution.warnings.length > 0) {
+			previewMd += `\n> [!NOTE]\n> ${resolution.warnings.join("\n> ")}\n`;
+		}
+
 		return textResult(previewMd);
 	}
 
-	// In Sandbox (or authorized Production), execute the upload directly!
+	// 8. Execute the upload via SuiteCloud CLI
 	const execResult = await suitecloudRunnerService.executeUpload(
 		resolvedProjectRoot,
-		normalizedFcPath,
+		uploadFcPaths,
+		{
+			targetAccountId: currentAccountId,
+			authId: effectiveAuthId,
+		},
 	);
 
 	if (!execResult.success) {
-		let errorMd = `❌ **SuiteCloud Upload Failed (Time: ${execResult.executionTimeMs}ms)**\n\n`;
-		errorMd += `### CLI Error Output:\n\`\`\`\n${execResult.stderr || execResult.stdout}\n\`\`\`\n\n`;
-		errorMd += `💡 **Troubleshooting Tips:**\n`;
-		errorMd += `1. Ensure you have authenticated with SuiteCloud CLI (\`npx suitecloud account:setup\` or manageauth).\n`;
-		errorMd += `2. Ensure the active SuiteCloud auth ID matches account \`${currentAccountId}\`.\n`;
-		errorMd += `3. Check that the path \`${normalizedFcPath}\` is registered in \`deploy.xml\` or FileCabinet structure.`;
+		let errorMd = `❌ **SuiteCloud Upload 失败 (耗时: ${execResult.executionTimeMs}ms)**\n\n`;
+		errorMd += `- **目标账号**: \`${currentAccountId.toUpperCase()}\`\n`;
+		errorMd += `- **使用的 Auth ID**: \`${effectiveAuthId}\`\n`;
+		errorMd += `- **SDF 项目根目录**: \`${resolvedProjectRoot}\`\n\n`;
+		errorMd += `### CLI 原始错误输出：\n\`\`\`\n${execResult.stderr || execResult.stdout}\n\`\`\`\n\n`;
+
+		if (execResult.diagnostics && execResult.diagnostics.length > 0) {
+			errorMd += `💡 **智能自愈与排查指南：**\n`;
+			execResult.diagnostics.forEach((diag) => {
+				errorMd += `${diag}\n\n`;
+			});
+		}
+
 		return textResult(errorMd, true);
 	}
 
-	let successMd = `✅ **SuiteCloud File Upload Succeeded (Time: ${execResult.executionTimeMs}ms)**\n\n`;
-	successMd += `- **Uploaded Path**: \`${normalizedFcPath}\`\n`;
-	successMd += `- **Target Account**: \`${currentAccountId.toUpperCase()}\`\n`;
-	successMd += `- **Local File**: \`${inspection.localFullPath}\`\n\n`;
+	// 9. Success response formatting
+	let successMd = `✅ **SuiteCloud File Upload Succeeded / 上传成功 (Time: ${execResult.executionTimeMs}ms)**\n\n`;
+	successMd += `| 属性 | 信息 |\n|---|---|\n`;
+	successMd += `| **目标账号** | \`${currentAccountId.toUpperCase()}\` (${isProd ? "🚨 PRODUCTION" : "🛡️ SANDBOX"}) |\n`;
+	successMd += `| **使用的 Auth ID** | \`${effectiveAuthId}\` |\n`;
+	successMd += `| **成功上传文件数** | ${resolution.files.length} 个文件 (${(resolution.totalBytes / 1024).toFixed(2)} KB) |\n`;
+	successMd += `| **SDF 项目目录** | \`${resolvedProjectRoot}\` |\n\n`;
+
+	successMd += `### 📄 已上传文件列表\n`;
+	for (const f of resolution.files) {
+		const sizeKb =
+			f.sizeBytes !== undefined ? (f.sizeBytes / 1024).toFixed(2) : "0";
+		successMd += `- \`${f.fileCabinetPath}\` (${sizeKb} KB) ➔ \`${f.localFullPath}\`\n`;
+	}
+
 	if (execResult.stdout.trim().length > 0) {
-		successMd += `### CLI Output:\n\`\`\`\n${execResult.stdout.trim()}\n\`\`\`\n`;
+		successMd += `\n### CLI 输出：\n\`\`\`\n${execResult.stdout.trim()}\n\`\`\`\n`;
 	}
 
 	return textResult(successMd);
+}
+
+async function handleGetErrorSummary(
+	args: Record<string, unknown>,
+): Promise<ToolResponse> {
+	const parsed = GetErrorSummaryArgsSchema.safeParse(args);
+	if (!parsed.success) {
+		return textResult(
+			`❌ Invalid arguments: ${parsed.error.issues[0]?.message}`,
+			true,
+		);
+	}
+	try {
+		const summary = await summarizeToolErrors({
+			days: parsed.data.days,
+			tool: parsed.data.tool,
+			category: parsed.data.category,
+		});
+		return textResult(formatSummaryToMarkdown(summary));
+	} catch (error: unknown) {
+		const message = error instanceof Error ? error.message : String(error);
+		return textResult(`❌ Failed to summarize error logs: ${message}`, true);
+	}
 }
 
 /** Normalize standard parameters (recordType, tableName, table_name, record_type, table). */
@@ -1176,6 +1300,7 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
 
 	// --- Call Tool ---
 	server.setRequestHandler("tools/call", async (request) => {
+		const callStartTime = Date.now();
 		const { name, arguments: args } = request.params;
 		const safeArgs = normalizeStandardArgs(
 			(args || {}) as Record<string, unknown>,
@@ -1207,254 +1332,308 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
 			}
 		};
 
-		try {
-			// --- Tools that do NOT require authentication ---
-			if (name === "netsuite_authenticate") {
-				return await handleAuthentication(safeArgs);
-			}
-			if (name === "netsuite_logout") {
-				return await handleLogout();
-			}
-			if (name === "netsuite_status") {
-				return await handleStatus(oauthManager);
-			}
-
-			// --- All remaining tools require authentication ---
-			const isAuthenticated = await oauthManager.hasValidSession();
-			if (!isAuthenticated) {
-				return textResult(
-					"❌ Not authenticated. Please use the netsuite_authenticate tool first.",
-					true,
-				);
-			}
-
-			// --- Local tools (authenticated) ---
-			if (name === "netsuite_refresh_cache") {
-				return await handleCacheRefresh(safeArgs);
-			}
-			if (name === "netsuite_get_record_link") {
-				return await handleGetRecordLink(
-					safeArgs,
-					oauthManager,
-					resolveCustomRecordRectype,
-				);
-			}
-			if (name === "netsuite_batch_execute") {
-				return await handleBatchExecute(safeArgs, deps, reportProgress);
-			}
-			if (name === "netsuite_get_script_logs") {
-				return await handleGetScriptLogs(safeArgs, mcpTools);
-			}
-			if (name === "netsuite_inspect_record") {
-				return await handleInspectRecord(safeArgs, mcpTools);
-			}
-			if (name === "netsuite_get_record_definition") {
-				return await handleGetRecordDefinition(safeArgs);
-			}
-			if (name === "netsuite_get_query_template") {
-				return await handleGetQueryTemplate(safeArgs);
-			}
-			if (name === "netsuite_get_system_notes") {
-				return await handleGetSystemNotes(safeArgs, mcpTools);
-			}
-			if (name === "netsuite_suitecloud_upload") {
-				return await handleSuitecloudUpload(
-					safeArgs,
-					oauthManager,
-					deps.projectRoot,
-				);
-			}
-
-			// --- Fast metadata discovery for ns_getSuiteQLMetadata without recordType ---
-			if (name === "ns_getSuiteQLMetadata") {
-				const recordTypeRaw = safeArgs.recordType || safeArgs.tableName;
-				if (!recordTypeRaw) {
-					const keywordRaw = safeArgs.keyword || safeArgs.search;
-					const keyword =
-						typeof keywordRaw === "string" ? keywordRaw.trim() : undefined;
-					const entries = searchSuiteQLCatalog(keyword);
-					return textResult(formatTableCatalogMarkdown(entries, keyword));
+		const recordErrorIfPresent = async (
+			res: CallToolResult,
+			errorStack?: string,
+		): Promise<CallToolResult> => {
+			if (res.isError && name !== "netsuite_get_error_summary") {
+				let currentAccountId: string | undefined;
+				let currentEnv: "Sandbox" | "Production" | "Unknown" = "Unknown";
+				try {
+					const detectedId =
+						(await oauthManager.getAccountId()) ||
+						process.env.NETSUITE_ACCOUNT_ID;
+					if (detectedId) {
+						currentAccountId = detectedId;
+						currentEnv = isSandboxAccount(detectedId)
+							? "Sandbox"
+							: "Production";
+					}
+				} catch {
+					// Non-fatal
 				}
-			}
 
-			// --- Dual-Gate Defense: Strictly block write operations in production ---
-			if (name === "ns_createRecord" || name === "ns_updateRecord") {
-				const accountId =
-					(await oauthManager.getAccountId()) ||
-					process.env.NETSUITE_ACCOUNT_ID;
-				if (!accountId || !isSandboxAccount(accountId)) {
+				const errorText =
+					res.content
+						?.filter(
+							(c): c is { type: "text"; text: string } => c.type === "text",
+						)
+						.map((c) => c.text)
+						.join("\n") || "Unknown error";
+				const category = classifyError(name, errorText);
+				recordToolError({
+					tool: name,
+					accountId: currentAccountId,
+					environment: currentEnv,
+					durationMs: Date.now() - callStartTime,
+					category,
+					errorMessage: errorText,
+					errorStack,
+					parameters: safeArgs,
+				});
+			}
+			return res;
+		};
+
+		try {
+			const result = await (async (): Promise<CallToolResult> => {
+				// --- Tools that do NOT require authentication ---
+				if (name === "netsuite_authenticate") {
+					return await handleAuthentication(safeArgs);
+				}
+				if (name === "netsuite_logout") {
+					return await handleLogout();
+				}
+				if (name === "netsuite_status") {
+					return await handleStatus(oauthManager);
+				}
+				if (name === "netsuite_get_error_summary") {
+					return await handleGetErrorSummary(safeArgs);
+				}
+
+				// --- All remaining tools require authentication ---
+				const isAuthenticated = await oauthManager.hasValidSession();
+				if (!isAuthenticated) {
 					return textResult(
-						`⛔ [Production Safety Violation] Operation '${name}' is strictly blocked in Production environment (${accountId || "unknown"}). ` +
-							`Record create and update operations are only permitted in Sandbox / Test environments (accounts containing '_SB' or 'TSTDRV').`,
+						"❌ Not authenticated. Please use the netsuite_authenticate tool first.",
 						true,
 					);
 				}
-			}
 
-			// --- Proxy to NetSuite MCP API ---
-			let result: unknown;
-			let executeError: unknown = null;
-
-			if (name === "ns_runCustomSuiteQL") {
-				await reportProgress(1, 3, "Validating & optimizing SuiteQL query...");
-			}
-
-			try {
-				if (name === "ns_runCustomSuiteQL") {
-					await reportProgress(
-						2,
-						3,
-						"Executing SuiteQL query against NetSuite...",
+				// --- Local tools (authenticated) ---
+				if (name === "netsuite_refresh_cache") {
+					return await handleCacheRefresh(safeArgs);
+				}
+				if (name === "netsuite_get_record_link") {
+					return await handleGetRecordLink(
+						safeArgs,
+						oauthManager,
+						resolveCustomRecordRectype,
 					);
 				}
-				result = await mcpTools.executeTool(name, safeArgs);
-				if (name === "ns_runCustomSuiteQL") {
-					await reportProgress(
-						3,
-						3,
-						"Formatting & slimming response payload...",
+				if (name === "netsuite_batch_execute") {
+					return await handleBatchExecute(safeArgs, deps, reportProgress);
+				}
+				if (name === "netsuite_get_script_logs") {
+					return await handleGetScriptLogs(safeArgs, mcpTools);
+				}
+				if (name === "netsuite_inspect_record") {
+					return await handleInspectRecord(safeArgs, mcpTools);
+				}
+				if (name === "netsuite_get_record_definition") {
+					return await handleGetRecordDefinition(safeArgs);
+				}
+				if (name === "netsuite_get_query_template") {
+					return await handleGetQueryTemplate(safeArgs);
+				}
+				if (name === "netsuite_get_system_notes") {
+					return await handleGetSystemNotes(safeArgs, mcpTools);
+				}
+				if (name === "netsuite_suitecloud_upload") {
+					return await handleSuitecloudUpload(
+						safeArgs,
+						oauthManager,
+						deps.projectRoot,
 					);
 				}
-			} catch (err: unknown) {
+
+				// --- Fast metadata discovery for ns_getSuiteQLMetadata without recordType ---
+				if (name === "ns_getSuiteQLMetadata") {
+					const recordTypeRaw = safeArgs.recordType || safeArgs.tableName;
+					if (!recordTypeRaw) {
+						const keywordRaw = safeArgs.keyword || safeArgs.search;
+						const keyword =
+							typeof keywordRaw === "string" ? keywordRaw.trim() : undefined;
+						const entries = searchSuiteQLCatalog(keyword);
+						return textResult(formatTableCatalogMarkdown(entries, keyword));
+					}
+				}
+
+				// --- Dual-Gate Defense: Strictly block write operations in production ---
+				if (name === "ns_createRecord" || name === "ns_updateRecord") {
+					const accountId =
+						(await oauthManager.getAccountId()) ||
+						process.env.NETSUITE_ACCOUNT_ID;
+					if (!accountId || !isSandboxAccount(accountId)) {
+						return textResult(
+							`⛔ [Production Safety Violation] Operation '${name}' is strictly blocked in Production environment (${accountId || "unknown"}). ` +
+								`Record create and update operations are only permitted in Sandbox / Test environments (accounts containing '_SB' or 'TSTDRV').`,
+							true,
+						);
+					}
+				}
+
+				// --- Proxy to NetSuite MCP API ---
+				let result: unknown;
+				let executeError: unknown = null;
+
+				if (name === "ns_runCustomSuiteQL") {
+					await reportProgress(
+						1,
+						3,
+						"Validating & optimizing SuiteQL query...",
+					);
+				}
+
+				try {
+					if (name === "ns_runCustomSuiteQL") {
+						await reportProgress(
+							2,
+							3,
+							"Executing SuiteQL query against NetSuite...",
+						);
+					}
+					result = await mcpTools.executeTool(name, safeArgs);
+					if (name === "ns_runCustomSuiteQL") {
+						await reportProgress(
+							3,
+							3,
+							"Formatting & slimming response payload...",
+						);
+					}
+				} catch (err: unknown) {
+					if (
+						name === "ns_getRecordTypeMetadata" ||
+						name === "ns_getSuiteQLMetadata"
+					) {
+						executeError = err;
+					} else {
+						throw err;
+					}
+				}
+
 				if (
 					name === "ns_getRecordTypeMetadata" ||
 					name === "ns_getSuiteQLMetadata"
 				) {
-					executeError = err;
-				} else {
-					throw err;
-				}
-			}
+					const recordTypeRaw = safeArgs.recordType || safeArgs.tableName;
+					const hydratedResult = await hydrateMetadataIfNeeded(
+						name,
+						recordTypeRaw,
+						result ?? null,
+						mcpTools,
+						resolveCustomRecordRectype,
+					);
 
-			if (
-				name === "ns_getRecordTypeMetadata" ||
-				name === "ns_getSuiteQLMetadata"
-			) {
-				const recordTypeRaw = safeArgs.recordType || safeArgs.tableName;
-				const hydratedResult = await hydrateMetadataIfNeeded(
-					name,
-					recordTypeRaw,
-					result ?? null,
-					mcpTools,
-					resolveCustomRecordRectype,
-				);
+					if (hydratedResult) {
+						const parsed = unwrapMcpContent(hydratedResult) as Record<
+							string,
+							unknown
+						> | null;
 
-				if (hydratedResult) {
-					const parsed = unwrapMcpContent(hydratedResult) as Record<
-						string,
-						unknown
-					> | null;
-
-					if (
-						parsed &&
-						typeof parsed === "object" &&
-						parsed.success === false
-					) {
-						const errorMsg =
-							parsed.error || parsed.message || JSON.stringify(parsed);
-						if (isPermissionError(String(errorMsg))) {
-							return textResult(
-								`❌ NetSuite Permission Error: ${errorMsg}\n\n${PERMISSION_HARD_STOP_ADVICE.trim()}`,
-								true,
-							);
+						if (
+							parsed &&
+							typeof parsed === "object" &&
+							parsed.success === false
+						) {
+							const errorMsg =
+								parsed.error || parsed.message || JSON.stringify(parsed);
+							if (isPermissionError(String(errorMsg))) {
+								return textResult(
+									`❌ NetSuite Permission Error: ${errorMsg}\n\n${PERMISSION_HARD_STOP_ADVICE.trim()}`,
+									true,
+								);
+							}
+							if (name === "ns_getSuiteQLMetadata") {
+								return textResult(
+									formatSuiteQLErrorResponse(String(errorMsg)),
+									true,
+								);
+							}
+							return textResult(`❌ NetSuite Error: ${errorMsg}`, true);
 						}
-						if (name === "ns_getSuiteQLMetadata") {
-							return textResult(
-								formatSuiteQLErrorResponse(String(errorMsg)),
-								true,
-							);
-						}
-						return textResult(`❌ NetSuite Error: ${errorMsg}`, true);
+
+						const compactMarkdown =
+							formatMetadataToCompactMarkdown(hydratedResult);
+						return textResult(compactMarkdown);
 					}
 
-					const compactMarkdown =
-						formatMetadataToCompactMarkdown(hydratedResult);
+					if (executeError) {
+						const errMsg =
+							executeError instanceof Error
+								? executeError.message
+								: String(executeError);
+						if (name === "ns_getSuiteQLMetadata") {
+							return textResult(formatSuiteQLErrorResponse(errMsg), true);
+						}
+						throw executeError;
+					}
+
+					const compactMarkdown = formatMetadataToCompactMarkdown(result);
 					return textResult(compactMarkdown);
 				}
 
-				if (executeError) {
-					const errMsg =
-						executeError instanceof Error
-							? executeError.message
-							: String(executeError);
-					if (name === "ns_getSuiteQLMetadata") {
-						return textResult(formatSuiteQLErrorResponse(errMsg), true);
+				// Check if the record tool call returned a NetSuite-level error
+				const parsedRecordResult = unwrapMcpContent(result) as Record<
+					string,
+					unknown
+				> | null;
+
+				if (
+					parsedRecordResult &&
+					typeof parsedRecordResult === "object" &&
+					parsedRecordResult.success === false
+				) {
+					const errorMsg = String(
+						parsedRecordResult.error ||
+							parsedRecordResult.message ||
+							JSON.stringify(parsedRecordResult),
+					);
+					if (isPermissionError(errorMsg)) {
+						return textResult(
+							`❌ NetSuite Permission Error: ${errorMsg}\n\n${PERMISSION_HARD_STOP_ADVICE.trim()}`,
+							true,
+						);
 					}
-					throw executeError;
+					if (name === "ns_runCustomSuiteQL") {
+						const sqlQuery = (safeArgs.sqlQuery ||
+							safeArgs.query ||
+							safeArgs.sql ||
+							"") as string;
+						return textResult(
+							formatSuiteQLErrorResponse(errorMsg, sqlQuery),
+							true,
+						);
+					}
+					const guidance =
+						"\n\n💡 [Self-Healing Action]: Call `ns_getRecordTypeMetadata` to check schema constraints and valid field IDs.";
+					return textResult(`❌ NetSuite Error: ${errorMsg}${guidance}`, true);
 				}
 
-				const compactMarkdown = formatMetadataToCompactMarkdown(result);
-				return textResult(compactMarkdown);
-			}
-
-			// Check if the record tool call returned a NetSuite-level error
-			const parsedRecordResult = unwrapMcpContent(result) as Record<
-				string,
-				unknown
-			> | null;
-
-			if (
-				parsedRecordResult &&
-				typeof parsedRecordResult === "object" &&
-				parsedRecordResult.success === false
-			) {
-				const errorMsg = String(
-					parsedRecordResult.error ||
-						parsedRecordResult.message ||
-						JSON.stringify(parsedRecordResult),
-				);
-				if (isPermissionError(errorMsg)) {
-					return textResult(
-						`❌ NetSuite Permission Error: ${errorMsg}\n\n${PERMISSION_HARD_STOP_ADVICE.trim()}`,
-						true,
-					);
-				}
 				if (name === "ns_runCustomSuiteQL") {
-					const sqlQuery = (safeArgs.sqlQuery ||
-						safeArgs.query ||
-						safeArgs.sql ||
-						"") as string;
-					return textResult(
-						formatSuiteQLErrorResponse(errorMsg, sqlQuery),
-						true,
+					return textResult(formatSuiteQLToCompactMarkdown(result));
+				}
+
+				if (
+					name === "ns_getRecord" ||
+					name === "ns_createRecord" ||
+					name === "ns_updateRecord"
+				) {
+					result = cleanRecordPayload(result);
+				}
+
+				let responseText =
+					typeof result === "string" ? result : JSON.stringify(result, null, 2);
+
+				// Auto-append UI deep link for record operations
+				if (
+					name === "ns_getRecord" ||
+					name === "ns_createRecord" ||
+					name === "ns_updateRecord"
+				) {
+					responseText = await appendRecordLink(
+						responseText,
+						safeArgs,
+						result,
+						oauthManager,
+						resolveCustomRecordRectype,
 					);
 				}
-				const guidance =
-					"\n\n💡 [Self-Healing Action]: Call `ns_getRecordTypeMetadata` to check schema constraints and valid field IDs.";
-				return textResult(`❌ NetSuite Error: ${errorMsg}${guidance}`, true);
-			}
 
-			if (name === "ns_runCustomSuiteQL") {
-				return textResult(formatSuiteQLToCompactMarkdown(result));
-			}
+				return textResult(responseText);
+			})();
 
-			if (
-				name === "ns_getRecord" ||
-				name === "ns_createRecord" ||
-				name === "ns_updateRecord"
-			) {
-				result = cleanRecordPayload(result);
-			}
-
-			let responseText =
-				typeof result === "string" ? result : JSON.stringify(result, null, 2);
-
-			// Auto-append UI deep link for record operations
-			if (
-				name === "ns_getRecord" ||
-				name === "ns_createRecord" ||
-				name === "ns_updateRecord"
-			) {
-				responseText = await appendRecordLink(
-					responseText,
-					safeArgs,
-					result,
-					oauthManager,
-					resolveCustomRecordRectype,
-				);
-			}
-
-			return textResult(responseText);
+			return await recordErrorIfPresent(result);
 		} catch (error: unknown) {
 			// Let McpError propagate directly to the MCP SDK
 			if (error instanceof ProtocolError) {
@@ -1462,18 +1641,24 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
 			}
 			// All other errors: return as tool-level error response
 			const message = error instanceof Error ? error.message : String(error);
+			const stack = error instanceof Error ? error.stack : undefined;
 			let guidance = "";
+			let finalRes: CallToolResult;
 			if (isPermissionError(message)) {
 				// DO NOT attach self-healing guidance on permission errors
 				if (!message.includes("PERMISSION DENIED — HARD STOP REQUIRED")) {
 					guidance = `\n\n${PERMISSION_HARD_STOP_ADVICE.trim()}`;
 				}
+				finalRes = textResult(`❌ Error: ${message}${guidance}`, true);
 			} else if (name === "ns_runCustomSuiteQL") {
 				const sqlQuery = (safeArgs.sqlQuery ||
 					safeArgs.query ||
 					safeArgs.sql ||
 					"") as string;
-				return textResult(formatSuiteQLErrorResponse(message, sqlQuery), true);
+				finalRes = textResult(
+					formatSuiteQLErrorResponse(message, sqlQuery),
+					true,
+				);
 			} else if (
 				name === "ns_getRecord" ||
 				name === "ns_createRecord" ||
@@ -1481,8 +1666,11 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
 			) {
 				guidance =
 					"\n\n💡 [Self-Healing Action]: Call `ns_getRecordTypeMetadata` to check schema constraints and valid field IDs.";
+				finalRes = textResult(`❌ Error: ${message}${guidance}`, true);
+			} else {
+				finalRes = textResult(`❌ Error: ${message}`, true);
 			}
-			return textResult(`❌ Error: ${message}${guidance}`, true);
+			return await recordErrorIfPresent(finalRes, stack);
 		}
 	});
 }

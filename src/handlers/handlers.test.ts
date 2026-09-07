@@ -908,6 +908,20 @@ describe("MCP Handler Wires", () => {
 				expect(res.content[0].text).toContain("Pending Fulfillment");
 			});
 
+			it("should handle netsuite_get_error_summary successfully", async () => {
+				const callFn = registeredHandlers.get("tools/call");
+				const res = await callFn?.({
+					params: {
+						name: "netsuite_get_error_summary",
+						arguments: { days: 7 },
+					},
+				});
+
+				expect(res.content[0].text).toContain(
+					"NetSuite MCP 工具调用错误分析与智能优化报告",
+				);
+			});
+
 			it("should execute upload directly in sandbox without confirmation tokens", async () => {
 				const callFn = registeredHandlers.get("tools/call");
 				mockOAuthManager.getAccountId.mockResolvedValueOnce("9260916_sb1");
@@ -1019,6 +1033,98 @@ describe("MCP Handler Wires", () => {
 					"SuiteCloud File Upload Succeeded",
 				);
 				expect(res.content[0].text).toContain("9260916");
+				execSpy.mockRestore();
+			});
+
+			it("should support uploading an array of paths in sandbox", async () => {
+				const callFn = registeredHandlers.get("tools/call");
+				mockOAuthManager.getAccountId.mockResolvedValueOnce("9260916_sb1");
+
+				const s1 = path.join(testRoot, "s1.js");
+				const s2 = path.join(testRoot, "s2.js");
+				await fs.writeFile(s1, "console.log(1);");
+				await fs.writeFile(s2, "console.log(2);");
+
+				const execSpy = vi
+					.spyOn(suitecloudRunnerService, "executeUpload")
+					.mockResolvedValueOnce({
+						success: true,
+						stdout: "Batch upload complete.",
+						stderr: "",
+						executionTimeMs: 150,
+					});
+
+				const res = await callFn?.({
+					params: {
+						name: "netsuite_suitecloud_upload",
+						arguments: {
+							paths: [s1, s2],
+							projectPath: testRoot,
+						},
+					},
+				});
+
+				expect(execSpy).toHaveBeenCalled();
+				expect(res.content[0].text).toContain(
+					"SuiteCloud File Upload Succeeded",
+				);
+				expect(res.content[0].text).toContain("成功上传文件数");
+				expect(res.content[0].text).toContain("2 个文件");
+				execSpy.mockRestore();
+			});
+
+			it("should block upload with pre-flight syntax error when script is malformed", async () => {
+				const callFn = registeredHandlers.get("tools/call");
+				mockOAuthManager.getAccountId.mockResolvedValueOnce("9260916_sb1");
+
+				const brokenScript = path.join(testRoot, "broken.js");
+				await fs.writeFile(brokenScript, "function malformed( { return;");
+
+				const res = await callFn?.({
+					params: {
+						name: "netsuite_suitecloud_upload",
+						arguments: {
+							paths: brokenScript,
+							projectPath: testRoot,
+						},
+					},
+				});
+
+				expect(res.content[0].text).toContain("代码预检失败");
+				expect(res.content[0].text).toContain("JavaScript 语法错误");
+			});
+
+			it("should bypass pre-flight syntax check when skipValidation is true", async () => {
+				const callFn = registeredHandlers.get("tools/call");
+				mockOAuthManager.getAccountId.mockResolvedValueOnce("9260916_sb1");
+
+				const brokenScript = path.join(testRoot, "broken_skip.js");
+				await fs.writeFile(brokenScript, "function malformed( { return;");
+
+				const execSpy = vi
+					.spyOn(suitecloudRunnerService, "executeUpload")
+					.mockResolvedValueOnce({
+						success: true,
+						stdout: "Uploaded despite syntax.",
+						stderr: "",
+						executionTimeMs: 110,
+					});
+
+				const res = await callFn?.({
+					params: {
+						name: "netsuite_suitecloud_upload",
+						arguments: {
+							paths: brokenScript,
+							projectPath: testRoot,
+							skipValidation: true,
+						},
+					},
+				});
+
+				expect(execSpy).toHaveBeenCalled();
+				expect(res.content[0].text).toContain(
+					"SuiteCloud File Upload Succeeded",
+				);
 				execSpy.mockRestore();
 			});
 		});

@@ -85,7 +85,7 @@ Built for seamless integration with MCP clients including **Claude Code**, **Cur
 | `netsuite_get_system_notes` | High-performance audit trail query to inspect record change history without triggering timeout penalties. | `readOnly` |
 | `netsuite_get_script_logs` | Query NetSuite Script Execution Logs (`ScriptNote`) with filters for log level (DEBUG, AUDIT, ERROR, EMERGENCY), date range, and script IDs. | `readOnly` |
 | `netsuite_get_record_link` | Generate direct, clickable NetSuite UI deep links for standard and custom records. | `readOnly` |
-| `netsuite_suitecloud_upload` | Upload script and asset files to NetSuite File Cabinet using SuiteCloud CLI. Features dry-run inspection and production confirmation safeguards. | `destructive` |
+| `netsuite_suitecloud_upload` | Upload script and asset files to NetSuite File Cabinet using SuiteCloud CLI. Supports multi-file arrays, directory batch expansion, smart SDF project discovery, Auth ID auto-alignment, pre-flight syntax checks, rich dry-run preview, and production safeguards. | `destructive` |
 
 ### 2. NetSuite AI Connector Proxied Tools (`ns_*`)
 

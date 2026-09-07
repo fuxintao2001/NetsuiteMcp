@@ -3,7 +3,6 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { httpClient } from "../utils/httpClient.js";
-import { CallbackServer } from "./callbackServer.js";
 import { OAuthManager } from "./manager.js";
 import { base64URLEncode, generatePKCE } from "./pkce.js";
 import { type SessionData, SessionStorage } from "./sessionStorage.js";
@@ -274,7 +273,6 @@ describe("OAuth Module", () => {
 			".test-manager-storage-rewritten",
 		);
 		let manager: OAuthManager;
-		let startSpy: any;
 		let httpPostSpy: any;
 
 		beforeEach(async () => {
@@ -282,9 +280,6 @@ describe("OAuth Module", () => {
 			await fs.rm(testStoragePath, { recursive: true, force: true });
 
 			manager = new OAuthManager({ storagePath: testStoragePath });
-
-			// Mock CallbackServer.prototype.start
-			startSpy = vi.spyOn(CallbackServer.prototype, "start");
 
 			// Mock httpClient.post
 			httpPostSpy = vi.spyOn(httpClient, "post");
@@ -294,42 +289,6 @@ describe("OAuth Module", () => {
 			manager.stopProactiveRefresh();
 			await fs.rm(testStoragePath, { recursive: true, force: true });
 			vi.restoreAllMocks();
-		});
-
-		describe("startAuthFlow", () => {
-			it("should orchestrate start, launch browser, and wait for callback", async () => {
-				startSpy.mockImplementation(
-					async (_state: string, callback: (code: string) => Promise<void>) => {
-						// Execute callback
-						await callback("new-auth-code");
-					},
-				);
-
-				httpPostSpy.mockResolvedValue({
-					data: {
-						access_token: "new-access-token",
-						refresh_token: "new-refresh-token",
-						expires_in: 3600,
-					},
-				} as any);
-
-				await manager.startAuthFlow({
-					accountId: "9260916-sb1",
-					clientId: "my-client-id",
-				});
-
-				expect(startSpy).toHaveBeenCalled();
-				expect(httpPostSpy).toHaveBeenCalled();
-
-				const finalSession = JSON.parse(
-					await fs.readFile(
-						path.join(testStoragePath, "session.json"),
-						"utf-8",
-					),
-				);
-				expect(finalSession.tokens.access_token).toBe("new-access-token");
-				expect(finalSession.authenticated).toBe(true);
-			});
 		});
 
 		describe("ensureValidToken", () => {

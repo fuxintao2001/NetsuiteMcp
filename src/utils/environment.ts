@@ -86,3 +86,17 @@ export function getDefaultSessionsDir(): string {
 	}
 	return path.join(getDefaultConfigDir(), "sessions");
 }
+
+/**
+ * Get standard logs directory for NetSuite MCP (~/.config/netsuite-mcp/logs).
+ * Supports NETSUITE_LOG_DIR or NETSUITE_LOGS_DIR environment variable override.
+ */
+export function getDefaultLogsDir(): string {
+	if (process.env.NETSUITE_LOG_DIR) {
+		return path.resolve(process.env.NETSUITE_LOG_DIR);
+	}
+	if (process.env.NETSUITE_LOGS_DIR) {
+		return path.resolve(process.env.NETSUITE_LOGS_DIR);
+	}
+	return path.join(getDefaultConfigDir(), "logs");
+}

@@ -23,6 +23,7 @@ import { validateEnv } from "./utils/envValidator.js";
 import { installGlobalErrorHandlers } from "./utils/globalErrorHandlers.js";
 import { resolveCustomRecordRectype as resolveRectypeHelper } from "./utils/metadata.js";
 import { RedisCacheProvider } from "./utils/redisCacheProvider.js";
+import { flushToolErrorLogger } from "./utils/toolErrorLogger.js";
 
 // ---------------------------------------------------------------------------
 // Global error handlers
@@ -300,6 +301,7 @@ class NetSuiteMCPServer {
 		console.error("🔌 Shutting down NetSuite MCP Server...");
 		this.oauthManager.stopProactiveRefresh();
 		await this.cacheProvider.disconnect();
+		await flushToolErrorLogger();
 	}
 }
 
