@@ -73,6 +73,7 @@ async function discoverAccounts(): Promise<AccountConfig[]> {
 	const sessionRoots = [
 		process.env.NETSUITE_SESSION_PATH,
 		process.env.DAEMON_SESSION_ROOTS,
+		path.join(os.homedir(), ".gemini", "antigravity", "sessions"),
 		getDefaultSessionsDir(),
 	].filter(Boolean) as string[];
 
