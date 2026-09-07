@@ -700,9 +700,9 @@ export const GET_ERROR_SUMMARY_TOOL = {
  */
 export const SUITEQL_RULES_SUFFIX = `
 
-═══ MANDATORY SUITEQL PROTOCOL & ON-DEMAND TEMPLATES ═══
-1. RECONNAISSANCE: Call 'ns_getSuiteQLMetadata' to verify exact table and column names before querying unverified schemas.
-2. GOLDEN TEMPLATES (ON-DEMAND): For multi-location inventory ('aggregateitemlocation'), transaction line items ('transactionline' with 'mainline=F'), lineage ('tl.createdfrom'), or GL impact ('transactionaccountingline'), call 'netsuite_get_query_template' or read 'netsuite://queries/golden-templates'.
+═══ MANDATORY SUITEQL PROTOCOL & FAST-PATH GUIDELINES ═══
+1. FAST-PATH & RECONNAISSANCE: For standard verified tables (transaction, transactionline, customer, vendor, item, account, subsidiary), construct queries directly. Call 'ns_getSuiteQLMetadata' only for unverified schemas, custom records, or after schema errors.
+2. GOLDEN PATTERNS: Use standard golden patterns (mainline='F' for lines, tl.createdfrom for lineage, BUILTIN.DF for names). Call 'netsuite_get_query_template' if an unfamiliar query pattern is needed.
 3. MANDATORY SYNTAX RULES:
    • Explicit columns only — NEVER use 'SELECT *' or 'table.*'.
    • Oracle pagination: MUST use 'ROWNUM <= N' or 'FETCH FIRST N ROWS ONLY'. NEVER use 'LIMIT' or 'OFFSET'.
@@ -718,7 +718,7 @@ export const SUITEQL_RULES_SUFFIX = `
  */
 export const METADATA_RULES_SUFFIX = `
 
-⚠️ MANDATORY: Call this tool BEFORE writing any SuiteQL query to verify exact field names, types, and case-sensitivity.
+💡 RECONNAISSANCE (Slow-Path): Use this tool to verify exact field names, data types, and case-sensitivity for unverified schemas or custom tables. Not required for standard known tables in Fast-Path.
 - Fast Table Discovery: To discover available SuiteQL tables across all business domains (Inventory, Transactions, Manufacturing, Accounting, CRM, Custom Records) without network timeouts, pass a search keyword (e.g. \`{ keyword: 'inventory' }\`, \`{ keyword: 'transaction' }\`, \`{ keyword: 'order' }\`, \`{ keyword: 'account' }\`).
 - Column Schema Inspection: To view exact column names, data types, and nullability for a specific table, provide recordType (e.g. \`{ recordType: 'aggregateitemlocation' }\`).
 - Field names are CASE-SENSITIVE — use them exactly as returned (e.g., 'tranid' instead of 'TranId').
