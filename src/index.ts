@@ -91,9 +91,19 @@ class NetSuiteMCPServer {
 		});
 		this.mcpTools = new NetSuiteMCPTools(this.oauthManager);
 
+		const enablePrompts =
+			process.env.ENABLE_MCP_PROMPTS === "true" ||
+			process.env.ENABLE_MCP_PROMPTS === "1";
+
 		this.server = new Server(
 			{ name: "netsuite-mcp", version: SERVER_VERSION },
-			{ capabilities: { tools: {}, resources: {}, prompts: {} } },
+			{
+				capabilities: {
+					tools: {},
+					resources: {},
+					...(enablePrompts ? { prompts: {} } : {}),
+				},
+			},
 		);
 	}
 
@@ -114,7 +124,12 @@ class NetSuiteMCPServer {
 
 		registerToolHandlers(deps);
 		registerResourceHandlers(this.server, projectRoot);
-		registerPromptHandlers(this.server);
+		if (
+			process.env.ENABLE_MCP_PROMPTS === "true" ||
+			process.env.ENABLE_MCP_PROMPTS === "1"
+		) {
+			registerPromptHandlers(this.server);
+		}
 	}
 
 	// -------------------------------------------------------------------------
