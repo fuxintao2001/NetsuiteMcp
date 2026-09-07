@@ -49,7 +49,7 @@ Detailed domain knowledge is decoupled into Antigravity Skills (`~/.gemini/confi
 
 ### 3. Environment Lock & Write Protection
 - **Record Write Operations (`ns_createRecord`, `ns_updateRecord`)**: Strictly disabled in Production environments; enabled in Sandbox/Test (`_SB`, `TSTDRV`). Managed via `src/utils/environment.ts`.
-- **Code & Asset Uploads (`netsuite_suitecloud_upload`)**: Direct uploads to Production are blocked unless explicit user authorization and `allowProduction: true` are provided.
+- **Code & Asset Uploads (`netsuite_suitecloud_upload`)**: Simplified card protocol. Always pop up an interactive confirmation card (`ask_question`) showing only the file's absolute path and "接受" / "拒绝" options before uploading.
 
 ### 4. Permission Hard-Stop & Zero-Hallucination
 - On NetSuite authorization/permission errors (`INSUFFICIENT_PERMISSION`, 403 Forbidden, `Permission Violation`), immediately cease all further tasks and tool calls. Never simulate fake data. Report the exact failed record type/table name and specify the required NetSuite role permission configuration.

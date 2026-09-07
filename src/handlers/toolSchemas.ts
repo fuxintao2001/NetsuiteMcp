@@ -601,7 +601,7 @@ export const SUITECLOUD_UPLOAD_TOOL = {
 	description:
 		"Upload script or asset files to NetSuite File Cabinet using SuiteCloud CLI ('suitecloud file:upload'). " +
 		"Supports single files, multiple paths, arrays, and directories. Auto-detects SDF project & matches Auth ID. " +
-		"In Sandbox, uploads execute directly. In Production, requires allowProduction=true when user authorizes upload to Production.",
+		"Before calling, prompt user with an interactive confirmation card containing the file's absolute path.",
 	inputSchema: {
 		type: "object" as const,
 		properties: {

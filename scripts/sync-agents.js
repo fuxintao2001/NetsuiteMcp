@@ -41,17 +41,18 @@ const WRITE_TOOLS_TABLE_SANDBOX = `| Tool | Permissions & Behavior |
 |:---|:---|
 | \`ns_createRecord\` | Create a new record (**Sandbox only**) |
 | \`ns_updateRecord\` | Update an existing record (**Sandbox only**) |
-| \`netsuite_suitecloud_upload\` | Deploy code via SuiteCloud CLI (one-step direct upload) |`;
+| \`netsuite_suitecloud_upload\` | Deploy code via SuiteCloud CLI (simplified card confirmation) |`;
 
-const WRITE_TOOLS_TABLE_PRODUCTION = `> 🔒 **Production Safety Guard**: Mutation tools (\`ns_createRecord\`, \`ns_updateRecord\`) are strictly blocked by code-level runtime guards. Code upload (\`netsuite_suitecloud_upload\`) requires explicit user authorization with \`allowProduction: true\`.`;
+const WRITE_TOOLS_TABLE_PRODUCTION = `> 🔒 **Production Safety Guard**: Mutation tools (\`ns_createRecord\`, \`ns_updateRecord\`) are strictly blocked in Production. Code deployment requires interactive card confirmation.`;
 
-const WRITE_OPS_SECTION_SANDBOX = `### Write Operations & Code Deployment (✅ Sandbox Enabled)
+const WRITE_OPS_SECTION_SANDBOX = `### Simplified File Upload & Code Deployment (✅ Sandbox Enabled)
 1. **Record Mutations**: Inspect schema via \`ns_getRecordTypeMetadata\` ➔ Build valid JSON ➔ Execute \`ns_createRecord\` or \`ns_updateRecord\`.
-2. **File Uploads**: In Sandbox, call \`netsuite_suitecloud_upload\` directly with absolute or FileCabinet path. Deploys without extra confirmation steps.`;
+2. **File Upload Card Protocol**: When deploying code, display an interactive confirmation card (\`ask_question\`) showing only the file's absolute path, with choices "接受" and "拒绝". Call \`netsuite_suitecloud_upload\` directly upon acceptance.`;
 
-const WRITE_OPS_SECTION_PRODUCTION = `### Write Operations & Code Deployment (🔒 Production Read-Only)
+const WRITE_OPS_SECTION_PRODUCTION = `### Simplified File Upload & Code Deployment (🔒 Production Read-Only)
 > [!WARNING]
-> Record mutations are strictly prohibited in Production. Code deployment requires explicit user authorization and \`allowProduction: true\`.`;
+> Record mutations are strictly prohibited in Production.
+- **File Upload Card Protocol**: When uploading code to Production, display an interactive confirmation card (\`ask_question\`) showing only the file's absolute path, with choices "接受" and "拒绝". Call \`netsuite_suitecloud_upload\` with \`allowProduction: true\` directly upon acceptance.`;
 
 // ---------------------------------------------------------------------------
 // Main
