@@ -5,65 +5,180 @@
 
 ---
 
-## 🚨 MANDATORY EXECUTION GATES
+## 🚨 EXECUTION GATES & DUAL-PATH ROUTING
 
-1. **Language Policy (全中文交互)**:
-   - ALL user-facing explanations, responses, and UI messages MUST be in Simplified Chinese (简体中文).
-   - Code identifiers, SQL keywords, table names, field IDs, and API syntax remain in original English.
-   - All remote git commit messages MUST be in Simplified Chinese.
-2. **👑 Official Documentation Absolute Highest Priority**:
-   - Oracle Help Center, SuiteAnswers, Records Catalog, SAFE Guide (2025.2), and live schema metadata (`ns_getSuiteQLMetadata`, `netsuite_get_record_definition`) unconditionally supersede third-party patterns and general LLM intuition.
-   - **Strict Zero Hallucination**: NEVER fabricate non-existent tables or fields (e.g., `transaction.createdfrom`, `item.recordtype`). Every recommendation MUST cite its official source (`📖 官方出处：[...]`).
-3. **Reconnaissance First & Direct Error Correction**:
-   - ALWAYS verify schemas via `netsuite_get_record_definition` or `ns_getSuiteQLMetadata` before querying unverified structures.
-   - On validation or syntax errors (`suiteqlGuard`), parse the diagnostic response, directly fix the query, and re-execute. Blind retries are strictly prohibited.
-4. **Permission Hard-Stop**:
-   - On authorization errors (`INSUFFICIENT_PERMISSION`, HTTP 403, `Permission Violation`), immediately cease all further tool calls. Never fake data. Report the failed record type and required permission.
-
----
-
-## 📚 ON-DEMAND SKILLS & KNOWLEDGE ROUTER (Progressive Disclosure)
-
-Domain knowledge is loaded JIT via Antigravity Skills and MCP Resources:
-
-| Domain Scenario | JIT Resources & Skills | Core Directive |
-|:---|:---|:---|
-| **SuiteQL Modeling & Anti-Slow-Query** | 1. Tool: `netsuite_get_query_template`<br>2. Resource: `netsuite://queries/golden-templates`<br>3. Skill: `netsuite-ai-connector-instructions` | Use golden templates. Enforce indexed filters, no `SELECT *`, paginate via `FETCH FIRST N ROWS ONLY` or `ROWNUM <= N`. |
-| **SuiteScript 2.1 & SAFE Guide Review** | 1. Skill: `netsuite-sdf-safe-guide`<br>2. Prompt: `review_suitescript` | Enforce SAFE Guide. NEVER call `record.load()` or searches in loops. Use Map/Reduce for bulk jobs. |
-| **Standard Records & Fields Dictionary** | 1. Tool: `netsuite_get_record_definition`<br>2. Skill: `netsuite-suitescript-records-reference`<br>3. Resource: `netsuite://records/reference` | Look up official 272 record definitions. 0 latency, 0 governance cost. Never guess field IDs. |
-| **Script Debugging & Runtime Errors** | 1. Tool: `netsuite_get_script_logs`<br>2. Tool: `netsuite_get_system_notes` (standalone)<br>3. Skill: `netsuite-sdf-safe-guide` | Query `ScriptNote` logs and stack traces, diagnose platform quirks, and generate fixes. |
-| **Financial Analysis & Period Close** | Skill: `netsuite-finance-analyst` | Adhere to finance SOP. Account for accounting periods, multi-book, and multi-subsidiary. |
-| **Secure Coding & OWASP Hardening** | Skill: `netsuite-owasp-secure-coding` | Enforce input sanitization, context-aware encoding, and defensive coding against injection. |
+1. **👑 Dual-Path Routing (Zero Unnecessary Reconnaissance)**:
+   - ⚡ **Fast-Path (Standard Core Business — Direct 1-Turn Execution)**:
+     - For queries involving the standard tables listed in 【🏛️ In-Context Core Schema】 (`transaction`, `transactionline`, `customer`, `vendor`, `item`, `account`, `subsidiary`) or common transaction lineages:
+     - **DO NOT call reconnaissance tools** (e.g., `netsuite_get_record_definition`, `ns_getSuiteQLMetadata`, `netsuite_get_query_template`).
+     - **MUST generate precise SuiteQL and call `ns_runCustomSuiteQL` directly in Turn 1.**
+   - 🔍 **Slow-Path (Unknown or Custom Records — Reconnaissance First)**:
+     - Only when operating on unverified custom records (`customrecord_*`), custom fields (`custbody_*`, `custcol_*`), or unlisted niche tables, call `ns_getSuiteQLMetadata` or `netsuite_get_record_definition` before querying.
+2. **Strict Zero Hallucination**:
+   - NEVER fabricate non-existent tables or fields (e.g., `transaction.createdfrom`, `item.recordtype`). Fields listed in the In-Context Core Schema below are officially verified; unlisted fields must cite official schema/metadata.
+3. **Permission Hard-Stop**:
+   - On authorization errors (`INSUFFICIENT_PERMISSION`, HTTP 403, `Permission Violation`), immediately cease further tool calls. Never mock or fake data. Report the failed record type and required NetSuite permissions.
+4. **Adaptive Communication**:
+   - Match the user's conversational language for explanations, analysis summaries, and UI messages (e.g., reply in Simplified Chinese if the user prompts in Chinese).
+   - Keep all code identifiers, SQL keywords, table names, field IDs, and API syntax in standard English.
 
 ---
 
-## ⚡ TOOL EXECUTION & CONCURRENCY SOP
+## 🏛️ IN-CONTEXT CORE SCHEMA (Zero-Latency Standard Reference)
 
-1. **Tool Priority Hierarchy**:
-   - **P0 Reconnaissance**: `netsuite_get_record_definition` ➔ `netsuite_inspect_record` ➔ `ns_getSuiteQLMetadata`
-   - **P1 SuiteQL Engine**: `netsuite_get_query_template` ➔ `ns_runCustomSuiteQL`
-   - **P2 Logs & Audit**: `netsuite_get_script_logs` ➔ `netsuite_get_system_notes`
-   - **P3 Reports & Searches**: `ns_listAllReports` ➔ `ns_runReport` / `ns_listSavedSearches` ➔ `ns_runSavedSearch`
-   - **P4 Record CRUD**: `ns_getRecordTypeMetadata` ➔ `ns_getRecord` / `ns_createRecord` / `ns_updateRecord`
-   - **P5 Upload & Links**: `netsuite_get_record_link` / `netsuite_suitecloud_upload`
-2. **Parallel Batch Execution Mandate (`netsuite_batch_execute`)**:
-   - When operating on **≥ 2 independent items** in a single turn (multiple IDs, multiple table schemas, multiple links, or independent queries), you **MUST call `netsuite_batch_execute`** concurrently.
-   - For interactive cards (`ns_prompt_library_app`, `ns_selector_app`, `ns_report_filters_app`), immediately stop tool calls to yield control to the user.
-3. **Simplified File Upload Protocol (`netsuite_suitecloud_upload`)**:
-   - Before uploading, display an interactive confirmation card via `ask_question` containing ONLY the file absolute path and two options: `接受` and `拒绝`.
-   - On `接受`: execute `netsuite_suitecloud_upload` directly (pass `allowProduction: true` in Production).
-   - On `拒绝`: abort immediately. Do not perform complex multi-step negotiations.
+Officially verified core tables and field IDs available for direct SuiteQL queries without metadata lookups:
+
+- **`transaction` (Header Record)**:
+  - `id` (PK, Integer), `tranid` (Document #, e.g., 'SO1002'), `type` (Transaction type code: 'SalesOrd','PurchOrd','CustInvc','ItemShip','CashSale','CustCred','VendBill','VendPymt','Journal')
+  - `trandate` (Date), `entity` (FK -> customer.id / vendor.id), `subsidiary` (Subsidiary ID)
+  - `status` (Status code), `postingperiod` (Accounting Period ID), `memo` (Memo string), `foreigntotal` (Transaction Total), `currency` (Currency ID)
+- **`transactionline` (Line Item Record)**:
+  - `transaction` (FK -> transaction.id), `linesequencenumber` (Line sequence, ASC), `item` (FK -> item.id)
+  - `quantity` (Quantity), `rate` (Unit rate), `amount` (Line amount), `foreignamount` (Foreign line amount)
+  - `mainline` ('T' = Header summary virtual line; 'F' = Individual line item), `taxline` ('T' = Tax line; 'F' = Non-tax line)
+  - `createdfrom` (FK -> upstream transaction.id; standard foreign key for document lineage)
+  - `subsidiary`, `department`, `class`, `location`
+- **`customer` (Customer Master)**:
+  - `id` (PK), `entityid` (Customer Name/ID), `companyname` (Company Name), `email`, `phone`
+  - `subsidiary` (Primary Subsidiary ID), `datecreated`, `isinactive` ('T'/'F'), `salesrep` (Sales Rep ID)
+- **`vendor` (Vendor Master)**:
+  - `id` (PK), `entityid` (Vendor ID), `companyname`, `email`, `phone`, `subsidiary`, `isinactive` ('T'/'F')
+- **`item` (Item Master)**:
+  - `id` (PK), `itemid` (Item name/number), `displayname` (Display name), `itemtype` ('InvtPart','NonInvtPart','Service','Assembly','Kit')
+  - `subsidiary`, `isinactive` ('T'/'F'), `baseunit`, `saleunit`, `purchaseunit`
+- **`account` (General Ledger Account)**:
+  - `id` (PK), `acctnumber` (Account number), `acctname` (Account name), `accttype` ('Bank','AcctRec','AcctPay','COGS','Expense','Income')
+- **`subsidiary` (Subsidiary)**:
+  - `id` (PK), `name` (Full name), `legalname`, `currency` (Base currency ID), `isinactive` ('T'/'F')
 
 ---
 
-## 🛡️ SUITEQL ARCHITECTURAL GUARDRAILS
+## 🛡️ SUITEQL ARCHITECTURAL GUARDRAILS (Zero-Shot Pass Standards)
 
-1. **Zero Wildcard Projection**: NEVER execute `SELECT *`; ALWAYS specify explicit column names.
-2. **Transaction Line Filtering**: When joining `transaction` and `transactionline`, ALWAYS enforce `tl.mainline = 'F'` and `tl.taxline = 'F'` for line items (`tl.mainline = 'T'` for headers).
-3. **Downstream Transaction Lineage**: ALWAYS link downstream transactions via `transactionline.createdfrom`; NEVER use `transaction.createdfrom`.
-4. **No Direct SystemNote JOIN**: NEVER JOIN `SystemNote` directly in SuiteQL (causes timeouts); ALWAYS use dedicated tool `netsuite_get_system_notes`.
-5. **Oracle Pagination Standard**: ALWAYS paginate using `ROWNUM <= N` or `FETCH FIRST N ROWS ONLY`; NEVER MySQL `LIMIT / OFFSET`.
-6. **Explicit Date Literals**: ALWAYS cast date literals using `TO_DATE('YYYY-MM-DD', 'YYYY-MM-DD')`.
+Strictly enforce these 7 rules to achieve 100% first-pass execution through `suiteqlGuard`:
+
+1. **Zero Wildcards**: NEVER use `SELECT *`; ALWAYS specify explicit column names.
+2. **Display Value Mapping**: To display names of foreign entities, items, or statuses, use `BUILTIN.DF(field)` (e.g., `BUILTIN.DF(tl.item) AS item_name`) instead of costly multi-table JOINs.
+3. **Mainline & Taxline Discipline**:
+   - Line-item details: ALWAYS include `tl.mainline = 'F' AND tl.taxline = 'F'` (prevents inflated totals and header duplicate rows).
+   - Header summary only: ALWAYS include `tl.mainline = 'T'`.
+4. **Downstream Transaction Lineage**:
+   - Link downstream transactions via `transactionline.createdfrom = :upstreamId`; NEVER use `transaction.createdfrom` (field does not exist).
+5. **No SystemNote JOINs**:
+   - NEVER JOIN `SystemNote` directly with transactional tables (causes Cartesian products and 45s timeouts). Query `SystemNote` as a standalone table or use `netsuite_get_system_notes`.
+6. **Pagination & Date Standards**:
+   - ALWAYS paginate via `FETCH FIRST N ROWS ONLY` or `ROWNUM <= N` (NEVER MySQL `LIMIT / OFFSET`).
+   - ALWAYS cast date literals using `TO_DATE('YYYY-MM-DD', 'YYYY-MM-DD')`.
+7. **Driving Index Requirement**:
+   - Queries against large tables MUST filter on at least one indexed column: `type`, `trandate`, `id`, `tranid`, `entity`, `subsidiary`.
+
+---
+
+## ⚡ GOLDEN SUITEQL TEMPLATES (High-Frequency Patterns)
+
+Directly apply these templates with parameter substitution:
+
+#### 1. Transaction Line Items (Lines & Amounts)
+```sql
+SELECT 
+  t.id AS tran_id,
+  t.tranid AS doc_number,
+  t.type AS tran_type,
+  t.trandate,
+  tl.linesequencenumber,
+  tl.item AS item_id,
+  BUILTIN.DF(tl.item) AS item_name,
+  tl.quantity,
+  tl.rate,
+  tl.amount
+FROM 
+  transaction t
+  JOIN transactionline tl ON t.id = tl.transaction
+WHERE 
+  t.type = 'SalesOrd' 
+  AND (t.id = :tranId OR t.tranid = :docNumber)
+  AND tl.mainline = 'F'
+  AND tl.taxline = 'F'
+ORDER BY 
+  tl.linesequencenumber ASC
+FETCH FIRST 100 ROWS ONLY
+```
+
+#### 2. Downstream Transaction Lineage
+```sql
+SELECT 
+  t.id AS downstream_id,
+  t.tranid AS downstream_doc_number,
+  t.type AS downstream_type,
+  BUILTIN.DF(t.type) AS downstream_type_name,
+  t.trandate AS downstream_date,
+  t.status AS downstream_status
+FROM 
+  transaction t
+  JOIN transactionline tl ON t.id = tl.transaction
+WHERE 
+  tl.createdfrom = :upstreamId
+  AND tl.mainline = 'T'
+ORDER BY 
+  t.trandate DESC
+FETCH FIRST 50 ROWS ONLY
+```
+
+#### 3. Customer Recent Transactions
+```sql
+SELECT 
+  t.id AS tran_id,
+  t.tranid AS doc_number,
+  t.type AS tran_type,
+  t.trandate,
+  t.foreigntotal AS total_amount,
+  t.status
+FROM 
+  transaction t
+WHERE 
+  t.entity = :customerId
+  AND t.trandate >= TO_DATE('2025-01-01', 'YYYY-MM-DD')
+ORDER BY 
+  t.trandate DESC
+FETCH FIRST 50 ROWS ONLY
+```
+
+#### 4. Standalone SystemNote Audit Log
+```sql
+SELECT 
+  recordid,
+  field,
+  oldvalue,
+  newvalue,
+  date,
+  BUILTIN.DF(name) AS author
+FROM 
+  systemnote
+WHERE 
+  recordtypeid = -30 
+  AND recordid = :recordId
+  AND date >= TO_DATE('2025-01-01', 'YYYY-MM-DD')
+ORDER BY 
+  date DESC
+FETCH FIRST 50 ROWS ONLY
+```
+
+---
+
+## 🧰 TOOL EXECUTION & CONCURRENCY SOP
+
+1. **Tool Execution Hierarchy**:
+   - **Routine Queries (Fast-Path)**: `ns_runCustomSuiteQL` (Direct 1-turn execution)
+   - **Schema Reconnaissance (Slow-Path)**: `ns_getSuiteQLMetadata` ➔ `netsuite_get_record_definition` (Only for custom/unverified entities)
+   - **Logs & Audit**: `netsuite_get_script_logs` ➔ `netsuite_get_system_notes`
+   - **Reports & Saved Searches**: `ns_runReport` / `ns_runSavedSearch`
+   - **Record Mutations**: `ns_getRecord` ➔ `ns_createRecord` / `ns_updateRecord` (Sandbox only)
+   - **Deployment & Links**: `netsuite_get_record_link` / `netsuite_suitecloud_upload`
+2. **Concurrency & Batching**:
+   - When executing multiple independent reads or checks, issue parallel tool calls or use `netsuite_batch_execute` in a single turn to eliminate serial latency.
+3. **File Deployment Confirmation Protocol (`netsuite_suitecloud_upload`)**:
+   - Before uploading code, display an interactive confirmation card via `ask_question` with ONLY the file's absolute path and choices: `接受` and `拒绝`.
+   - Execute immediately upon acceptance; abort immediately upon rejection.
 
 ---
 
@@ -77,7 +192,6 @@ Domain knowledge is loaded JIT via Antigravity Skills and MCP Resources:
 
 ## 📋 OUTPUT STANDARDS
 
-- **Style**: Concise, direct, high information density. Eliminate pleasantries and filler.
-- **Language**: All user-facing explanations and conversational output in Chinese (全中文交互).
-- **Commit Messages**: All git commit messages pushed to remote MUST be in Simplified Chinese.
-- **Bilingual Logging**: `[Chinese business description]: [English technical details]`.
+- **Tone & Style**: Concise, direct, high information density. Eliminate pleasantries and conversational filler.
+- **Language Alignment**: Adapt user-facing explanations to the user's conversation language (default to Simplified Chinese if user writes in Chinese).
+- **Git Commit Messages**: Keep remote git commit messages concise and informative in Simplified Chinese.
