@@ -918,7 +918,9 @@ export class SuiteCloudRunnerService {
 
 		try {
 			const env = this.resolveEnvironment();
-			console.log(`[SuiteCloudRunner] Executing: ${command} in ${projectRoot}`);
+			console.error(
+				`[SuiteCloudRunner] Executing: ${command} in ${projectRoot}`,
+			);
 			const { stdout, stderr } = await execAsync(command, {
 				cwd: projectRoot,
 				timeout: 120000, // 120 seconds
