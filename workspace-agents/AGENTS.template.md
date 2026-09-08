@@ -211,10 +211,10 @@ When writing, modifying, or refactoring code (SuiteScript, TypeScript, JavaScrip
 3. **Root-Cause Resolution Over Defensive Masking**:
    - Runtime errors indicate invalid assumptions or defective logic. Confront errors directly, identify the root cause (e.g., API deprecation, incorrect field ID, missing permissions, type mismatch), and implement the authoritative fix. Never mask unverified failures with defensive try-catch traps or silent fallback branching.
 
-4. **Current-State-Only Explanations (聚焦最新代码，严禁版本历史更迭叙事)**:
-   - ❌ **PROHIBITED**: 叙述代码的版本演进历史、更迭过程或新旧版本对比（严禁输出类似「过去版本是 X，现在升级为 Y」、「之前采用了 A，现重构成 B」、「与旧版相比...」等历史包袱叙事）。
-   - ❌ **PROHIBITED**: 在代码注释或技术答复中夹带变更日志（Changelog）叙述或过时实现复盘。
-   - ✅ **MANDATE**: 无论在代码注释、技术答复还是文档说明中，**只对当前最新代码的现状与逻辑进行阐述**。将当前代码视为唯一、独立的权威实现，直接切入最新逻辑、架构设计、数据流向与参数含义，彻底剔除一切版本迭代更迭叙事。
+4. **Current-State-Only Explanations (Zero Version Iteration Narrative)**:
+   - ❌ **PROHIBITED**: Narrating code evolution history, migration trajectories, or past vs present comparisons (strictly prohibit narratives like "in the previous version it was X, now we upgraded to Y", "previously we used A, now refactored to B", "compared to earlier versions...").
+   - ❌ **PROHIBITED**: Inserting changelog commentary, historical diff reflections, or superseded implementation post-mortems into code comments, technical responses, or documentation.
+   - ✅ **MANDATE**: In all code comments, technical explanations, and documentation, **describe ONLY the current, definitive state and logic of the latest code**. Treat the current codebase as the sole authoritative, standalone implementation. Explain directly its latest architecture, data flow, parameter semantics, and business logic, completely excising all version iteration narratives.
 
 ---
 
