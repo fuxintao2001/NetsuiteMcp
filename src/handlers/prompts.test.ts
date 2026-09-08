@@ -25,6 +25,12 @@ describe("MCP Prompt Handlers", () => {
 		expect(res.prompts.some((p: any) => p.name === "generate_suiteql")).toBe(
 			true,
 		);
+		expect(
+			res.prompts.some((p: any) => p.name === "visualize_netsuite_data"),
+		).toBe(true);
+		expect(res.prompts.some((p: any) => p.name === "upgrade_suitescript")).toBe(
+			true,
+		);
 	});
 
 	it("should render review_suitescript prompt message", async () => {
@@ -80,6 +86,65 @@ describe("MCP Prompt Handlers", () => {
 			"TypeError: Cannot read property",
 		);
 		expect(res.messages[0].content.text).toContain("Root Cause");
+	});
+
+	it("should render visualize_netsuite_data prompt message adhering to Generative UI standards", async () => {
+		let getHandler: any;
+		const fakeServer = {
+			setRequestHandler: vi.fn((method, handler) => {
+				if (method === "prompts/get") getHandler = handler;
+			}),
+		} as unknown as Server;
+
+		registerPromptHandlers(fakeServer);
+
+		const res = await getHandler({
+			params: {
+				name: "visualize_netsuite_data",
+				arguments: {
+					dataType: "financial_variance",
+					dataJson: JSON.stringify({ revenue: 1000000, cogs: 600000 }),
+					layout: "inline",
+				},
+			},
+		});
+
+		expect(res.messages).toHaveLength(1);
+		const text = res.messages[0].content.text;
+		expect(text).toContain("generative_ui");
+		expect(text).toContain(
+			"https://www.gstatic.com/antigravity/web/dev/tailwindcss.min.js",
+		);
+		expect(text).toContain("var(--card)");
+		expect(text).toContain("<agent-embed");
+	});
+
+	it("should render upgrade_suitescript prompt message", async () => {
+		let getHandler: any;
+		const fakeServer = {
+			setRequestHandler: vi.fn((method, handler) => {
+				if (method === "prompts/get") getHandler = handler;
+			}),
+		} as unknown as Server;
+
+		registerPromptHandlers(fakeServer);
+
+		const res = await getHandler({
+			params: {
+				name: "upgrade_suitescript",
+				arguments: {
+					code: "var rec = nlapiLoadRecord('customer', 123);",
+					targetVersion: "2.1",
+				},
+			},
+		});
+
+		expect(res.messages).toHaveLength(1);
+		const text = res.messages[0].content.text;
+		expect(text).toContain("SuiteScript Modernization Specialist");
+		expect(text).toContain("API Conversion (1.0 -> 2.1)");
+		expect(text).toContain("ES6+ Modernization");
+		expect(text).toContain("nlapiLoadRecord('customer', 123)");
 	});
 
 	it("should throw for unknown prompt", async () => {

@@ -1,17 +1,21 @@
 /**
- * sync-agents.js — Synchronize AGENTS.md template to all NetSuite workspace projects.
+ * sync-agents.js — Synchronize AGENTS.md and Antigravity .agents/ structure to all NetSuite workspace projects.
  *
  * Usage:
  *   npm run sync-agents              # Execute sync to all workspaces
  *   npm run sync-agents -- --dry-run # Preview changes without writing
  *
- * Reads workspace-agents/AGENTS.template.md and workspace-agents/workspaces.json,
- * substitutes environment-specific variables, and writes to each project's AGENTS.md.
+ * Reads workspace-agents/ templates and workspace-agents/workspaces.json,
+ * substitutes environment-specific variables, and provisions:
+ * 1. Project-level AGENTS.md (core charter & SOP)
+ * 2. .agents/hooks.json (lifecycle safety gates)
+ * 3. .agents/rules/*.md (modular directives: Fast-Path, SuiteQL, SAFE, Generative UI, Environment Locks)
+ * 4. scripts/ (pre-upload-check.js & suitescript-safe-check.js)
  */
 
-import fs from "fs";
-import path from "path";
-import { fileURLToPath } from "url";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -27,6 +31,12 @@ const templatePath = path.join(
 	"workspace-agents",
 	"AGENTS.template.md",
 );
+const hooksTemplatePath = path.join(
+	projectRoot,
+	"workspace-agents",
+	"hooks.template.json",
+);
+const rulesSourceDir = path.join(projectRoot, "workspace-agents", "rules");
 const configPath = path.join(
 	projectRoot,
 	"workspace-agents",
@@ -55,20 +65,28 @@ const WRITE_OPS_SECTION_PRODUCTION = `### Simplified File Upload & Code Deployme
 - **File Upload Card Protocol**: When uploading code to Production, display an interactive confirmation card (\`ask_question\`) showing only the file's absolute path, with choices "接受" and "拒绝". Call \`netsuite_suitecloud_upload\` with \`allowProduction: true\` directly upon acceptance.`;
 
 // ---------------------------------------------------------------------------
+// Helper: Variable Interpolator
+// ---------------------------------------------------------------------------
+function interpolateTemplate(rawTemplate, vars) {
+	let output = rawTemplate;
+	for (const [key, value] of Object.entries(vars)) {
+		output = output.replaceAll(`{{${key}}}`, value);
+	}
+	return output;
+}
+
+// ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 
 try {
-	// Read template
 	if (!fs.existsSync(templatePath)) {
 		throw new Error(`Template not found: ${templatePath}`);
 	}
-	const template = fs.readFileSync(templatePath, "utf-8");
-
-	// Read workspace config
 	if (!fs.existsSync(configPath)) {
 		throw new Error(`Config not found: ${configPath}`);
 	}
+	const template = fs.readFileSync(templatePath, "utf-8");
 	const config = JSON.parse(fs.readFileSync(configPath, "utf-8"));
 
 	if (!config.workspaces || !Array.isArray(config.workspaces)) {
@@ -87,97 +105,111 @@ try {
 			workspace;
 
 		try {
-			// Validate project path exists
 			if (!fs.existsSync(projectPath)) {
 				console.warn(`⚠️  Skipped (directory not found): ${projectPath}`);
 				errorCount++;
 				continue;
 			}
 
-			let output = template;
+			const vars = {
+				ACCOUNT_ID: accountId,
+				ENV_TYPE: envType,
+				MCP_SERVER_NAME: mcpServerName,
+				WRITE_OPS_BADGE: writeOpsEnabled ? "✅ Enabled" : "❌ Disabled",
+				PROJECT_PATH: projectPath,
+				WRITE_TOOLS_TABLE: writeOpsEnabled
+					? WRITE_TOOLS_TABLE_SANDBOX
+					: WRITE_TOOLS_TABLE_PRODUCTION,
+				WRITE_OPS_SECTION: writeOpsEnabled
+					? WRITE_OPS_SECTION_SANDBOX
+					: WRITE_OPS_SECTION_PRODUCTION,
+			};
 
-			// Replace simple variables
-			output = output.replaceAll("{{ACCOUNT_ID}}", accountId);
-			output = output.replaceAll("{{ENV_TYPE}}", envType);
-			output = output.replaceAll("{{MCP_SERVER_NAME}}", mcpServerName);
-			output = output.replaceAll(
-				"{{WRITE_OPS_BADGE}}",
-				writeOpsEnabled ? "✅ Enabled" : "❌ Disabled",
-			);
+			const renderedAgents = interpolateTemplate(template, vars);
 
-			// Replace conditional blocks
-			if (writeOpsEnabled) {
-				output = output.replaceAll(
-					"{{WRITE_TOOLS_TABLE}}",
-					WRITE_TOOLS_TABLE_SANDBOX,
-				);
-				output = output.replaceAll(
-					"{{WRITE_OPS_SECTION}}",
-					WRITE_OPS_SECTION_SANDBOX,
-				);
-			} else {
-				output = output.replaceAll(
-					"{{WRITE_TOOLS_TABLE}}",
-					WRITE_TOOLS_TABLE_PRODUCTION,
-				);
-				output = output.replaceAll(
-					"{{WRITE_OPS_SECTION}}",
-					WRITE_OPS_SECTION_PRODUCTION,
-				);
-			}
-
-			// Verify no unreplaced placeholders remain
-			const unreplaced = output.match(/\{\{[A-Z_]+\}\}/g);
+			// Check for remaining unreplaced placeholders
+			const unreplaced = renderedAgents.match(/\{\{[A-Z_]+\}\}/g);
 			if (unreplaced) {
 				console.warn(
 					`⚠️  Warning: Unreplaced placeholders in ${accountId}: ${unreplaced.join(", ")}`,
 				);
 			}
 
-			const targetPath = path.join(projectPath, "AGENTS.md");
-			const sizeBytes = Buffer.byteLength(output, "utf-8");
+			const targetAgentsPath = path.join(projectPath, "AGENTS.md");
+			const targetAgentsDir = path.join(projectPath, ".agents");
+			const targetRulesDir = path.join(targetAgentsDir, "rules");
+			const targetHooksPath = path.join(targetAgentsDir, "hooks.json");
+			const targetScriptsDir = path.join(projectPath, "scripts");
 
-			const agentsDir = path.join(projectPath, ".agents");
-			const skillsDir = path.join(agentsDir, "skills");
-			const skillsJsonPath = path.join(agentsDir, "skills.json");
-			const hasObsoleteSkillsJson = fs.existsSync(skillsJsonPath);
-			const hasObsoleteSkillsDir = fs.existsSync(skillsDir);
+			// Cleanup obsolete legacy items
+			const obsoleteSkillsJson = path.join(targetAgentsDir, "skills.json");
+			const obsoleteSkillsDir = path.join(targetAgentsDir, "skills");
 
 			if (dryRun) {
-				console.log(`🔍 [DRY RUN] ${path.basename(projectPath)}/AGENTS.md`);
+				console.log(`🔍 [DRY RUN] ${path.basename(projectPath)}:`);
 				console.log(
-					`   Account: ${accountId} | Env: ${envType} | Write: ${writeOpsEnabled ? "✅" : "❌"} | Size: ${sizeBytes} bytes`,
+					`   - AGENTS.md (${Buffer.byteLength(renderedAgents, "utf-8")} bytes)`,
 				);
-				if (hasObsoleteSkillsJson || hasObsoleteSkillsDir) {
-					console.log(
-						`   🔍 [DRY RUN] Will remove obsolete .agents folder contents`,
-					);
-				}
+				console.log(`   - .agents/hooks.json`);
+				console.log(`   - .agents/rules/*.md (5 modular rules)`);
+				console.log(
+					`   - scripts/ (pre-upload-check.js, suitescript-safe-check.js)`,
+				);
 			} else {
-				fs.writeFileSync(targetPath, output, "utf-8");
-				if (hasObsoleteSkillsJson) {
-					fs.rmSync(skillsJsonPath, { force: true });
-					console.log(
-						`🧹 Cleaned: Removed obsolete ${path.basename(projectPath)}/.agents/skills.json`,
-					);
+				// 1. Write AGENTS.md
+				fs.writeFileSync(targetAgentsPath, renderedAgents, "utf-8");
+
+				// 2. Clean obsolete legacy items if present
+				if (fs.existsSync(obsoleteSkillsJson)) {
+					fs.rmSync(obsoleteSkillsJson, { force: true });
 				}
-				if (hasObsoleteSkillsDir) {
-					fs.rmSync(skillsDir, { recursive: true, force: true });
-					console.log(
-						`🧹 Cleaned: Removed obsolete ${path.basename(projectPath)}/.agents/skills/`,
-					);
+				if (fs.existsSync(obsoleteSkillsDir)) {
+					fs.rmSync(obsoleteSkillsDir, { recursive: true, force: true });
 				}
-				if (fs.existsSync(agentsDir)) {
-					const files = fs.readdirSync(agentsDir);
-					if (files.length === 0) {
-						fs.rmdirSync(agentsDir);
-						console.log(
-							`🧹 Cleaned: Removed empty ${path.basename(projectPath)}/.agents/ directory`,
-						);
+
+				// 3. Ensure .agents and .agents/rules directories exist
+				fs.mkdirSync(targetRulesDir, { recursive: true });
+
+				// 4. Write hooks.json
+				if (fs.existsSync(hooksTemplatePath)) {
+					const hooksContent = fs.readFileSync(hooksTemplatePath, "utf-8");
+					fs.writeFileSync(targetHooksPath, hooksContent, "utf-8");
+				}
+
+				// 5. Sync modular rules
+				if (fs.existsSync(rulesSourceDir)) {
+					const ruleFiles = fs.readdirSync(rulesSourceDir);
+					for (const rf of ruleFiles) {
+						const srcRulePath = path.join(rulesSourceDir, rf);
+						if (!fs.statSync(srcRulePath).isFile()) continue;
+
+						let targetRuleName = rf;
+						if (rf === "environment-locks.template.md") {
+							targetRuleName = "environment-locks.md";
+						}
+						const destRulePath = path.join(targetRulesDir, targetRuleName);
+						const rawRuleContent = fs.readFileSync(srcRulePath, "utf-8");
+						const renderedRule = interpolateTemplate(rawRuleContent, vars);
+						fs.writeFileSync(destRulePath, renderedRule, "utf-8");
 					}
 				}
+
+				// 6. Ensure target scripts directory has the safety checkers
+				fs.mkdirSync(targetScriptsDir, { recursive: true });
+				const scriptSourceDir = path.join(projectRoot, "scripts");
+				for (const scriptFile of [
+					"pre-upload-check.js",
+					"suitescript-safe-check.js",
+				]) {
+					const srcScript = path.join(scriptSourceDir, scriptFile);
+					const destScript = path.join(targetScriptsDir, scriptFile);
+					if (fs.existsSync(srcScript)) {
+						fs.copyFileSync(srcScript, destScript);
+					}
+				}
+
 				console.log(
-					`✅ Synced: ${path.basename(projectPath)}/AGENTS.md — ${accountId} [${envType}]`,
+					`✅ Synced: ${path.basename(projectPath)} — ${accountId} [${envType}] (.agents + rules + hooks + scripts)`,
 				);
 			}
 

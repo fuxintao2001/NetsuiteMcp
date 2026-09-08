@@ -1,0 +1,42 @@
+{
+  "deploy-safety-gate": {
+    "enabled": true,
+    "PreToolUse": [
+      {
+        "matcher": "netsuite_suitecloud_upload",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node scripts/pre-upload-check.js",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  },
+  "code-quality-gate": {
+    "enabled": true,
+    "PostToolUse": [
+      {
+        "matcher": "write_to_file",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node scripts/suitescript-safe-check.js",
+            "timeout": 15
+          }
+        ]
+      },
+      {
+        "matcher": "replace_file_content",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node scripts/suitescript-safe-check.js",
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  }
+}

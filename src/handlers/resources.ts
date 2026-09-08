@@ -111,6 +111,14 @@ export function registerResourceHandlers(
 					"Index of all 272 standard NetSuite record types available in SuiteScript records reference.",
 				mimeType: "text/markdown",
 			},
+			{
+				uri: "netsuite://templates/generative-ui",
+				name: "Antigravity Generative UI NetSuite Visual Component Library",
+				description:
+					"Production-ready HTML/Tailwind templates for NetSuite financial variance, " +
+					"transaction flow graphs, and multi-location inventory maps conforming to Antigravity theme standards.",
+				mimeType: "text/markdown",
+			},
 		];
 
 		const now = Date.now();
@@ -221,6 +229,25 @@ export function registerResourceHandlers(
 			md += `### Supported Record Types:\n`;
 			md += types.map((t) => `- \`${t}\``).join("\n");
 
+			return {
+				contents: [
+					{
+						uri,
+						mimeType: "text/markdown",
+						text: md,
+					},
+				],
+			};
+		}
+
+		if (uri === "netsuite://templates/generative-ui") {
+			let md = `# Antigravity Generative UI NetSuite Component Library\n\n`;
+			md += `Official Tailwind CSS & Semantic Variable Templates for NetSuite Data Visualizations.\n\n`;
+			md += `CDN Requirement:\n\`\`\`html\n<script src="https://www.gstatic.com/antigravity/web/dev/tailwindcss.min.js"></script>\n\`\`\`\n\n`;
+			md += `## 1. Metric Summary Card (Inline Widget)\n\n`;
+			md += `\`\`\`html\n<!DOCTYPE html>\n<html>\n<head>\n  <script src="https://www.gstatic.com/antigravity/web/dev/tailwindcss.min.js"></script>\n</head>\n<body class="bg-transparent text-[var(--foreground)] antialiased p-4">\n  <div class="bg-[var(--card)] text-[var(--foreground)] border border-[var(--border)] rounded-xl p-5 shadow-sm space-y-3">\n    <div class="flex justify-between items-center">\n      <h3 class="font-semibold text-base">NetSuite Financial Summary</h3>\n      <span class="text-xs px-2 py-0.5 rounded-full bg-[var(--primary)] text-[var(--primary-foreground)] font-medium">Q3 2026</span>\n    </div>\n    <div class="grid grid-cols-3 gap-4 pt-2">\n      <div class="p-3 bg-[var(--background)] rounded-lg border border-[var(--border)]">\n        <div class="text-xs text-[var(--muted-foreground)]">Total Revenue</div>\n        <div class="text-lg font-bold text-[var(--foreground)]">$1,248,500</div>\n      </div>\n      <div class="p-3 bg-[var(--background)] rounded-lg border border-[var(--border)]">\n        <div class="text-xs text-[var(--muted-foreground)]">Gross Margin</div>\n        <div class="text-lg font-bold text-emerald-500">42.8%</div>\n      </div>\n      <div class="p-3 bg-[var(--background)] rounded-lg border border-[var(--border)]">\n        <div class="text-xs text-[var(--muted-foreground)]">Open Invoices</div>\n        <div class="text-lg font-bold text-[var(--foreground)]">38</div>\n      </div>\n    </div>\n  </div>\n</body>\n</html>\n\`\`\`\n\n`;
+			md += `## 2. Transaction Flow & Lineage Widget\n\n`;
+			md += `\`\`\`html\n<!DOCTYPE html>\n<html>\n<head>\n  <script src="https://www.gstatic.com/antigravity/web/dev/tailwindcss.min.js"></script>\n</head>\n<body class="bg-transparent text-[var(--foreground)] antialiased p-4">\n  <div class="bg-[var(--card)] border border-[var(--border)] rounded-xl p-5 shadow-sm space-y-4">\n    <h3 class="font-semibold text-base">Order Fulfillment Lifecycle</h3>\n    <div class="flex items-center space-x-2 text-sm overflow-x-auto py-2">\n      <div class="flex-1 p-3 rounded-lg border border-[var(--border)] bg-[var(--background)]">\n        <div class="text-xs text-[var(--muted-foreground)]">Sales Order</div>\n        <div class="font-medium">SO1002</div>\n        <div class="text-xs text-emerald-500">Billed</div>\n      </div>\n      <div class="text-[var(--muted-foreground)]">➔</div>\n      <div class="flex-1 p-3 rounded-lg border border-[var(--border)] bg-[var(--background)]">\n        <div class="text-xs text-[var(--muted-foreground)]">Fulfillment</div>\n        <div class="font-medium">IF2041</div>\n        <div class="text-xs text-emerald-500">Shipped</div>\n      </div>\n      <div class="text-[var(--muted-foreground)]">➔</div>\n      <div class="flex-1 p-3 rounded-lg border border-[var(--border)] bg-[var(--background)]">\n        <div class="text-xs text-[var(--muted-foreground)]">Invoice</div>\n        <div class="font-medium">INV3092</div>\n        <div class="text-xs text-emerald-500">Paid In Full</div>\n      </div>\n    </div>\n  </div>\n</body>\n</html>\n\`\`\`\n`;
 			return {
 				contents: [
 					{

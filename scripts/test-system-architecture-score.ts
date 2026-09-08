@@ -54,7 +54,7 @@ interface DimensionEvaluation {
 
 console.log("=".repeat(90));
 console.log(
-	"🎯 NetSuite MCP 360° 全架构深度评测与系统综合打分基准 (Benchmark v3.0 - Gemini 3.8 Flash 适配版)",
+	"🎯 NetSuite MCP 360° 全架构深度评测与系统综合打分基准 (Benchmark v4.0 - Gemini 3.8 Flash & Antigravity Native 版)",
 );
 console.log("=".repeat(90) + "\n");
 
@@ -289,11 +289,13 @@ const expectedPrompts = [
 	"review_suitescript",
 	"debug_script_error",
 	"generate_suiteql",
+	"visualize_netsuite_data",
+	"upgrade_suitescript",
 ];
 const allPromptsExist = expectedPrompts.every((p) => promptNames.includes(p));
 dim3Cases.push({
 	id: "D3-3",
-	name: "专用 MCP Prompts 注册完备度 (review, debug, generate)",
+	name: "专用 MCP Prompts 注册完备度 (5 个全功能领域提示词)",
 	passed: allPromptsExist,
 	score: allPromptsExist ? 100 : 0,
 	detail: `已注册 ${promptNames.length} 个专用提示词: [${promptNames.join(", ")}]`,
@@ -530,7 +532,9 @@ for (const ws of config.workspaces) {
 		const sz = fs.statSync(wsPath).size;
 		const okSize = sz > 3000 && sz <= 20000;
 		if (!okSize) allWsAgentsValid = false;
-		wsStatusList.push(`${path.basename(ws.projectPath)}: ${okSize ? "✅" : "❌"} (${sz} 字节)`);
+		wsStatusList.push(
+			`${path.basename(ws.projectPath)}: ${okSize ? "✅" : "❌"} (${sz} 字节)`,
+		);
 	}
 }
 dim6Cases.push({
@@ -582,6 +586,148 @@ dim6Cases.push({
 });
 
 // ---------------------------------------------------------------------------
+// 维度 7: Antigravity 原生规范与生命周期门禁 (Antigravity Customization Architecture & Hooks) [权重 15%]
+// ---------------------------------------------------------------------------
+
+const dim7Cases: TestCaseResult[] = [];
+
+// Case 7.1: Antigravity 官方生命周期钩子配置完备度 (.agents/hooks.json)
+const hooksPath = path.join(projectRoot, ".agents", "hooks.json");
+let hooksValid = false;
+let hooksDetail = "";
+if (fs.existsSync(hooksPath)) {
+	try {
+		const hooksData = JSON.parse(fs.readFileSync(hooksPath, "utf-8"));
+		const hasPre = Object.values(hooksData).some(
+			(h: any) => Array.isArray(h.PreToolUse) && h.PreToolUse.length > 0,
+		);
+		const hasPost = Object.values(hooksData).some(
+			(h: any) => Array.isArray(h.PostToolUse) && h.PostToolUse.length > 0,
+		);
+		hooksValid = hasPre && hasPost;
+		hooksDetail = hooksValid
+			? "✅ 成功配置 PreToolUse (部署安全防线) 与 PostToolUse (SAFE静态扫描/代码风格检查)"
+			: "❌ hooks.json 缺少 PreToolUse 或 PostToolUse 配置";
+	} catch (e) {
+		hooksDetail = `❌ hooks.json 解析失败: ${(e as Error).message}`;
+	}
+} else {
+	hooksDetail = "❌ .agents/hooks.json 不存在";
+}
+dim7Cases.push({
+	id: "D7-1",
+	name: "Antigravity 官方生命周期钩子配置完备度 (.agents/hooks.json)",
+	passed: hooksValid,
+	score: hooksValid ? 100 : 0,
+	detail: hooksDetail,
+});
+
+// Case 7.2: 分层模块化规约目录与核心规约覆盖 (.agents/rules/*.md)
+const rulesDir = path.join(projectRoot, ".agents", "rules");
+const requiredRules = [
+	"fast-path-routing.md",
+	"suiteql-guardrails.md",
+	"safe-guide-standards.md",
+	"environment-locks.md",
+	"generative-ui.md",
+];
+let rulesFoundCount = 0;
+if (fs.existsSync(rulesDir)) {
+	const existingRules = fs.readdirSync(rulesDir);
+	rulesFoundCount = requiredRules.filter((r) =>
+		existingRules.includes(r),
+	).length;
+}
+const allRulesFound = rulesFoundCount === requiredRules.length;
+dim7Cases.push({
+	id: "D7-2",
+	name: "Antigravity 原生分层模块化规约覆盖度 (.agents/rules/*.md)",
+	passed: allRulesFound,
+	score: Math.round((rulesFoundCount / requiredRules.length) * 100),
+	detail: `已覆盖 ${rulesFoundCount}/${requiredRules.length} 个核心领域规约: [${requiredRules.join(", ")}]`,
+});
+
+// Case 7.3: Antigravity 官方 Generative UI 规约与资产模板深度集成
+const genUiRulePath = path.join(rulesDir, "generative-ui.md");
+let genUiValid = false;
+if (fs.existsSync(genUiRulePath)) {
+	const genUiContent = fs.readFileSync(genUiRulePath, "utf-8");
+	const hasCdn = genUiContent.includes(
+		"https://www.gstatic.com/antigravity/web/dev/tailwindcss.min.js",
+	);
+	const hasCssVars =
+		genUiContent.includes("var(--card)") &&
+		genUiContent.includes("var(--foreground)");
+	const hasEmbedTag = genUiContent.includes("<agent-embed");
+	const hasPrompt = promptNames.includes("visualize_netsuite_data");
+	genUiValid = hasCdn && hasCssVars && hasEmbedTag && hasPrompt;
+}
+dim7Cases.push({
+	id: "D7-3",
+	name: "Antigravity 官方 Generative UI 规约与提示词融合度",
+	passed: genUiValid,
+	score: genUiValid ? 100 : 0,
+	detail: genUiValid
+		? "✅ 严格锁定官方 Tailwind 脚本、语义化 CSS 主题变量、<agent-embed> 规范并注册专用可视化 Prompt"
+		: "❌ Generative UI 规范或提示词未完整集成",
+});
+
+// Case 7.4: SuiteScript SAFE Guide 离线静态扫描与前置检查脚本
+const safeCheckScript = path.join(
+	projectRoot,
+	"scripts",
+	"suitescript-safe-check.js",
+);
+const preUploadScript = path.join(
+	projectRoot,
+	"scripts",
+	"pre-upload-check.js",
+);
+let scriptsValid = false;
+if (fs.existsSync(safeCheckScript) && fs.existsSync(preUploadScript)) {
+	const safeContent = fs.readFileSync(safeCheckScript, "utf-8");
+	const preContent = fs.readFileSync(preUploadScript, "utf-8");
+	const checksLoops =
+		safeContent.includes("record.load") || safeContent.includes("SAFE-GOV-001");
+	const checksOwasp =
+		safeContent.includes("OWASP-INJ-001") || safeContent.includes("eval");
+	const blocksSensitive =
+		preContent.includes("sensitivePatterns") || preContent.includes(".env");
+	scriptsValid = checksLoops && checksOwasp && blocksSensitive;
+}
+dim7Cases.push({
+	id: "D7-4",
+	name: "SuiteScript SAFE 离线静态扫描与上传前置防篡改拦截 (scripts)",
+	passed: scriptsValid,
+	score: scriptsValid ? 100 : 0,
+	detail: scriptsValid
+		? "✅ 具备治理耗尽扫描、OWASP 注入检测、过时 API 拦截与敏感环境凭证阻断能力"
+		: "❌ 脚本缺失或静态分析项不全",
+});
+
+// Case 7.5: 客户端工作区模板与分发预备度 (workspace-agents)
+const wsRulesDir = path.join(projectRoot, "workspace-agents", "rules");
+const wsHooksPath = path.join(
+	projectRoot,
+	"workspace-agents",
+	"hooks.template.json",
+);
+let wsTemplatesValid = false;
+if (fs.existsSync(wsRulesDir) && fs.existsSync(wsHooksPath)) {
+	const wsRules = fs.readdirSync(wsRulesDir);
+	wsTemplatesValid = wsRules.length >= 4;
+}
+dim7Cases.push({
+	id: "D7-5",
+	name: "客户端多工作区分发模板与钩子预备度 (workspace-agents)",
+	passed: wsTemplatesValid,
+	score: wsTemplatesValid ? 100 : 0,
+	detail: wsTemplatesValid
+		? "✅ 包含通用的 hooks.template.json 与 rules/*.md 模板，支持一键分发"
+		: "❌ workspace-agents 模板缺失",
+});
+
+// ---------------------------------------------------------------------------
 // 汇总统计与打分输出
 // ---------------------------------------------------------------------------
 
@@ -589,7 +735,7 @@ const dimensions: DimensionEvaluation[] = [
 	{
 		id: "DIM_1",
 		name: "双轨路由与按需上下文架构 (Dual-Path & On-Demand Progressive)",
-		weight: 0.2,
+		weight: 0.15,
 		cases: dim1Cases,
 		rawScore: 0,
 		weightedScore: 0,
@@ -605,7 +751,7 @@ const dimensions: DimensionEvaluation[] = [
 	{
 		id: "DIM_3",
 		name: "MCP 协议完备度与并发调度 (MCP Protocol & Concurrency Dispatch)",
-		weight: 0.2,
+		weight: 0.15,
 		cases: dim3Cases,
 		rawScore: 0,
 		weightedScore: 0,
@@ -613,7 +759,7 @@ const dimensions: DimensionEvaluation[] = [
 	{
 		id: "DIM_4",
 		name: "运行时代码级硬防御 (Runtime Guardrails)",
-		weight: 0.2,
+		weight: 0.15,
 		cases: dim4Cases,
 		rawScore: 0,
 		weightedScore: 0,
@@ -631,6 +777,14 @@ const dimensions: DimensionEvaluation[] = [
 		name: "多工作区同步健康度 (Workspace Synchronization)",
 		weight: 0.1,
 		cases: dim6Cases,
+		rawScore: 0,
+		weightedScore: 0,
+	},
+	{
+		id: "DIM_7",
+		name: "Antigravity 原生规范与生命周期门禁 (Antigravity Customization Architecture)",
+		weight: 0.15,
+		cases: dim7Cases,
 		rawScore: 0,
 		weightedScore: 0,
 	},

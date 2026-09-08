@@ -69,6 +69,49 @@ export const PROMPT_DEFINITIONS: PromptDefinition[] = [
 			},
 		],
 	},
+	{
+		name: "visualize_netsuite_data",
+		description:
+			"Generate an interactive HTML/Tailwind Generative UI widget or dashboard artifact for NetSuite financial, transaction, or inventory data based on Antigravity Generative UI standards.",
+		arguments: [
+			{
+				name: "dataType",
+				description:
+					"Type of NetSuite data: 'financial_variance', 'transaction_lineage', 'multi_location_inventory', or 'audit_timeline'.",
+				required: true,
+			},
+			{
+				name: "dataJson",
+				description:
+					"The SuiteQL query results, financial report rows, or transaction details in JSON format.",
+				required: true,
+			},
+			{
+				name: "layout",
+				description:
+					"Visual presentation format: 'inline' (compact widget embedded via <agent-embed>) or 'standalone' (full-page dashboard artifact).",
+				required: false,
+			},
+		],
+	},
+	{
+		name: "upgrade_suitescript",
+		description:
+			"Upgrade legacy SuiteScript 1.0 or 2.0 code to modern SuiteScript 2.1 adhering strictly to Oracle authoritative migration specifications and ES6+ standards.",
+		arguments: [
+			{
+				name: "code",
+				description:
+					"The legacy SuiteScript 1.0 or 2.0 source code to modernize.",
+				required: true,
+			},
+			{
+				name: "targetVersion",
+				description: "Target version (default: '2.1').",
+				required: false,
+			},
+		],
+	},
 ];
 
 export function registerPromptHandlers(server: Server): void {
@@ -175,6 +218,93 @@ Generate a valid, high-performance SuiteQL query for the following requirement:
 5. Use \`BUILTIN.DF(fieldName)\` to display friendly names without unnecessary JOINs.
 6. End with \`FETCH FIRST 100 ROWS ONLY\`.
 7. Output the query with parameter placeholders and explain each column choice.`;
+
+				return {
+					messages: [
+						{
+							role: "user",
+							content: {
+								type: "text",
+								text: promptText,
+							},
+						},
+					],
+				};
+			}
+
+			case "visualize_netsuite_data": {
+				const dataType = (args?.dataType as string) || "financial_variance";
+				const dataJson = (args?.dataJson as string) || "{}";
+				const layout = (args?.layout as string) || "inline";
+
+				const promptText = `You are a Frontend & NetSuite Visualization Specialist adhering strictly to the official Antigravity 'generative_ui' skill guidelines.
+Your goal is to transform the provided NetSuite data into an interactive, high-aesthetic HTML component.
+
+- **Data Type**: ${dataType}
+- **Presentation Layout**: ${layout} (${layout === "inline" ? "compact widget rendered inline via <agent-embed>" : "standalone full-page artifact in side-pane"})
+- **Input Data**:
+\`\`\`json
+${dataJson}
+\`\`\`
+
+## Antigravity Generative UI Mandates:
+1. **Allowlisted Tailwind Script**:
+   Include ONLY:
+   \`<script src="https://www.gstatic.com/antigravity/web/dev/tailwindcss.min.js"></script>\`
+   DO NOT load any external CSS, Google Fonts, or third-party CDN scripts.
+2. **Semantic Theme Variables**:
+   Use host CSS tokens for theme neutrality:
+   - Surfaces: \`bg-[var(--card)]\`, \`bg-[var(--background)]\`
+   - Borders: \`border-[var(--border)]\`
+   - Text: \`text-[var(--foreground)]\`, \`text-[var(--muted-foreground)]\`
+   - Accents: \`bg-[var(--primary)]\`, \`text-[var(--primary-foreground)]\`
+   NEVER declare fallback overrides on \`:root\` in a \`<style>\` tag.
+3. **Layout & Embedding**:
+   ${
+			layout === "inline"
+				? `- Set <body class="bg-transparent text-[var(--foreground)] p-4">
+   - Wrap in a card container: <div class="bg-[var(--card)] border border-[var(--border)] rounded-xl p-4 shadow-sm">
+   - Provide instructions to embed using: <agent-embed src="file:///<artifact_path>/widget.html"></agent-embed>`
+				: `- Use a complete dashboard layout with solid bg-[var(--background)], header metrics, search/filter inputs, and interactive data visualization.`
+}
+4. Provide the complete, self-contained HTML artifact code with inline vanilla JavaScript for interactions (e.g. tooltips, filtering, sorting, tab switching).`;
+
+				return {
+					messages: [
+						{
+							role: "user",
+							content: {
+								type: "text",
+								text: promptText,
+							},
+						},
+					],
+				};
+			}
+
+			case "upgrade_suitescript": {
+				const code = (args?.code as string) || "";
+				const targetVer = (args?.targetVersion as string) || "2.1";
+
+				const promptText = `You are a Senior NetSuite Architect and SuiteScript Modernization Specialist following Oracle official migration guides (SuiteScript 1.0/2.0 to 2.1).
+Modernize the following legacy SuiteScript code to standard SuiteScript ${targetVer}:
+
+\`\`\`javascript
+${code}
+\`\`\`
+
+## Modernization Directives & Breaking Changes Checklist:
+1. **API Conversion (1.0 -> 2.1)**:
+   - Convert all \`nlapi*\` functions to SuiteScript 2.1 standard AMD modules (e.g. \`N/record\`, \`N/search\`, \`N/query\`, \`N/ui/serverWidget\`, \`N/format\`, \`N/runtime\`).
+2. **ES6+ Modernization**:
+   - Use \`const\` / \`let\` instead of \`var\`.
+   - Use arrow functions, object destructuring, template literals, and default parameters.
+3. **Breaking Behavioral Differences Migration**:
+   - Sublist indexing: 1-based in 1.0 -> 0-based in 2.1 (\`getLineCount\`, \`getSublistValue\`).
+   - Standardize search filters and search columns to \`N/search\` arrays.
+   - Dynamic vs Standard record mode: explicitly specify \`isDynamic: true\` when modifying UI fields with sourced dependencies.
+4. **Clean Replacement & Zero Defensive Bloat**:
+   - Physically remove all legacy 1.0 shims, dead comments, and fallback branches. Provide only the single, clean, production-ready SuiteScript ${targetVer} script.`;
 
 				return {
 					messages: [

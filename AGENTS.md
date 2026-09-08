@@ -67,3 +67,20 @@ When writing, debugging, or refactoring code (SuiteScript, TypeScript, JavaScrip
    - Adapt conversational explanations, summaries, and interactive messages to the user's language (default to Simplified Chinese if prompted in Chinese).
    - Keep all code symbols, SQL keywords, table names, field IDs, and API syntax strictly in standard English.
    - Git commit messages pushed to remote must be in Simplified Chinese.
+
+---
+
+## ⚙️ 5. Antigravity Native Customization Architecture (.agents/)
+
+This workspace adheres strictly to the official Google Antigravity Customization Architecture (`agy-customizations`):
+
+- **Lifecycle Hooks ([`.agents/hooks.json`](file:///Users/fuxintao/WebstormProjects/NetsuiteMcp/.agents/hooks.json))**:
+  - `PreToolUse`: Validates syntax and blocks credential leaks prior to SuiteCloud uploads (`scripts/pre-upload-check.js`).
+  - `PostToolUse`: Runs automated code formatting and SAFE Guide offline linter (`scripts/suitescript-safe-check.js`) after code modifications.
+- **Modular Directory Rules ([`.agents/rules/`](file:///Users/fuxintao/WebstormProjects/NetsuiteMcp/.agents/rules))**:
+  - [Fast-Path Routing](file:///Users/fuxintao/WebstormProjects/NetsuiteMcp/.agents/rules/fast-path-routing.md): Standard core tables 1-turn direct execution.
+  - [SuiteQL Guardrails](file:///Users/fuxintao/WebstormProjects/NetsuiteMcp/.agents/rules/suiteql-guardrails.md): 7 golden SQL defense rules.
+  - [SAFE Guide Standards](file:///Users/fuxintao/WebstormProjects/NetsuiteMcp/.agents/rules/safe-guide-standards.md): SAFE Guide 2025.2 & OWASP secure coding directives.
+  - [Environment Locks](file:///Users/fuxintao/WebstormProjects/NetsuiteMcp/.agents/rules/environment-locks.md): Production write lockout & upload card gates.
+  - [Generative UI](file:///Users/fuxintao/WebstormProjects/NetsuiteMcp/.agents/rules/generative-ui.md): Antigravity Generative UI styling, CSS theme variables, and `<agent-embed>` directives.
+

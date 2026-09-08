@@ -218,3 +218,20 @@ When writing, modifying, or refactoring code (SuiteScript, TypeScript, JavaScrip
 - **Tone & Style**: Concise, direct, high information density. Eliminate pleasantries and conversational filler.
 - **Language Alignment**: Adapt user-facing explanations to the user's conversation language (default to Simplified Chinese if user writes in Chinese).
 - **Git Commit Messages**: Keep remote git commit messages concise and informative in Simplified Chinese.
+
+---
+
+## ⚙️ ANTIGRAVITY NATIVE CUSTOMIZATION ARCHITECTURE (.agents/)
+
+This workspace adheres strictly to the official Google Antigravity Customization Architecture (`agy-customizations`):
+
+- **Lifecycle Hooks ([`.agents/hooks.json`](file://{{PROJECT_PATH}}/.agents/hooks.json))**:
+  - `PreToolUse`: Automated pre-upload safety and syntax checks (`scripts/pre-upload-check.js`).
+  - `PostToolUse`: Automated code formatting and SAFE Guide static checks (`scripts/suitescript-safe-check.js`).
+- **Modular Directory Rules ([`.agents/rules/`](file://{{PROJECT_PATH}}/.agents/rules))**:
+  - [Fast-Path Routing](file://{{PROJECT_PATH}}/.agents/rules/fast-path-routing.md): 1-turn direct execution on standard tables.
+  - [SuiteQL Guardrails](file://{{PROJECT_PATH}}/.agents/rules/suiteql-guardrails.md): 7 golden SQL defense rules.
+  - [SAFE Guide Standards](file://{{PROJECT_PATH}}/.agents/rules/safe-guide-standards.md): SAFE Guide 2025.2 & OWASP secure coding directives.
+  - [Environment Locks](file://{{PROJECT_PATH}}/.agents/rules/environment-locks.md): Production write lockout & upload card gates.
+  - [Generative UI](file://{{PROJECT_PATH}}/.agents/rules/generative-ui.md): Antigravity Generative UI styling, CSS theme variables, and `<agent-embed>` directives.
+
