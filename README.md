@@ -31,7 +31,13 @@ Built for seamless integration with MCP clients including **Claude Code**, **Cur
   - Exposes 272 standard NetSuite record definitions (`netsuite://records/reference`).
   - Curated SuiteQL golden templates (`netsuite://queries/golden-templates`).
   - SuiteCloud Agent Skills integration (`netsuite://skills/*`).
-  - Ready-to-use prompt templates for SuiteScript 2.1 code reviews, error stack trace debugging, and SuiteQL generation.
+  - Generative UI interactive component templates (`netsuite://templates/generative-ui`).
+  - Ready-to-use prompt templates for SuiteScript 2.1 code reviews, error stack trace debugging, SuiteQL generation, Generative UI visualizations, and SuiteScript 1.0->2.1 modernization.
+- 🎨 **Antigravity Generative UI & Visualizations**:
+  - Direct integration with Antigravity official `generative_ui` standards using allowlisted Tailwind CSS and semantic host theme variables (`--card`, `--foreground`, `--primary`).
+  - Ready-made interactive visual components for financial statements, order fulfillment lifecycles, and inventory distributions with `<agent-embed>` inline support.
+- ⚙️ **Antigravity Native Lifecycle Hooks & Automated Gates**:
+  - Standard `.agents/hooks.json` integration with `PreToolUse` deployment safety gates (`scripts/pre-upload-check.js`) and `PostToolUse` SAFE Guide static analyzers (`scripts/suitescript-safe-check.js`).
 - 🔄 **Daemon & Background Keepalive**:
   - Background scheduler proactively refreshes OAuth tokens before expiration.
   - Native macOS LaunchAgent daemon keeps tokens fresh 24/7 without manual user re-authentication.
@@ -117,6 +123,7 @@ Built for seamless integration with MCP clients including **Claude Code**, **Cur
 - **`netsuite://guides/suiteql`**: Comprehensive SuiteQL query syntax, Oracle dialect rules, BUILTIN functions, and performance best practices.
 - **`netsuite://queries/golden-templates`**: Curated, production-tested SuiteQL templates for transactions, line items, inventory, GL impact, and audit logs.
 - **`netsuite://records/reference`**: Complete catalog index of all 272 standard NetSuite record types.
+- **`netsuite://templates/generative-ui`**: Production-ready HTML/Tailwind templates for NetSuite financial variance cards, transaction lifecycle flows, and multi-location inventory maps conforming to Antigravity theme standards.
 - **`netsuite://skills/{skillName}`**: Markdown manuals for bundled NetSuite SuiteCloud Agent Skills (e.g., `netsuite-ai-connector-instructions`, `netsuite-sdf-safe-guide`).
 
 ### Prompts (Ready-to-Use)
@@ -124,6 +131,8 @@ Built for seamless integration with MCP clients including **Claude Code**, **Cur
 - **`review_suitescript`**: Review SuiteScript 2.1 code against Oracle SAFE Guide principles, governance limits, OWASP security, and performance patterns.
 - **`debug_script_error`**: Analyze NetSuite runtime error stack traces, explain root causes, and provide actionable refactoring patches.
 - **`generate_suiteql`**: Generate production-ready SuiteQL queries adhering to SAFE Guide guidelines.
+- **`visualize_netsuite_data`**: Generate interactive HTML/Tailwind Generative UI widgets or dashboards for NetSuite financial, transaction, or inventory data based on Antigravity Generative UI standards (`<agent-embed>`).
+- **`upgrade_suitescript`**: Modernize legacy SuiteScript 1.0 or 2.0 code to SuiteScript 2.1 adhering strictly to Oracle authoritative migration specifications and ES6+ standards.
 
 ---
 
@@ -137,8 +146,13 @@ This server is designed to empower AI coding agents (such as Antigravity, Claude
    - Establishes production write shields and permission hard-stops.
 2. **SuiteCloud Agent Skills (`~/.gemini/config/skills/`)**:
    - On-demand specialized skills covering the SAFE Guide (`netsuite-sdf-safe-guide`), official record dictionary (`netsuite-suitescript-records-reference`), financial operations (`netsuite-finance-analyst`), OWASP security (`netsuite-owasp-secure-coding`), and SuiteScript 1.0 → 2.1 upgrade (`netsuite-suitescript-upgrade`).
-3. **Multi-Workspace Synchronization (`npm run sync-agents`)**:
+3. **Antigravity Native Customization Architecture ([`.agents/`](./.agents))**:
+   - **Lifecycle Hooks ([`.agents/hooks.json`](./.agents/hooks.json))**: Configured with `PreToolUse` deployment gates (`scripts/pre-upload-check.js`) to block credential leaks and check syntax, and `PostToolUse` offline validators (`scripts/suitescript-safe-check.js`) to enforce SAFE Guide rules.
+   - **Modular Rules ([`.agents/rules/*.md`](./.agents/rules))**: Dedicated domain rule files for Fast-Path routing, SuiteQL guardrails, SAFE Guide standards, environment locks, and Generative UI design.
+4. **Multi-Workspace Synchronization & Automated Git Push (`npm run sync-agents` & `npm run sync:push`)**:
    - Automatically synchronizes environment-specific rules, account IDs, and sandbox write privileges from `workspace-agents/AGENTS.template.md` to each local client project's `AGENTS.md`.
+   - Provisions `.agents/hooks.json`, `.agents/rules/*.md`, and offline checker scripts across all configured workspaces in `workspaces.json`.
+   - `npm run sync:push`: One-command execution to sync rules, auto-stage changes, commit, and push updates across all connected workspace GitHub repositories.
 
 ---
 
@@ -302,7 +316,8 @@ Logs are stored in:
 | `npm run dev` | Start stdio MCP server in development mode via `tsx` |
 | `npm run auth:all` | Interactive bulk OAuth authentication tool across all configured accounts |
 | `npm run fetch-skills` | Download official Oracle SuiteCloud Agent Skills |
-| `npm run sync-agents` | Sync AGENTS.md rules to connected client workspaces |
+| `npm run sync-agents` | Sync AGENTS.md and .agents/ rules to connected client workspaces |
+| `npm run sync:push` | Sync rules and automatically commit & push across all connected client workspaces |
 | `npm run score` | Run the 360° architecture & runtime guardrail scoring suite |
 
 ---
