@@ -356,10 +356,12 @@ async function handleInspectRecord(
 				? (unwrapped.data as Record<string, unknown>)
 				: unwrapped;
 
-		// Separate system fields vs custom fields vs sublists
+		// Separate system fields vs custom fields vs sublists vs false flags
 		const systemFields: Record<string, unknown> = {};
 		const customFields: Record<string, unknown> = {};
 		const sublists: Record<string, unknown> = {};
+		const systemFalseFlags: string[] = [];
+		const customFalseFlags: string[] = [];
 
 		for (const [key, val] of Object.entries(recordData)) {
 			if (
@@ -376,6 +378,7 @@ async function handleInspectRecord(
 				continue;
 			}
 
+			const isFalseFlag = val === false || val === "F";
 			const lowerKey = key.toLowerCase();
 			if (
 				lowerKey.startsWith("custbody") ||
@@ -385,7 +388,11 @@ async function handleInspectRecord(
 				lowerKey.startsWith("custitem") ||
 				lowerKey.startsWith("custevent")
 			) {
-				customFields[key] = val;
+				if (isFalseFlag) {
+					customFalseFlags.push(key);
+				} else {
+					customFields[key] = val;
+				}
 			} else if (
 				Array.isArray(val) ||
 				(typeof val === "object" &&
@@ -400,31 +407,51 @@ async function handleInspectRecord(
 					sublists[key] = val;
 				}
 			} else {
-				systemFields[key] = val;
+				if (isFalseFlag) {
+					systemFalseFlags.push(key);
+				} else {
+					systemFields[key] = val;
+				}
 			}
 		}
 
 		let md = `## 🔍 NetSuite Record Inspection: \`${recordType}\` (ID: ${recordId})\n\n`;
 
 		// Format system fields table
-		md += `### 📋 System Header Fields (${Object.keys(systemFields).length})\n`;
-		md += `| Field ID | Value |\n|---|---|\n`;
-		for (const [k, v] of Object.entries(systemFields)) {
-			const displayVal =
-				typeof v === "object" && v !== null ? JSON.stringify(v) : String(v);
-			md += `| \`${k}\` | ${displayVal.replace(/\|/g, "\\|").replace(/\n/g, " ")} |\n`;
-		}
-
-		// Format custom fields table
-		md += `\n### 🏷️ Custom Fields (${Object.keys(customFields).length})\n`;
-		if (Object.keys(customFields).length === 0) {
-			md += `*(No populated custom fields found)*\n`;
-		} else {
+		const sysTotal = Object.keys(systemFields).length + systemFalseFlags.length;
+		md += `### 📋 System Header Fields (${sysTotal})\n`;
+		if (Object.keys(systemFields).length > 0) {
 			md += `| Field ID | Value |\n|---|---|\n`;
-			for (const [k, v] of Object.entries(customFields)) {
+			for (const [k, v] of Object.entries(systemFields)) {
 				const displayVal =
 					typeof v === "object" && v !== null ? JSON.stringify(v) : String(v);
 				md += `| \`${k}\` | ${displayVal.replace(/\|/g, "\\|").replace(/\n/g, " ")} |\n`;
+			}
+		}
+		if (systemFalseFlags.length > 0) {
+			md += `\n> 🔘 **Unchecked / False Flags (${systemFalseFlags.length})**: \`${systemFalseFlags.join("`, `")}\`\n\n`;
+		}
+
+		// Format custom fields table
+		const custTotal =
+			Object.keys(customFields).length + customFalseFlags.length;
+		md += `### 🏷️ Custom Fields (${custTotal})\n`;
+		if (
+			Object.keys(customFields).length === 0 &&
+			customFalseFlags.length === 0
+		) {
+			md += `*(No populated custom fields found)*\n`;
+		} else {
+			if (Object.keys(customFields).length > 0) {
+				md += `| Field ID | Value |\n|---|---|\n`;
+				for (const [k, v] of Object.entries(customFields)) {
+					const displayVal =
+						typeof v === "object" && v !== null ? JSON.stringify(v) : String(v);
+					md += `| \`${k}\` | ${displayVal.replace(/\|/g, "\\|").replace(/\n/g, " ")} |\n`;
+				}
+			}
+			if (customFalseFlags.length > 0) {
+				md += `\n> 🔘 **Unchecked / False Flags (${customFalseFlags.length})**: \`${customFalseFlags.join("`, `")}\`\n\n`;
 			}
 		}
 

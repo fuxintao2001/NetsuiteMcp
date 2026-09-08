@@ -886,6 +886,37 @@ describe("MCP Handler Wires", () => {
 				expect(res.content[0].text).toContain("Sublists & Lines Summary");
 			});
 
+			it("should compact unchecked false flags into compact inline lists", async () => {
+				const callFn = registeredHandlers.get("tools/call");
+				mockMCPTools.executeTool.mockResolvedValueOnce({
+					id: "12345",
+					tranid: "SO1002",
+					isInactive: false,
+					shipComplete: "F",
+					custbody_active_flag: true,
+					custbody_unchecked_1: false,
+					custbody_unchecked_2: "F",
+				});
+
+				const res = await callFn?.({
+					params: {
+						name: "netsuite_inspect_record",
+						arguments: { recordType: "salesorder", recordId: "12345" },
+					},
+				});
+
+				const text = res.content[0].text;
+				// Active fields remain in table
+				expect(text).toContain("| `custbody_active_flag` | true |");
+				expect(text).toContain("| `tranid` | SO1002 |");
+				// False flags are compacted into inline summaries
+				expect(text).toContain("Unchecked / False Flags (2)");
+				expect(text).toContain("`isInactive`, `shipComplete`");
+				expect(text).toContain(
+					"`custbody_unchecked_1`, `custbody_unchecked_2`",
+				);
+			});
+
 			it("should normalize id to recordId for netsuite_inspect_record and ns_getRecord", async () => {
 				const callFn = registeredHandlers.get("tools/call");
 				mockMCPTools.executeTool.mockResolvedValueOnce({
