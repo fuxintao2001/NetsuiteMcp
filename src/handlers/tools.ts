@@ -381,7 +381,9 @@ async function handleInspectRecord(
 				lowerKey.startsWith("custbody") ||
 				lowerKey.startsWith("custentity") ||
 				lowerKey.startsWith("custrecord") ||
-				lowerKey.startsWith("custcol")
+				lowerKey.startsWith("custcol") ||
+				lowerKey.startsWith("custitem") ||
+				lowerKey.startsWith("custevent")
 			) {
 				customFields[key] = val;
 			} else if (
