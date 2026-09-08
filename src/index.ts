@@ -11,11 +11,11 @@ import axios from "axios";
 import { registerPromptHandlers } from "./handlers/prompts.js";
 import { registerResourceHandlers } from "./handlers/resources.js";
 import type { ToolHandlerDeps } from "./handlers/tools.js";
-
 // Import handlers
 import { registerToolHandlers, textResult } from "./handlers/tools.js";
 import { NetSuiteMCPTools } from "./mcp/tools.js";
 import { OAuthManager } from "./oauth/manager.js";
+import { McpSupervisor } from "./supervisor/supervisor.js";
 import { cacheService } from "./utils/cache.js";
 import { resolveSessionPath } from "./utils/config.js";
 import { getKnownClientId } from "./utils/constants.js";
@@ -323,6 +323,23 @@ class NetSuiteMCPServer {
 // ---------------------------------------------------------------------------
 // Main
 async function main(): Promise<void> {
+	// --- Hot-Reload Supervisor vs Worker ---
+	const isWorker = process.env.__NETSUITE_MCP_WORKER__ === "true";
+	const noReload =
+		process.env.NETSUITE_MCP_NO_RELOAD === "true" ||
+		process.env.NODE_ENV === "test";
+
+	if (!isWorker && !noReload) {
+		const scriptPath = fileURLToPath(import.meta.url);
+		const distDir = dirname(scriptPath);
+		const supervisor = new McpSupervisor({
+			scriptPath,
+			distDir,
+		});
+		supervisor.start();
+		return;
+	}
+
 	try {
 		const server = new NetSuiteMCPServer();
 
