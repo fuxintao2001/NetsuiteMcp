@@ -174,10 +174,12 @@ FETCH FIRST 50 ROWS ONLY
 1. **Tool Execution Hierarchy**:
    - **Routine Queries (Fast-Path)**: `ns_runCustomSuiteQL` (Direct 1-turn execution)
    - **Schema Reconnaissance (Slow-Path)**: `ns_getSuiteQLMetadata` ➔ `netsuite_get_record_definition` (Only for custom/unverified entities)
+   - **Record Inspection (High Signal, Low Token)**: `netsuite_inspect_record` (Preferred: automatically strips null noise, supports doc numbers/tranid, supports compact JSON & controllable line items, saving 85%+ tokens). Use `ns_getRecord` only when an unpruned raw JSON tree or protocol metadata is strictly required.
    - **Logs & Audit**: `netsuite_get_script_logs` ➔ `netsuite_get_system_notes`
    - **Reports & Saved Searches**: `ns_runReport` / `ns_runSavedSearch`
-   - **Record Mutations**: `ns_getRecord` ➔ `ns_createRecord` / `ns_updateRecord` (Sandbox only)
+   - **Record Mutations (Sandbox only)**: `netsuite_inspect_record` / `ns_getRecord` ➔ `ns_createRecord` / `ns_updateRecord`
    - **Deployment & Links**: `netsuite_get_record_link` / `netsuite_suitecloud_upload`
+   - **🚫 Pruned & Prohibited Tools**: `ns_prompt_library_app`, `ns_selector_app`, `ns_report_filters_app` (web browser modal widgets that cause headless agent deadlocks; strictly blocked), `ns_getAccountingContexts`, `ns_getNexusIds` (query via SuiteQL instead).
 2. **Concurrency & Batching**:
    - When executing multiple independent reads or checks, issue parallel tool calls or use `netsuite_batch_execute` in a single turn to eliminate serial latency.
 3. **File Deployment Confirmation Protocol (`netsuite_suitecloud_upload`)**:
