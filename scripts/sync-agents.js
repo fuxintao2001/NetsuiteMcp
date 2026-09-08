@@ -13,6 +13,7 @@
  * 4. scripts/ (pre-upload-check.js & suitescript-safe-check.js)
  */
 
+import { execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -22,6 +23,7 @@ const __dirname = path.dirname(__filename);
 const projectRoot = path.dirname(__dirname);
 
 const dryRun = process.argv.includes("--dry-run");
+const shouldPush = process.argv.includes("--push");
 
 // ---------------------------------------------------------------------------
 // Paths
@@ -211,6 +213,52 @@ try {
 				console.log(
 					`✅ Synced: ${path.basename(projectPath)} — ${accountId} [${envType}] (.agents + rules + hooks + scripts)`,
 				);
+
+				// 7. Git commit and push if requested
+				if (shouldPush) {
+					try {
+						execSync(
+							"git add AGENTS.md .agents/ scripts/pre-upload-check.js scripts/suitescript-safe-check.js",
+							{ cwd: projectPath, stdio: "pipe" },
+						);
+
+						let hasChanges = false;
+						try {
+							execSync("git diff --cached --quiet", {
+								cwd: projectPath,
+								stdio: "pipe",
+							});
+						} catch {
+							hasChanges = true;
+						}
+
+						if (hasChanges) {
+							execSync(
+								'git commit -m "docs(agents): 同步最新 Antigravity 原生规约、生命周期钩子与离线检测脚本"',
+								{ cwd: projectPath, stdio: "pipe" },
+							);
+							const currentBranch = execSync("git rev-parse --abbrev-ref HEAD", {
+								cwd: projectPath,
+								encoding: "utf-8",
+							}).trim();
+							execSync(`git push origin ${currentBranch}`, {
+								cwd: projectPath,
+								stdio: "pipe",
+							});
+							console.log(
+								`   🚀 Pushed to remote: ${path.basename(projectPath)} [branch: ${currentBranch}]`,
+							);
+						} else {
+							console.log(
+								`   ℹ️  Remote up to date: ${path.basename(projectPath)} (no changes)`,
+							);
+						}
+					} catch (pushErr) {
+						console.error(
+							`   ⚠️  Git push warning for ${path.basename(projectPath)}: ${pushErr.message}`,
+						);
+					}
+				}
 			}
 
 			successCount++;
