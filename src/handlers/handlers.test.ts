@@ -163,6 +163,44 @@ describe("MCP Handler Wires", () => {
 			expect(names).toContain("ns_getRecord");
 		});
 
+		it("should filter out pruned/useless interactive tools from tools/list", async () => {
+			mockOAuthManager.getAccountId.mockResolvedValue("9260916-sb1");
+			mockMCPTools.fetchTools.mockResolvedValueOnce([
+				{ name: "ns_getRecord", description: "Get a record" },
+				{ name: "ns_prompt_library_app", description: "Interactive app" },
+				{ name: "ns_selector_app", description: "Interactive app" },
+				{ name: "ns_report_filters_app", description: "Interactive app" },
+				{
+					name: "ns_getAccountingContexts",
+					description: "Accounting contexts",
+				},
+				{ name: "ns_getNexusIds", description: "Nexus IDs" },
+			]);
+			const listFn = registeredHandlers.get("tools/list");
+			const result = await listFn?.();
+			const names = result.tools.map((t: any) => t.name);
+
+			expect(names).toContain("ns_getRecord");
+			expect(names).not.toContain("ns_prompt_library_app");
+			expect(names).not.toContain("ns_selector_app");
+			expect(names).not.toContain("ns_report_filters_app");
+			expect(names).not.toContain("ns_getAccountingContexts");
+			expect(names).not.toContain("ns_getNexusIds");
+		});
+
+		it("should block interactive _app tools on tools/call with informative guidance", async () => {
+			const callFn = registeredHandlers.get("tools/call");
+			const res = await callFn?.({
+				params: {
+					name: "ns_selector_app",
+					arguments: { recordType: "customer" },
+				},
+			});
+
+			expect(res.isError).toBe(true);
+			expect(res.content[0].text).toContain("⛔ [Interactive App Unsupported]");
+		});
+
 		it("should enforce Dual-Gate Defense on tools/call for write operations in Production", async () => {
 			mockOAuthManager.getAccountId.mockResolvedValue("123456"); // Production
 			const callFn = registeredHandlers.get("tools/call");
@@ -937,6 +975,125 @@ describe("MCP Handler Wires", () => {
 					recordId: "99887",
 				});
 				expect(res.content[0].text).toContain("NetSuite Record Inspection");
+			});
+
+			it("should support format: compact_json and return clean structured JSON", async () => {
+				const callFn = registeredHandlers.get("tools/call");
+				mockMCPTools.executeTool.mockResolvedValueOnce({
+					id: "12345",
+					tranid: "SO1002",
+					emptyField: null,
+					emptyString: "",
+					custbody_order_type: "online",
+					item: [
+						{ item: "100", quantity: 2, custcol_test_col: "abc" },
+						{ item: "101", quantity: 1, custcol_test_col: "def" },
+					],
+				});
+
+				const res = await callFn?.({
+					params: {
+						name: "netsuite_inspect_record",
+						arguments: {
+							recordType: "salesorder",
+							recordId: "12345",
+							format: "compact_json",
+						},
+					},
+				});
+
+				expect(res.isError).toBeUndefined();
+				const parsed = JSON.parse(res.content[0].text);
+				expect(parsed.recordType).toBe("salesorder");
+				expect(parsed.recordId).toBe("12345");
+				expect(parsed.systemFields.tranid).toBe("SO1002");
+				expect(parsed.systemFields.emptyField).toBeUndefined();
+				expect(parsed.customFields.custbody_order_type).toBe("online");
+				expect(parsed.sublistsSummary.item.count).toBe(2);
+			});
+
+			it("should support linesMode: all and maxLines to inspect detailed line item rows", async () => {
+				const callFn = registeredHandlers.get("tools/call");
+				mockMCPTools.executeTool.mockResolvedValueOnce({
+					id: "12345",
+					tranid: "SO1002",
+					item: [
+						{ item: "100", quantity: 2, rate: 50, amount: 100 },
+						{ item: "101", quantity: 1, rate: 30, amount: 30 },
+						{ item: "102", quantity: 5, rate: 10, amount: 50 },
+					],
+				});
+
+				const res = await callFn?.({
+					params: {
+						name: "netsuite_inspect_record",
+						arguments: {
+							recordType: "salesorder",
+							recordId: "12345",
+							format: "compact_json",
+							linesMode: "all",
+							maxLines: 2,
+							lineFields: ["item", "quantity", "amount"],
+						},
+					},
+				});
+
+				const parsed = JSON.parse(res.content[0].text);
+				expect(parsed.sublists.item).toHaveLength(2);
+				expect(parsed.sublists.item[0]).toEqual({
+					item: "100",
+					quantity: 2,
+					amount: 100,
+				});
+				expect(parsed.sublists.item[0].rate).toBeUndefined(); // filtered by lineFields
+			});
+
+			it("should automatically resolve document number tranid for ns_getRecord", async () => {
+				const callFn = registeredHandlers.get("tools/call");
+				// 1st call: SuiteQL query to resolve tranid
+				mockMCPTools.executeTool.mockImplementationOnce(
+					(name: string, _args: any) => {
+						if (name === "ns_runCustomSuiteQL") {
+							return Promise.resolve({
+								data: [{ id: "9876", recordtype: "salesorder" }],
+							});
+						}
+						return Promise.resolve({});
+					},
+				);
+				// 2nd call: ns_getRecord with resolved internal ID
+				mockMCPTools.executeTool.mockImplementationOnce(
+					(name: string, args: any) => {
+						if (name === "ns_getRecord") {
+							return Promise.resolve({
+								id: args.recordId,
+								tranid: "SO9876",
+							});
+						}
+						return Promise.resolve({});
+					},
+				);
+
+				await callFn?.({
+					params: {
+						name: "ns_getRecord",
+						arguments: {
+							recordId: "SO9876",
+						},
+					},
+				});
+
+				expect(mockMCPTools.executeTool).toHaveBeenCalledWith(
+					"ns_runCustomSuiteQL",
+					{
+						sqlQuery: expect.stringContaining("WHERE tranid = 'SO9876'"),
+					},
+				);
+				expect(mockMCPTools.executeTool).toHaveBeenCalledWith("ns_getRecord", {
+					recordId: "9876",
+					id: "9876",
+					recordType: "salesorder",
+				});
 			});
 
 			it("should handle netsuite_get_system_notes successfully", async () => {

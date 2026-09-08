@@ -298,7 +298,18 @@ async function handleInspectRecord(
 			true,
 		);
 	}
-	let { recordType, recordId, includeLines, nonEmptyOnly } = parsed.data;
+	let {
+		recordType,
+		recordId,
+		format,
+		linesMode,
+		maxLines,
+		lineFields,
+		includeLines,
+		nonEmptyOnly,
+	} = parsed.data;
+
+	const shouldIncludeLines = includeLines !== false && linesMode !== "none";
 
 	// If recordId is not numeric (e.g. document tranid 'SO1002'), try resolving internal numeric ID
 	const isNumeric = /^\d+$/.test(recordId.trim());
@@ -359,7 +370,7 @@ async function handleInspectRecord(
 		// Separate system fields vs custom fields vs sublists vs false flags
 		const systemFields: Record<string, unknown> = {};
 		const customFields: Record<string, unknown> = {};
-		const sublists: Record<string, unknown> = {};
+		const rawSublists: Record<string, unknown> = {};
 		const systemFalseFlags: string[] = [];
 		const customFalseFlags: string[] = [];
 
@@ -403,8 +414,8 @@ async function handleInspectRecord(
 					val !== null &&
 					!("id" in val && Object.keys(val).length <= 2))
 			) {
-				if (includeLines) {
-					sublists[key] = val;
+				if (shouldIncludeLines) {
+					rawSublists[key] = val;
 				}
 			} else {
 				if (isFalseFlag) {
@@ -415,6 +426,98 @@ async function handleInspectRecord(
 			}
 		}
 
+		// Process sublists
+		const sublistsDetail: Record<string, Array<Record<string, unknown>>> = {};
+		const sublistsSummary: Record<
+			string,
+			{ count: number; sampleColumns: string[] }
+		> = {};
+
+		if (shouldIncludeLines && Object.keys(rawSublists).length > 0) {
+			for (const [sublistName, val] of Object.entries(rawSublists)) {
+				let items: unknown[] | null = null;
+				if (Array.isArray(val)) {
+					items = val;
+				} else if (
+					typeof val === "object" &&
+					val !== null &&
+					"items" in val &&
+					Array.isArray((val as { items: unknown[] }).items)
+				) {
+					items = (val as { items: unknown[] }).items;
+				}
+
+				if (items) {
+					const sampleKeys =
+						items.length > 0 &&
+						typeof items[0] === "object" &&
+						items[0] !== null
+							? Object.keys(items[0]).filter(
+									(k) =>
+										(items[0] as Record<string, unknown>)[k] !== null &&
+										(items[0] as Record<string, unknown>)[k] !== "",
+								)
+							: [];
+					sublistsSummary[sublistName] = {
+						count: items.length,
+						sampleColumns: sampleKeys.slice(0, 15),
+					};
+
+					if (linesMode === "all") {
+						const projectedRows: Array<Record<string, unknown>> = [];
+						for (const item of items.slice(0, maxLines)) {
+							if (typeof item !== "object" || item === null) continue;
+							const itemObj = item as Record<string, unknown>;
+							const cleanedRow: Record<string, unknown> = {};
+							for (const [k, v] of Object.entries(itemObj)) {
+								if (
+									lineFields &&
+									lineFields.length > 0 &&
+									!lineFields.includes(k)
+								) {
+									continue;
+								}
+								if (
+									nonEmptyOnly &&
+									(v === null || v === undefined || v === "")
+								) {
+									continue;
+								}
+								cleanedRow[k] = v;
+							}
+							projectedRows.push(cleanedRow);
+						}
+						sublistsDetail[sublistName] = projectedRows;
+					}
+				}
+			}
+		}
+
+		// If compact_json format is requested
+		if (format === "compact_json") {
+			const compactJsonResult: Record<string, unknown> = {
+				recordType,
+				recordId,
+				systemFields,
+				customFields,
+			};
+			if (systemFalseFlags.length > 0) {
+				compactJsonResult.systemFalseFlags = systemFalseFlags;
+			}
+			if (customFalseFlags.length > 0) {
+				compactJsonResult.customFalseFlags = customFalseFlags;
+			}
+			if (shouldIncludeLines) {
+				if (linesMode === "all") {
+					compactJsonResult.sublists = sublistsDetail;
+				} else {
+					compactJsonResult.sublistsSummary = sublistsSummary;
+				}
+			}
+			return textResult(JSON.stringify(compactJsonResult, null, 2));
+		}
+
+		// Otherwise format as Markdown (default)
 		let md = `## 🔍 NetSuite Record Inspection: \`${recordType}\` (ID: ${recordId})\n\n`;
 
 		// Format system fields table
@@ -455,34 +558,39 @@ async function handleInspectRecord(
 			}
 		}
 
-		// Format sublists overview
-		if (includeLines && Object.keys(sublists).length > 0) {
-			md += `\n### 📦 Sublists & Lines Summary\n`;
-			for (const [sublistName, val] of Object.entries(sublists)) {
-				let items: unknown[] | null = null;
-				if (Array.isArray(val)) {
-					items = val;
-				} else if (
-					typeof val === "object" &&
-					val !== null &&
-					"items" in val &&
-					Array.isArray((val as { items: unknown[] }).items)
-				) {
-					items = (val as { items: unknown[] }).items;
-				}
-				if (items) {
-					md += `- **\`${sublistName}\`** (${items.length} rows)\n`;
-					if (
-						items.length > 0 &&
-						typeof items[0] === "object" &&
-						items[0] !== null
-					) {
-						const sampleKeys = Object.keys(items[0]).filter(
-							(k) =>
-								(items[0] as Record<string, unknown>)[k] !== null &&
-								(items[0] as Record<string, unknown>)[k] !== "",
+		// Format sublists overview or detailed rows
+		if (shouldIncludeLines && Object.keys(rawSublists).length > 0) {
+			if (linesMode === "all") {
+				md += `\n### 📦 Sublists & Line Details (up to ${maxLines} rows/list)\n`;
+				for (const [sublistName, rows] of Object.entries(sublistsDetail)) {
+					const totalCount = sublistsSummary[sublistName]?.count ?? rows.length;
+					md += `\n#### Sublist: \`${sublistName}\` (Showing ${rows.length} of ${totalCount} rows)\n`;
+					if (rows.length === 0) {
+						md += `*(Empty sublist)*\n`;
+					} else {
+						const allCols = Array.from(
+							new Set(rows.flatMap((r) => Object.keys(r))),
 						);
-						md += `  - Populated Columns in Row 1: \`${sampleKeys.slice(0, 15).join("`, `")}\`${sampleKeys.length > 15 ? "..." : ""}\n`;
+						md += `| # | ${allCols.map((c) => `\`${c}\``).join(" | ")} |\n`;
+						md += `|---|${allCols.map(() => "---").join("|")}|\n`;
+						rows.forEach((r, idx) => {
+							const rowVals = allCols.map((col) => {
+								const val = r[col];
+								if (val === undefined || val === null) return "";
+								return typeof val === "object"
+									? JSON.stringify(val)
+									: String(val);
+							});
+							md += `| ${idx + 1} | ${rowVals.map((v) => v.replace(/\|/g, "\\|").replace(/\n/g, " ")).join(" | ")} |\n`;
+						});
+					}
+				}
+			} else {
+				md += `\n### 📦 Sublists & Lines Summary\n`;
+				for (const [sublistName, summary] of Object.entries(sublistsSummary)) {
+					md += `- **\`${sublistName}\`** (${summary.count} rows)\n`;
+					if (summary.sampleColumns.length > 0) {
+						md += `  - Populated Columns in Row 1: \`${summary.sampleColumns.join("`, `")}\`${summary.sampleColumns.length >= 15 ? "..." : ""}\n`;
 					}
 				}
 			}
@@ -1314,6 +1422,19 @@ function enhanceToolDescriptions(
 // ---------------------------------------------------------------------------
 
 /**
+ * Tools that are pruned from tools/list:
+ * - Interactive MCP apps that require NetSuite web UI modal widgets and cause headless agent deadlocks
+ * - Rarely used, low-value cascading report tools that can be directly queried via SuiteQL
+ */
+export const PRUNED_TOOLS = new Set([
+	"ns_prompt_library_app",
+	"ns_selector_app",
+	"ns_report_filters_app",
+	"ns_getAccountingContexts",
+	"ns_getNexusIds",
+]);
+
+/**
  * Register all MCP tool handlers on the server.
  *
  * Error handling contract:
@@ -1350,13 +1471,19 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
 				Record<string, unknown>
 			>;
 
-			// Filter write tools in production
+			// Filter write tools in production and prune useless/hazardous interactive tools
 			const isSandbox = accountId ? isSandboxAccount(accountId) : false;
-			const filteredTools = isSandbox
-				? tools
-				: tools.filter(
-						(t) => t.name !== "ns_createRecord" && t.name !== "ns_updateRecord",
-					);
+			const filteredTools = tools.filter((t) => {
+				const toolName = (t.name as string) || "";
+				if (PRUNED_TOOLS.has(toolName)) return false;
+				if (
+					!isSandbox &&
+					(toolName === "ns_createRecord" || toolName === "ns_updateRecord")
+				) {
+					return false;
+				}
+				return true;
+			});
 
 			// Enhance SuiteQL tool descriptions with rules
 			const enhancedTools = enhanceToolDescriptions(filteredTools);
@@ -1529,6 +1656,18 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
 					}
 				}
 
+				// --- Defense for interactive _app tools in headless/coding environment ---
+				if (
+					name === "ns_prompt_library_app" ||
+					name === "ns_selector_app" ||
+					name === "ns_report_filters_app"
+				) {
+					return textResult(
+						`⛔ [Interactive App Unsupported] The tool '${name}' is an interactive UI widget designed strictly for NetSuite web browser environments. It is not supported in headless agent environments to prevent task hanging. Please use 'ns_runCustomSuiteQL' or 'netsuite_inspect_record' instead.`,
+						true,
+					);
+				}
+
 				// --- Dual-Gate Defense: Strictly block write operations in production ---
 				if (name === "ns_createRecord" || name === "ns_updateRecord") {
 					const accountId =
@@ -1540,6 +1679,36 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
 								`Record create and update operations are only permitted in Sandbox / Test environments (accounts containing '_SB' or 'TSTDRV').`,
 							true,
 						);
+					}
+				}
+
+				// --- Zero-friction document number (tranid) resolution for ns_getRecord ---
+				if (name === "ns_getRecord") {
+					const rawRecordId = String(
+						safeArgs.recordId || safeArgs.id || "",
+					).trim();
+					if (rawRecordId && !/^\d+$/.test(rawRecordId)) {
+						try {
+							const lookupSql = `SELECT id, recordtype FROM transaction WHERE tranid = '${rawRecordId.replace(/'/g, "''")}' FETCH FIRST 1 ROWS ONLY`;
+							const lookupRes = await mcpTools.executeTool(
+								"ns_runCustomSuiteQL",
+								{
+									sqlQuery: lookupSql,
+								},
+							);
+							const rows = mcpTools.extractDataArray(lookupRes);
+							if (rows.length > 0 && rows[0]?.id) {
+								safeArgs.recordId = String(rows[0].id);
+								safeArgs.id = String(rows[0].id);
+								if (rows[0].recordtype) {
+									safeArgs.recordType = String(
+										rows[0].recordtype,
+									).toLowerCase();
+								}
+							}
+						} catch {
+							// Continue with original recordId if lookup fails
+						}
 					}
 				}
 

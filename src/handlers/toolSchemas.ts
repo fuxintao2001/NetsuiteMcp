@@ -154,11 +154,43 @@ export const InspectRecordArgsSchema = z.object({
 		.describe(
 			"Record internal numeric ID (e.g. '12345') or document number / tranid (e.g. 'SO1002').",
 		),
+	format: z
+		.enum(["markdown", "compact_json"])
+		.optional()
+		.default("markdown")
+		.describe(
+			"Output format: 'markdown' for human-readable structured tables (default), or 'compact_json' for clean, noise-free, machine-readable JSON.",
+		),
+	linesMode: z
+		.enum(["summary", "all", "none"])
+		.optional()
+		.default("summary")
+		.describe(
+			"Line items / sublists detail mode: 'summary' (row counts & 1st-row sample keys, default), 'all' (inspect detailed line item rows up to maxLines), or 'none' (omit sublists entirely).",
+		),
+	maxLines: z
+		.number()
+		.int()
+		.positive()
+		.max(50)
+		.optional()
+		.default(5)
+		.describe(
+			"Maximum number of line item rows to include per sublist when linesMode is 'all' (default: 5, max: 50). Prevents context token explosion.",
+		),
+	lineFields: z
+		.array(z.string().trim())
+		.optional()
+		.describe(
+			"Optional array of specific line item field names to project (e.g. ['item', 'quantity', 'rate', 'amount']). If omitted, all populated line fields are returned.",
+		),
 	includeLines: z
 		.boolean()
 		.optional()
 		.default(true)
-		.describe("Whether to include line item details (default: true)."),
+		.describe(
+			"Whether to include line item details (default: true). Set false as shortcut for linesMode='none'.",
+		),
 	nonEmptyOnly: z
 		.boolean()
 		.optional()
@@ -488,7 +520,7 @@ export const SCRIPT_LOGS_TOOL = {
 export const INSPECT_RECORD_TOOL = {
 	name: "netsuite_inspect_record",
 	description:
-		"Deeply inspect a real NetSuite record's populated fields and line items in the current environment. Eliminates null/empty noise, separates system header fields from custom fields (custbody_*, custcol_*, custrecord_*), and formats a clean developer-friendly overview. Ideal for writing SuiteScript and SuiteQL.",
+		"Deeply inspect a real NetSuite record's populated fields and line items in the current environment. Eliminates null/empty noise, separates system header fields from custom fields (custbody_*, custcol_*, custrecord_*), and formats a clean developer-friendly overview. Supports compact JSON or Markdown, and controllable line-item depth. Ideal for writing SuiteScript and SuiteQL.",
 	inputSchema: {
 		type: "object" as const,
 		properties: {
@@ -502,9 +534,33 @@ export const INSPECT_RECORD_TOOL = {
 				description:
 					"Record internal numeric ID (e.g. '12345') or document number / tranid (e.g. 'SO1002').",
 			},
+			format: {
+				type: "string",
+				enum: ["markdown", "compact_json"],
+				description:
+					"Output format: 'markdown' for formatted Markdown tables (default), or 'compact_json' for clean, machine-readable JSON without null/empty noise.",
+			},
+			linesMode: {
+				type: "string",
+				enum: ["summary", "all", "none"],
+				description:
+					"Line items / sublists detail mode: 'summary' (row counts & 1st-row sample keys, default), 'all' (inspect detailed line item rows up to maxLines), or 'none' (omit sublists).",
+			},
+			maxLines: {
+				type: "integer",
+				description:
+					"Maximum number of line item rows to include per sublist when linesMode is 'all' (default: 5, max: 50).",
+			},
+			lineFields: {
+				type: "array",
+				items: { type: "string" },
+				description:
+					"Optional array of specific line item field names to project (e.g. ['item', 'quantity', 'rate', 'amount']).",
+			},
 			includeLines: {
 				type: "boolean",
-				description: "Whether to include line item details (default: true).",
+				description:
+					"Whether to include line item details (default: true). Set false as shortcut for linesMode='none'.",
 			},
 			nonEmptyOnly: {
 				type: "boolean",
