@@ -140,6 +140,21 @@ export class NetSuiteMCPTools {
 			parameters.sqlQuery = sqlQuery;
 		}
 
+		if (toolName === "ns_getRecord" || toolName === "ns_updateRecord") {
+			const idVal =
+				parameters.recordId ??
+				parameters.id ??
+				parameters.record_id ??
+				parameters.internalId ??
+				parameters.internal_id;
+			if (idVal !== undefined && idVal !== null) {
+				const strId = String(idVal).trim();
+				if (strId.length > 0) {
+					parameters.recordId = strId;
+				}
+			}
+		}
+
 		let result: unknown;
 		try {
 			result = await this.jsonRpcCall<unknown>("tools/call", {

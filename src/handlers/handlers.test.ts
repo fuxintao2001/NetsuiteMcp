@@ -206,6 +206,7 @@ describe("MCP Handler Wires", () => {
 
 			expect(mockMCPTools.executeTool).toHaveBeenCalledWith("ns_getRecord", {
 				recordType: "customer",
+				recordId: "101",
 				id: "101",
 			});
 			expect(res.content[0].text).toContain("Acme Corp");
@@ -876,9 +877,35 @@ describe("MCP Handler Wires", () => {
 					},
 				});
 
+				expect(mockMCPTools.executeTool).toHaveBeenCalledWith("ns_getRecord", {
+					recordType: "salesorder",
+					recordId: "12345",
+				});
 				expect(res.content[0].text).toContain("NetSuite Record Inspection");
 				expect(res.content[0].text).toContain("custbody_test_flag");
 				expect(res.content[0].text).toContain("Sublists & Lines Summary");
+			});
+
+			it("should normalize id to recordId for netsuite_inspect_record and ns_getRecord", async () => {
+				const callFn = registeredHandlers.get("tools/call");
+				mockMCPTools.executeTool.mockResolvedValueOnce({
+					id: "99887",
+					tranid: "SO1003",
+				});
+
+				// Test netsuite_inspect_record with id instead of recordId
+				const res = await callFn?.({
+					params: {
+						name: "netsuite_inspect_record",
+						arguments: { recordType: "salesorder", id: "99887" },
+					},
+				});
+
+				expect(mockMCPTools.executeTool).toHaveBeenCalledWith("ns_getRecord", {
+					recordType: "salesorder",
+					recordId: "99887",
+				});
+				expect(res.content[0].text).toContain("NetSuite Record Inspection");
 			});
 
 			it("should handle netsuite_get_system_notes successfully", async () => {

@@ -217,5 +217,33 @@ describe("NetSuiteMCPTools", () => {
 				"ns_getRecordTypeMetadata_item",
 			);
 		});
+
+		it("should normalize id to recordId when executing ns_getRecord", async () => {
+			httpPostSpy.mockResolvedValueOnce({
+				data: {
+					result: { id: "123", companyname: "Test Customer" },
+				},
+			});
+
+			const result = await client.executeTool("ns_getRecord", {
+				id: "123",
+				recordType: "customer",
+			});
+
+			expect(httpPostSpy).toHaveBeenCalledWith(
+				expect.any(String),
+				expect.objectContaining({
+					params: expect.objectContaining({
+						name: "ns_getRecord",
+						arguments: expect.objectContaining({
+							recordId: "123",
+							recordType: "customer",
+						}),
+					}),
+				}),
+				expect.any(Object),
+			);
+			expect(result).toEqual({ id: "123", companyname: "Test Customer" });
+		});
 	});
 });

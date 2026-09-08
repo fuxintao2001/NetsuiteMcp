@@ -323,7 +323,7 @@ async function handleInspectRecord(
 	try {
 		const rawRecord = await mcpTools.executeTool("ns_getRecord", {
 			recordType,
-			id: recordId,
+			recordId,
 		});
 
 		const unwrapped = (unwrapMcpContent(rawRecord) || rawRecord) as Record<
@@ -827,7 +827,7 @@ async function handleGetErrorSummary(
 	}
 }
 
-/** Normalize standard parameters (recordType, tableName, table_name, record_type, table). */
+/** Normalize standard parameters (recordType, tableName, recordId, id, record_id, internalId). */
 function normalizeStandardArgs(
 	args: Record<string, unknown>,
 ): Record<string, unknown> {
@@ -846,13 +846,18 @@ function normalizeStandardArgs(
 		}
 	}
 
-	if (
-		typeof args.record_id === "string" ||
-		typeof args.record_id === "number"
-	) {
-		const strId = String(args.record_id).trim();
-		if (!args.recordId) args.recordId = strId;
-		if (!args.id) args.id = strId;
+	const rawId =
+		args.recordId ??
+		args.id ??
+		args.record_id ??
+		args.internalId ??
+		args.internal_id;
+	if (rawId !== undefined && rawId !== null) {
+		const strId = String(rawId).trim();
+		if (strId.length > 0) {
+			if (!args.recordId) args.recordId = strId;
+			if (!args.id) args.id = strId;
+		}
 	}
 
 	return args;
