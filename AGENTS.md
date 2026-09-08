@@ -1,55 +1,69 @@
-# NetSuite MCP Server — AI Developer Guide
+# NetSuite MCP & SuiteCloud AI Engineering Directives (AGENTS.md)
 
-This repository contains the source code for the **NetSuite MCP Server** (`@suiteinsider/netsuite-mcp`). It exposes NetSuite functionalities to AI agents over the Model Context Protocol (MCP).
-
-**Tech Stack:** TypeScript (strict) · Node.js ≥ 18 (ESM) · Stdio Transport · OAuth 2.0 PKCE · Redis 分布式缓存与 Redlock 分布式锁
+> 🤖 **Role & Purpose**: This document provides mandatory execution directives for AI coding agents. It instructs AI agents on how to write, refactor, inspect, and deploy code in this repository and client NetSuite workspaces, strictly adhering to Oracle authoritative documentation and Antigravity Agent Skills.
 
 ---
 
-## ⚙️ Development & Testing Commands
+## 👑 1. Official Documentation Absolute Priority (官方权威文档最高效力)
 
-| Command | Description |
-|---|---|
-| `npm run build` | Clean build (`rimraf dist && tsc`) |
-| `npm run lint` | Run Biome linter & formatter check (`biome check src`) |
-| `npm test` | Run all Vitest unit tests |
-| `npm run dev` | Start the server in development mode (via `tsx`) |
-| `npm run fetch-skills` | Download latest Oracle SuiteCloud Agent Skills |
-| `npm run sync-agents` | Sync AGENTS.md template to all client workspaces (`--dry-run` to preview) |
-| `npm run score` | Run 360° architecture & on-demand benchmark scoring suite |
+AI agents must unconditionally enforce a **Strict Zero Hallucination** policy:
+
+1. **Hierarchy of Authoritative Truth**:
+   - **Tier 1 (Authoritative Standard)**: Oracle NetSuite Official Documentation (Help Center, SuiteAnswers, Records Catalog, SuiteScript 2.1 API Reference, SAFE Guide 2025.2). This unconditionally supersedes third-party forum posts, outdated tutorials, and LLM intuition.
+   - **Tier 2 (Account Live Schema)**: Real-time metadata retrieved directly from the active NetSuite account via `ns_getSuiteQLMetadata`, `netsuite_get_record_definition`, or `netsuite_inspect_record`.
+   - **Tier 3 (Curated Agent Skills)**: Antigravity Skills located at `~/.gemini/config/skills/`.
+   - **Tier 4 (LLM Parametric Knowledge)**: General training knowledge — MUST always be verified against Tier 1/2 before proposing code changes.
+2. **Strict Zero Hallucination**:
+   - NEVER fabricate non-existent tables or field IDs (e.g., `transaction.createdfrom`, `item.recordtype`, `LotNumberedAssemblyItemLocations`).
+   - Every technical proposal or schema reference should cite its official source (`📖 Official Source: [...]`).
 
 ---
 
-## 📚 On-Demand Skills & Knowledge Routing (渐进式按需加载)
+## 📚 2. On-Demand Skills & Documentation Routing Matrix (技能与文档按需检索路由)
 
-Detailed domain knowledge is decoupled into Antigravity Skills (`~/.gemini/config/skills/`) and MCP Resources (`netsuite://...`). **Read via `view_file` on demand only when working in that specific domain**:
+When developing or refactoring code in specific domains, the AI agent **MUST proactively read the corresponding skill or documentation** via `view_file` on demand:
 
-| Domain Scenario | On-Demand Target | Primary Purpose |
+| Development Domain | On-Demand Target Path | Key Engineering Directives & Standards |
 |:---|:---|:---|
-| **AI Connector SOP & SuiteQL** | `netsuite-ai-connector-instructions`<br>`netsuite://queries/golden-templates` | Tool selection hierarchy, SuiteQL safety checklist, number & link formatting |
-| **SAFE Guide & SuiteScript 2.1** | `netsuite-sdf-safe-guide` | SAFE Guide 12 principles, 14 script types, governance, 140+ pitfalls |
-| **272 Records & Fields Dictionary** | `netsuite-suitescript-records-reference`<br>`netsuite://records/reference` | Official standard record types, field IDs, required fields, and search attributes |
-| **Financial Analysis & Period-Close**| `netsuite-finance-analyst` | Financial statements, period-close, variance review, executive reporting |
-| **SuiteScript 1.0 → 2.1 Upgrade** | `netsuite-suitescript-upgrade` | 125+ API mappings, 34 object conversions, breaking behavioral changes |
-| **OWASP & Secure Coding** | `netsuite-owasp-secure-coding` | Injection prevention, encoding, CSP, SuiteScript API hardening |
-| **UIF SPA Components** | `netsuite-uif-spa-reference` | `@uif-js/core` and `@uif-js/component` component development |
-| **SDF Roles & Permissions** | `netsuite-sdf-roles-and-permissions` | Role permission XML configuration (`customrole*`, `permkey`, `permlevel`) |
+| **SuiteScript 2.1 & SAFE Guide Review** | `~/.gemini/config/skills/netsuite-sdf-safe-guide/SKILL.md` | Enforce 12 SAFE principles, 14 script types, governance budgets, `N/query` over `N/search`, and 140+ pitfalls. Never load records in loops; use Map/Reduce for bulk processing. |
+| **SuiteScript Records & Fields Schema** | `~/.gemini/config/skills/netsuite-suitescript-records-reference/SKILL.md`<br>Resource: `netsuite://records/reference` | Lookup exact field IDs, sublists, mandatory fields, and search filters across all 272 standard records. Zero guesswork on field names. |
+| **SuiteQL Modeling & Anti-Slow-Query** | `~/.gemini/config/skills/netsuite-ai-connector-instructions/SKILL.md`<br>Resource: `netsuite://queries/golden-templates` | Follow SuiteQL safety checklist: explicit column projections (no `SELECT *`), mandatory `mainline = 'F'`, pagination via `FETCH FIRST N ROWS ONLY`, driving index filters. |
+| **SuiteScript 1.0 → 2.1 Modernization** | `~/.gemini/config/skills/netsuite-suitescript-upgrade/SKILL.md` | 125+ API mappings, 34 object conversions, modern ES6+ features, breaking behavioral changes migration. |
+| **OWASP & Secure Coding Standards** | `~/.gemini/config/skills/netsuite-owasp-secure-coding/SKILL.md` | Context-aware output encoding, SQL injection prevention, CSP headers, credential protection, parameter sanitization. |
+| **Financial Operations & Reporting** | `~/.gemini/config/skills/netsuite-finance-analyst/SKILL.md` | Accounting periods, multi-book, multi-currency, GL impact validation, balance sheet, and cash flow logic. |
+| **SDF Roles & Permissions Config** | `~/.gemini/config/skills/netsuite-sdf-roles-and-permissions/SKILL.md` | Role permission XML (`customrole*`, `permkey`, `permlevel`), least-privilege role design, SDF object deployment. |
+| **UIF SPA Component Development** | `~/.gemini/config/skills/netsuite-uif-spa-reference/SKILL.md` | Modern NetSuite UIF SPA development, `@uif-js/core` and `@uif-js/component` APIs and hooks. |
 
 ---
 
-## 🔒 Critical Execution Rules (Always Active)
+## 🧼 3. Code Craftsmanship & Anti-Compatibility Bloat (代码重构与反伪兼容铁律)
 
-### 1. 👑 Official Documentation Absolute Highest Priority
-- **Oracle NetSuite Official Authoritative Documentation** (Help Center, SuiteAnswers, Records Catalog, SAFE Guide 2025.2) unconditionally supersedes all third-party habits and LLM intuition.
-- **Strict Zero Hallucination**: NEVER fabricate non-existent tables or fields (e.g. `LotNumberedAssemblyItemLocations`, `transaction.createdfrom`, or `item.recordtype`). Every technical recommendation MUST cite its official source (`📖 官方出处：[...]`).
+When writing, debugging, or refactoring code (SuiteScript, TypeScript, JavaScript, SQL), AI agents must strictly adhere to the **Single Authoritative Implementation** principle:
 
-### 2. Reconnaissance First & Error-Driven Self-Healing
-- Always call `ns_getSuiteQLMetadata` or `netsuite_get_record_definition` when record schema or columns are unverified.
-- Runtime validators (`suiteqlGuard.ts`) strictly block invalid syntax (`SELECT *`, `LIMIT/OFFSET`, missing `mainline`, unindexed table scans) and return structured diagnostic guidance. On validation or syntax errors, parse the diagnostic response, directly fix the query, and execute without blind retries.
+1. **Clean Replacement, Never Dual-Track (单一正解彻底替换，严禁双轨兼容)**:
+   - ❌ **PROHIBITED**: If an earlier implementation fails or throws errors, wrapping the new attempt in `try { newWay(); } catch (e) { oldWay(); }` to "support both ways".
+   - ❌ **PROHIBITED**: Adding dual-branch sniffing `if (supportsNewWay) { ... } else { ... }` when the previous way was defective or obsolete.
+   - ❌ **PROHIBITED**: Chaining speculative fallbacks due to unverified schemas (e.g., `rec.getValue('field_v2') || rec.getValue('field_v1')`).
+   - ✅ **MANDATE**: Locate the root cause via official schema or documentation. Determine the single officially sanctioned correct approach, and execute a **100% clean, total replacement**.
+2. **Immediate Physical Dead-Code Elimination (彻底清除死代码)**:
+   - When superseding an outdated implementation, immediately and physically delete obsolete functions, dead variables, deprecated arguments, and legacy logic.
+   - NEVER leave dead code behind as comments or "just in case" fallbacks. Zero tolerance for defensive code bloat.
+3. **Root Cause Resolution Over Defensive Masking (直面根因，拒绝防御掩盖)**:
+   - Errors signify invalid assumptions or schema mismatches. Confront errors directly, identify the exact defect (e.g., wrong field ID, API versioning, permission deficit), and fix it definitively at the source.
 
-### 3. Environment Lock & Write Protection
-- **Record Write Operations (`ns_createRecord`, `ns_updateRecord`)**: Strictly disabled in Production environments; enabled in Sandbox/Test (`_SB`, `TSTDRV`). Managed via `src/utils/environment.ts`.
-- **Code & Asset Uploads (`netsuite_suitecloud_upload`)**: Simplified card protocol. Always pop up an interactive confirmation card (`ask_question`) showing only the file's absolute path and "接受" / "拒绝" options before uploading.
+---
 
-### 4. Permission Hard-Stop & Zero-Hallucination
-- On NetSuite authorization/permission errors (`INSUFFICIENT_PERMISSION`, 403 Forbidden, `Permission Violation`), immediately cease all further tasks and tool calls. Never simulate fake data. Report the exact failed record type/table name and specify the required NetSuite role permission configuration.
+## 🛡️ 4. Runtime Guardrails & Operational Gates (运行时安全门禁)
+
+1. **Reconnaissance First & Error-Driven Self-Healing**:
+   - For unverified custom records (`customrecord_*`) or custom fields (`custbody_*`), always call `ns_getSuiteQLMetadata` or `netsuite_get_record_definition` before querying.
+   - On syntax or validation errors (`suiteqlGuard`), parse the structured diagnostic response, directly fix the query, and re-execute without blind retries.
+2. **Environment Lock & Write Protection**:
+   - **Record Mutations (`ns_createRecord`, `ns_updateRecord`)**: Strictly blocked in Production accounts; allowed only in Sandbox/Test (`_SB`, `TSTDRV`).
+   - **Code Deployment (`netsuite_suitecloud_upload`)**: Display an interactive confirmation card (`ask_question`) showing only the file's absolute path and choices `接受` / `拒绝` prior to uploading.
+3. **Permission Hard-Stop**:
+   - On authorization or permission errors (`INSUFFICIENT_PERMISSION`, 403 Forbidden, `Permission Violation`), immediately halt tool execution. Never simulate fake data. Report the failed record type and required permission configuration.
+4. **Adaptive Communication & English Code Standards**:
+   - Adapt conversational explanations, summaries, and interactive messages to the user's language (default to Simplified Chinese if prompted in Chinese).
+   - Keep all code symbols, SQL keywords, table names, field IDs, and API syntax strictly in standard English.
+   - Git commit messages pushed to remote must be in Simplified Chinese.

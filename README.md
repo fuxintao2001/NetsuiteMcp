@@ -4,6 +4,10 @@ An enterprise-grade Model Context Protocol (MCP) server providing AI agents with
 
 Built for seamless integration with MCP clients including **Claude Code**, **Cursor IDE**, **Gemini CLI**, **Windsurf**, and **Roo Code**.
 
+> 📖 **Documentation Map**:
+> - **`README.md` (This File)**: Comprehensive project overview, server architecture, MCP tools reference, configuration guides, and developer operations.
+> - **[`AGENTS.md`](./AGENTS.md)**: Authoritative AI Coding Directives — guides AI agents on how to write code, adhere to Oracle official documentation, utilize Agent Skills, and avoid anti-compatibility bloat.
+
 ---
 
 ## 🌟 Key Capabilities
@@ -120,6 +124,21 @@ Built for seamless integration with MCP clients including **Claude Code**, **Cur
 - **`review_suitescript`**: Review SuiteScript 2.1 code against Oracle SAFE Guide principles, governance limits, OWASP security, and performance patterns.
 - **`debug_script_error`**: Analyze NetSuite runtime error stack traces, explain root causes, and provide actionable refactoring patches.
 - **`generate_suiteql`**: Generate production-ready SuiteQL queries adhering to SAFE Guide guidelines.
+
+---
+
+## 🤖 AI Agent Engineering & Skills Integration
+
+This server is designed to empower AI coding agents (such as Antigravity, Claude Code, Cursor, and Gemini CLI) with deep domain knowledge while enforcing rigorous code quality:
+
+1. **AI Execution Directives ([`AGENTS.md`](./AGENTS.md))**:
+   - Outlines official documentation precedence (Tier 1 Oracle Help Center/SAFE Guide unconditionally supersedes LLM intuition).
+   - Enforces **Zero Defensive Compatibility Bloat** (clean code replacement over multi-version fallbacks, dead-code elimination, and root-cause resolution).
+   - Establishes production write shields and permission hard-stops.
+2. **SuiteCloud Agent Skills (`~/.gemini/config/skills/`)**:
+   - On-demand specialized skills covering the SAFE Guide (`netsuite-sdf-safe-guide`), official record dictionary (`netsuite-suitescript-records-reference`), financial operations (`netsuite-finance-analyst`), OWASP security (`netsuite-owasp-secure-coding`), and SuiteScript 1.0 → 2.1 upgrade (`netsuite-suitescript-upgrade`).
+3. **Multi-Workspace Synchronization (`npm run sync-agents`)**:
+   - Automatically synchronizes environment-specific rules, account IDs, and sandbox write privileges from `workspace-agents/AGENTS.template.md` to each local client project's `AGENTS.md`.
 
 ---
 

@@ -21,6 +21,10 @@
 4. **Adaptive Communication**:
    - Match the user's conversational language for explanations, analysis summaries, and UI messages (e.g., reply in Simplified Chinese if the user prompts in Chinese).
    - Keep all code identifiers, SQL keywords, table names, field IDs, and API syntax in standard English.
+5. **🚫 Zero Defensive Compatibility Bloat**:
+   - **Single Authoritative Implementation**: When an existing implementation fails, throws errors, or is obsolete, diagnose the root cause and completely replace it with the single, officially sanctioned standard approach (**Clean Replacement**).
+   - **Strict Prohibition on Dual-Compatibility Fallbacks**: NEVER retain both old and new implementations under the guise of "compatibility" (e.g., `try { newWay() } catch { oldWay() }`, dual-branch parameter/environment sniffing, or fallback chains like `res.newField || res.oldField`). When an earlier method is discredited or broken, **delete it completely**; never introduce defensive compatibility glue.
+   - **Clean Refactoring & Zero Dead Code**: Obsolete functions, superseded arguments, deprecated shims, and commented-out code must be physically excised from the codebase. Unless backward compatibility across distinct runtime versions is explicitly requested by the user, provide ONLY the single definitive implementation.
 
 ---
 
@@ -187,6 +191,25 @@ FETCH FIRST 50 ROWS ONLY
 {{WRITE_TOOLS_TABLE}}
 
 {{WRITE_OPS_SECTION}}
+
+---
+
+## 🧼 CODE CRAFTSMANSHIP & ZERO COMPATIBILITY BLOAT
+
+When writing, modifying, or refactoring code (SuiteScript, TypeScript, JavaScript, SQL, etc.), strictly adhere to these engineering imperatives to eliminate defensive bloat and dual-track clutter:
+
+1. **Clean Replacement, Never Dual-Track**:
+   - ❌ **PROHIBITED**: When Approach A fails, introducing Approach B wrapped in `try { approachB(); } catch (e) { approachA(); }` to "cover both bases".
+   - ❌ **PROHIBITED**: `if (supportsNewWay) { newWay(); } else { oldWay(); }` retaining both legacy and new execution paths (unless multi-environment backward compatibility is explicitly instructed by the user).
+   - ❌ **PROHIBITED**: Speculative fallback chains when uncertain of schema or API signatures, e.g., `rec.getValue('field_v2') || rec.getValue('field_v1')`.
+   - ✅ **STANDARD**: Inspect official metadata or authoritative schema definitions, verify the single correct identifier/API, and perform a **100% clean, total replacement** of the old code without lingering backward-compatibility baggage.
+
+2. **Immediate Physical Dead-Code Elimination**:
+   - When replacing an outdated implementation, immediately and physically delete deprecated helper functions, unused variables, dead types, and legacy branches.
+   - NEVER leave dead code behind as comments or "just in case" backups. Keep the codebase minimal (KISS principle), explicit, and free of ambiguity.
+
+3. **Root-Cause Resolution Over Defensive Masking**:
+   - Runtime errors indicate invalid assumptions or defective logic. Confront errors directly, identify the root cause (e.g., API deprecation, incorrect field ID, missing permissions, type mismatch), and implement the authoritative fix. Never mask unverified failures with defensive try-catch traps or silent fallback branching.
 
 ---
 

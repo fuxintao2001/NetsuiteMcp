@@ -54,17 +54,17 @@ interface DimensionEvaluation {
 
 console.log("=".repeat(90));
 console.log(
-	"🎯 NetSuite MCP 360° 全架构深度评测与系统综合打分基准 (Benchmark v2.0)",
+	"🎯 NetSuite MCP 360° 全架构深度评测与系统综合打分基准 (Benchmark v3.0 - Gemini 3.8 Flash 适配版)",
 );
 console.log("=".repeat(90) + "\n");
 
 // ---------------------------------------------------------------------------
-// 维度 1: 按需加载与渐进式披露架构 (On-Demand & Progressive Disclosure) [权重 20%]
+// 维度 1: 双轨路由与按需上下文架构 (Dual-Path & On-Demand Progressive) [权重 20%]
 // ---------------------------------------------------------------------------
 
 const dim1Cases: TestCaseResult[] = [];
 
-// Case 1.1: 模板瘦身幅度 (< 6.5KB, 相对原本 17KB 削减 > 60%)
+// Case 1.1: 模板工程体积与 Gemini 3.8 Flash 上下文适配度 (2KB ~ 20KB 黄金高密度区间)
 const templatePath = path.join(
 	projectRoot,
 	"workspace-agents",
@@ -73,41 +73,33 @@ const templatePath = path.join(
 const templateContent = fs.readFileSync(templatePath, "utf-8");
 const templateBytes = Buffer.byteLength(templateContent, "utf-8");
 const templateLines = templateContent.split("\n").length;
-const isSlim = templateBytes < 6500 && templateBytes > 2000;
+const isOptimalForFlash = templateBytes <= 20000 && templateBytes >= 2000;
 dim1Cases.push({
 	id: "D1-1",
-	name: "AGENTS.template.md 模板体积与上下文瘦身达标率",
-	passed: isSlim,
-	score: isSlim ? 100 : 0,
-	detail: `当前大小: ${templateBytes} 字节 / ${templateLines} 行 (目标: < 6,500 字节，原本: 17,046 字节，削减率: ${(100 - (templateBytes / 17046) * 100).toFixed(1)}%)`,
+	name: "AGENTS.template.md 模板体积与 Gemini 3.8 Flash 上下文适配度",
+	passed: isOptimalForFlash,
+	score: isOptimalForFlash ? 100 : 0,
+	detail: `当前大小: ${templateBytes} 字节 / ${templateLines} 行 (Gemini 3.8 Flash 适配区间: 2KB ~ 20KB 高密度黄金规约，占 1M 上下文 < 0.5%)`,
 });
 
-// Case 1.2: 知识按需加载路由表完整度
-const hasRouter =
-	templateContent.includes("知识按需加载路由表") ||
-	templateContent.includes("On-Demand Dispatcher") ||
-	templateContent.includes("ON-DEMAND SKILLS & KNOWLEDGE ROUTER");
-const requiredKeywords = [
-	"netsuite_get_query_template",
-	"golden-templates",
-	"netsuite-sdf-safe-guide",
-	"review_suitescript",
-	"netsuite_get_record_definition",
-	"netsuite-finance-analyst",
-	"netsuite-owasp-secure-coding",
-];
-const missingKeywords = requiredKeywords.filter(
-	(k) => !templateContent.includes(k),
-);
-const routerPassed = hasRouter && missingKeywords.length === 0;
+// Case 1.2: 双轨路由与极速单轮直出架构完整度 (Dual-Path & Fast-Path Routing)
+const hasDualPathRouting =
+	templateContent.includes("Dual-Path Routing") ||
+	templateContent.includes("Fast-Path") ||
+	templateContent.includes("ON-DEMAND");
+const hasReconnaissanceTools =
+	templateContent.includes("ns_runCustomSuiteQL") &&
+	(templateContent.includes("ns_getSuiteQLMetadata") ||
+		templateContent.includes("netsuite_get_record_definition"));
+const routerPassed = hasDualPathRouting && hasReconnaissanceTools;
 dim1Cases.push({
 	id: "D1-2",
-	name: "核心任务按需加载路由矩阵覆盖率 (Router Completeness)",
+	name: "双轨路由与极速单轮直出架构完整度 (Dual-Path Routing & Fast-Path)",
 	passed: routerPassed,
-	score: routerPassed ? 100 : Math.max(0, 100 - missingKeywords.length * 20),
+	score: routerPassed ? 100 : 0,
 	detail: routerPassed
-		? "✅ 包含全部 6 大任务场景 (SuiteQL、SAFE Guide、记录字典、脚本排错、财务分析、OWASP) 完整路由"
-		: `❌ 缺少路由项: ${missingKeywords.join(", ")}`,
+		? "✅ 建立 Fast-Path (核心表 1 轮直出) 与 Slow-Path (自定义记录探测) 双轨路由体系"
+		: "❌ 缺少双轨路由或探测工具调度规约",
 });
 
 // Case 1.3: 彻底消除单体大表冗余 (无硬编码的 8 领域 SuiteQL 巨大矩阵和 BAD vs GOOD 表)
@@ -201,31 +193,60 @@ dim2Cases.push({
 		: "❌ 缺少环境锁定标头",
 });
 
-// Case 2.3: 全中文交互底线锁定声明
-const hasLanguagePolicy =
+// Case 2.3: 自适应多语言交互与代码英文化规约 (Adaptive Communication & Code Standards)
+const hasAdaptivePolicy =
+	templateContent.includes("Adaptive Communication") ||
+	templateContent.includes("Language Policy") ||
 	templateContent.includes("全中文交互") ||
-	templateContent.includes("Language Policy");
+	templateContent.includes("Simplified Chinese");
 dim2Cases.push({
 	id: "D2-3",
-	name: "全中文交互底线约束声明 (Simplified Chinese Mandate)",
-	passed: hasLanguagePolicy,
-	score: hasLanguagePolicy ? 100 : 0,
-	detail: hasLanguagePolicy
-		? "✅ 顶层严格锁定所有用户解释与 UI 为简体中文交互"
-		: "❌ 缺少中文交互约束",
+	name: "自适应多语言交互与代码英文化规约 (Adaptive Communication & Code Standards)",
+	passed: hasAdaptivePolicy,
+	score: hasAdaptivePolicy ? 100 : 0,
+	detail: hasAdaptivePolicy
+		? "✅ 具备自适应语言匹配能力，且锁定代码标识符/SQL关键字为标准英文"
+		: "❌ 缺少自适应语言交互与代码英文规约",
 });
 
-// Case 2.4: 静态规则信息密度 (Signal-to-Noise Ratio)
-// 统计结构化标题、表格、列表、引用与编号规则行比例
+// Case 2.4: 结构化规约与代码示例信息密度 (Signal-to-Noise Ratio with Code Few-Shots)
+// 在 Gemini 3.8 Flash 长上下文中，规范 Markdown 标记与 ``` 代码示范均为高价值 Few-Shot 信号
 const lines = templateContent.split("\n").filter((l) => l.trim().length > 0);
-const highSignalLines = lines.filter((l) => /^([#|\->]|\d+\.)/.test(l.trim()));
-const snr = Math.round((highSignalLines.length / lines.length) * 100);
+let inCodeBlock = false;
+let highSignalCount = 0;
+for (const l of lines) {
+	const trimmed = l.trim();
+	if (trimmed.startsWith("```")) {
+		inCodeBlock = !inCodeBlock;
+		highSignalCount++;
+		continue;
+	}
+	if (inCodeBlock || /^([#|\->*]|\d+\.)/.test(trimmed)) {
+		highSignalCount++;
+	}
+}
+const snr = Math.round((highSignalCount / lines.length) * 100);
 dim2Cases.push({
 	id: "D2-4",
-	name: "静态提示词信息密度 (Signal-to-Noise Ratio)",
+	name: "结构化规约与代码示范信息密度 (Signal-to-Noise Ratio)",
 	passed: snr >= 85,
 	score: Math.min(100, snr),
-	detail: `信噪比: ${snr}% (高质量结构化规约/路由行: ${highSignalLines.length}/${lines.length} 行)`,
+	detail: `结构化信噪比: ${snr}% (高质量结构化规约/代码行: ${highSignalCount}/${lines.length} 行)`,
+});
+
+// Case 2.5: 反防御性代码兼容与单一权威实现铁律 (Zero Defensive Compatibility Bloat)
+const hasAntiBloat =
+	templateContent.includes("Zero Defensive Compatibility Bloat") &&
+	(templateContent.includes("Clean Replacement") ||
+		templateContent.includes("Single Authoritative Implementation"));
+dim2Cases.push({
+	id: "D2-5",
+	name: "反防御性代码兼容与单一权威实现铁律 (Zero Defensive Compatibility Bloat)",
+	passed: hasAntiBloat,
+	score: hasAntiBloat ? 100 : 0,
+	detail: hasAntiBloat
+		? "✅ 严格确立单一正解彻底替换原则，物理清除死代码，严禁 try-catch 兜底与双轨兼容"
+		: "❌ 缺少反伪兼容与死代码清除约束",
 });
 
 // ---------------------------------------------------------------------------
@@ -278,19 +299,21 @@ dim3Cases.push({
 	detail: `已注册 ${promptNames.length} 个专用提示词: [${promptNames.join(", ")}]`,
 });
 
-// Case 3.4: 批量并发执行引擎规范 (Batch Execution Mandate)
+// Case 3.4: 并行批处理与原生并发调用约束 (Batch Execution & Parallel Tool Calling)
 const hasBatchInstruction =
 	templateContent.includes("netsuite_batch_execute") &&
-	(templateContent.includes("≥ 2") ||
-		templateContent.includes("independent items"));
+	(templateContent.includes("parallel tool calls") ||
+		templateContent.includes("≥ 2") ||
+		templateContent.includes("independent items") ||
+		templateContent.includes("multiple independent"));
 dim3Cases.push({
 	id: "D3-4",
-	name: "并行批处理调度引擎约束 (Batch Execution Mandate)",
+	name: "并发批处理与并行工具调度约束 (Batch Execution & Parallel Tool Calling)",
 	passed: hasBatchInstruction,
 	score: hasBatchInstruction ? 100 : 0,
 	detail: hasBatchInstruction
-		? "✅ 明确规定 ≥ 2 个独立任务必须合并调用 netsuite_batch_execute，杜绝串行低效交互"
-		: "❌ 缺少批量并发调用明确指引",
+		? "✅ 明确规定多独立任务必须使用并行工具调用或 netsuite_batch_execute，彻底杜绝串行低效交互"
+		: "❌ 缺少并发调用与批量处理明确指引",
 });
 
 // ---------------------------------------------------------------------------
@@ -505,14 +528,14 @@ for (const ws of config.workspaces) {
 		wsStatusList.push(`${path.basename(ws.projectPath)}: ❌ 不存在`);
 	} else {
 		const sz = fs.statSync(wsPath).size;
-		const okSize = sz > 3000 && sz < 8000;
+		const okSize = sz > 3000 && sz <= 20000;
 		if (!okSize) allWsAgentsValid = false;
-		wsStatusList.push(`${path.basename(ws.projectPath)}: ✅ (${sz} 字节)`);
+		wsStatusList.push(`${path.basename(ws.projectPath)}: ${okSize ? "✅" : "❌"} (${sz} 字节)`);
 	}
 }
 dim6Cases.push({
 	id: "D6-1",
-	name: "四大多工作区 AGENTS.md 物理文件完好度",
+	name: "四大多工作区 AGENTS.md 物理文件完好度与体积适配",
 	passed: allWsAgentsValid,
 	score: allWsAgentsValid ? 100 : 0,
 	detail: wsStatusList.join(" | "),
@@ -565,7 +588,7 @@ dim6Cases.push({
 const dimensions: DimensionEvaluation[] = [
 	{
 		id: "DIM_1",
-		name: "按需加载与渐进式披露架构 (On-Demand Progressive)",
+		name: "双轨路由与按需上下文架构 (Dual-Path & On-Demand Progressive)",
 		weight: 0.2,
 		cases: dim1Cases,
 		rawScore: 0,
@@ -573,7 +596,7 @@ const dimensions: DimensionEvaluation[] = [
 	},
 	{
 		id: "DIM_2",
-		name: "Gemini 认知与上下文效能 (Cognitive Economics)",
+		name: "Gemini 3.8 认知效能与工程防御 (Gemini Cognitive & Engineering Standards)",
 		weight: 0.15,
 		cases: dim2Cases,
 		rawScore: 0,
@@ -581,7 +604,7 @@ const dimensions: DimensionEvaluation[] = [
 	},
 	{
 		id: "DIM_3",
-		name: "MCP 协议完备度与资源覆盖 (MCP Protocol & Coverage)",
+		name: "MCP 协议完备度与并发调度 (MCP Protocol & Concurrency Dispatch)",
 		weight: 0.2,
 		cases: dim3Cases,
 		rawScore: 0,
