@@ -50,6 +50,10 @@ When writing, debugging, or refactoring code (SuiteScript, TypeScript, JavaScrip
    - NEVER leave dead code behind as comments or "just in case" fallbacks. Zero tolerance for defensive code bloat.
 3. **Root Cause Resolution Over Defensive Masking (直面根因，拒绝防御掩盖)**:
    - Errors signify invalid assumptions or schema mismatches. Confront errors directly, identify the exact defect (e.g., wrong field ID, API versioning, permission deficit), and fix it definitively at the source.
+4. **Current-State-Only Explanations (聚焦最新代码，严禁版本历史更迭叙事)**:
+   - ❌ **PROHIBITED**: 叙述代码的版本演进历史、更迭过程或新旧版本对比（严禁输出类似「过去版本是 X，现在升级为 Y」、「之前采用了 A，现重构成 B」、「与旧版相比...」等历史包袱叙事）。
+   - ❌ **PROHIBITED**: 在代码注释或回复说明中夹带变更日志（Changelog）叙述或过时实现复盘。
+   - ✅ **MANDATE**: 无论在代码注释、技术答复还是文档说明中，**只对当前最新代码的现状与逻辑进行阐述**。将当前代码视为唯一、独立的权威实现，直接切入最新逻辑、架构设计、数据流向与参数含义，彻底剔除一切版本迭代更迭叙事。
 
 ---
 
@@ -66,6 +70,7 @@ When writing, debugging, or refactoring code (SuiteScript, TypeScript, JavaScrip
 4. **Adaptive Communication & English Code Standards**:
    - Adapt conversational explanations, summaries, and interactive messages to the user's language (default to Simplified Chinese if prompted in Chinese).
    - Keep all code symbols, SQL keywords, table names, field IDs, and API syntax strictly in standard English.
+   - **Current-State-Only Communication**: Focus solely on describing the latest codebase and logic; never narrate historical version changes, diffs, or migration trajectories.
    - Git commit messages pushed to remote must be in Simplified Chinese.
 
 ---
