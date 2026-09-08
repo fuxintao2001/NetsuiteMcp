@@ -337,30 +337,59 @@ async function handleInspectRecord(
 			);
 		}
 
+		if (unwrapped.success === false) {
+			const errMsg =
+				(unwrapped.error as string) ||
+				(unwrapped.message as string) ||
+				JSON.stringify(unwrapped);
+			return textResult(
+				`❌ NetSuite Record Inspection Failed: ${errMsg}`,
+				true,
+			);
+		}
+
+		// Unwrap nested data payload if present (NetSuite REST API returns { success: true, data: { ... } })
+		const recordData =
+			unwrapped.data &&
+			typeof unwrapped.data === "object" &&
+			!Array.isArray(unwrapped.data)
+				? (unwrapped.data as Record<string, unknown>)
+				: unwrapped;
+
 		// Separate system fields vs custom fields vs sublists
 		const systemFields: Record<string, unknown> = {};
 		const customFields: Record<string, unknown> = {};
 		const sublists: Record<string, unknown> = {};
 
-		for (const [key, val] of Object.entries(unwrapped)) {
+		for (const [key, val] of Object.entries(recordData)) {
 			if (
 				nonEmptyOnly &&
 				(val === null ||
 					val === undefined ||
 					val === "" ||
-					(Array.isArray(val) && val.length === 0))
+					(Array.isArray(val) && val.length === 0) ||
+					(typeof val === "object" &&
+						val !== null &&
+						"totalResults" in val &&
+						(val as { totalResults: number }).totalResults === 0))
 			) {
 				continue;
 			}
 
+			const lowerKey = key.toLowerCase();
 			if (
-				key.startsWith("custbody_") ||
-				key.startsWith("custentity_") ||
-				key.startsWith("custrecord_")
+				lowerKey.startsWith("custbody") ||
+				lowerKey.startsWith("custentity") ||
+				lowerKey.startsWith("custrecord") ||
+				lowerKey.startsWith("custcol")
 			) {
 				customFields[key] = val;
 			} else if (
 				Array.isArray(val) ||
+				(typeof val === "object" &&
+					val !== null &&
+					"items" in val &&
+					Array.isArray((val as { items: unknown[] }).items)) ||
 				(typeof val === "object" &&
 					val !== null &&
 					!("id" in val && Object.keys(val).length <= 2))
@@ -401,11 +430,28 @@ async function handleInspectRecord(
 		if (includeLines && Object.keys(sublists).length > 0) {
 			md += `\n### 📦 Sublists & Lines Summary\n`;
 			for (const [sublistName, val] of Object.entries(sublists)) {
+				let items: unknown[] | null = null;
 				if (Array.isArray(val)) {
-					md += `- **\`${sublistName}\`** (${val.length} rows)\n`;
-					if (val.length > 0 && typeof val[0] === "object" && val[0] !== null) {
-						const sampleKeys = Object.keys(val[0]).filter(
-							(k) => val[0][k] !== null && val[0][k] !== "",
+					items = val;
+				} else if (
+					typeof val === "object" &&
+					val !== null &&
+					"items" in val &&
+					Array.isArray((val as { items: unknown[] }).items)
+				) {
+					items = (val as { items: unknown[] }).items;
+				}
+				if (items) {
+					md += `- **\`${sublistName}\`** (${items.length} rows)\n`;
+					if (
+						items.length > 0 &&
+						typeof items[0] === "object" &&
+						items[0] !== null
+					) {
+						const sampleKeys = Object.keys(items[0]).filter(
+							(k) =>
+								(items[0] as Record<string, unknown>)[k] !== null &&
+								(items[0] as Record<string, unknown>)[k] !== "",
 						);
 						md += `  - Populated Columns in Row 1: \`${sampleKeys.slice(0, 15).join("`, `")}\`${sampleKeys.length > 15 ? "..." : ""}\n`;
 					}
