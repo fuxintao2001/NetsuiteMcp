@@ -1,0 +1,4 @@
+#!/bin/sh
+# Git pre-push hook: When pushing NetsuiteMcp, ensure all workspace environments are also pushed
+echo "\n🔄 [Git Hook: pre-push] 自动检查并同步各环境 AGENTS 与规约..."
+node scripts/sync-agents.js --push

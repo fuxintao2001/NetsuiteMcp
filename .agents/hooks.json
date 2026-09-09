@@ -38,5 +38,30 @@
         ]
       }
     ]
+  },
+  "agents-template-sync": {
+    "enabled": true,
+    "PostToolUse": [
+      {
+        "matcher": "write_to_file",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node scripts/post-tool-sync.js",
+            "timeout": 60
+          }
+        ]
+      },
+      {
+        "matcher": "replace_file_content",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node scripts/post-tool-sync.js",
+            "timeout": 60
+          }
+        ]
+      }
+    ]
   }
 }
