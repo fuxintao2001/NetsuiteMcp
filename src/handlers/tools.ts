@@ -176,15 +176,17 @@ async function handleGetScriptLogs(
 		limit,
 	} = parsed.data;
 
-	// Build SELECT with Script info joined for complete visibility
-	let sql = `SELECT sn.date, sn.type, sn.title, sn.detail, s.scriptid AS scriptScriptId, s.name AS scriptName FROM ScriptNote AS sn LEFT JOIN Script AS s ON sn.scripttype = s.id`;
+	// Build SELECT with Script info joined for complete visibility (explicit second-level timestamp formatting)
+	let sql = `SELECT TO_CHAR(sn.date, 'YYYY-MM-DD HH24:MI:SS') AS date, sn.type, sn.title, sn.detail, s.scriptid AS scriptScriptId, s.name AS scriptName FROM ScriptNote AS sn LEFT JOIN Script AS s ON sn.scripttype = s.id`;
 
 	// Build WHERE clauses
 	const conditions: string[] = [];
 
 	if (scriptId) {
 		const escapedScriptId = scriptId.replace(/'/g, "''");
-		conditions.push(`s.scriptid = '${escapedScriptId}'`);
+		conditions.push(
+			`sn.scripttype = (SELECT s_sub.id FROM Script s_sub WHERE s_sub.scriptid = '${escapedScriptId}' FETCH FIRST 1 ROWS ONLY)`,
+		);
 	}
 	if (deploymentId) {
 		const escapedDeploymentId = deploymentId.replace(/'/g, "''");
@@ -197,6 +199,9 @@ async function handleGetScriptLogs(
 	}
 	if (dateFrom) {
 		conditions.push(`sn.date >= TO_DATE('${dateFrom}', 'YYYY-MM-DD')`);
+	} else if (!dateTo) {
+		// SAFE Guide performance optimization: partition pruning defaults to last 7 days
+		conditions.push("sn.date >= SYSDATE - 7");
 	}
 	if (dateTo) {
 		// Include the full day of dateTo (up to 23:59:59) by checking < dateTo + 1
@@ -712,6 +717,37 @@ async function handleGetQueryTemplate(
 	return textResult(md);
 }
 
+const TRANSACTION_RECORD_TYPES = new Set([
+	"transaction",
+	"salesorder",
+	"invoice",
+	"itemfulfillment",
+	"itemreceipt",
+	"purchaseorder",
+	"cashsale",
+	"cashrefund",
+	"creditmemo",
+	"vendorbill",
+	"vendorpayment",
+	"vendorcredit",
+	"customerpayment",
+	"customerrefund",
+	"customerdeposit",
+	"deposit",
+	"check",
+	"estimate",
+	"opportunity",
+	"journalentry",
+	"inventoryadjustment",
+	"inventorytransfer",
+	"transferorder",
+	"returnauthorization",
+	"vendorreturnauthorization",
+	"workorder",
+	"assemblybuild",
+	"assemblyunbuild",
+]);
+
 async function handleGetSystemNotes(
 	args: Record<string, unknown>,
 	mcpTools: NetSuiteMCPTools,
@@ -723,7 +759,12 @@ async function handleGetSystemNotes(
 			true,
 		);
 	}
-	let { recordId, limit } = parsed.data;
+	let { recordId, recordType, limit } = parsed.data;
+	let recordTypeId: number | undefined;
+
+	if (recordType && TRANSACTION_RECORD_TYPES.has(recordType.toLowerCase())) {
+		recordTypeId = -30;
+	}
 
 	const isNumeric = /^\d+$/.test(recordId.trim());
 	if (!isNumeric) {
@@ -735,14 +776,31 @@ async function handleGetSystemNotes(
 			const rows = mcpTools.extractDataArray(lookupRes);
 			if (rows.length > 0 && rows[0]?.id) {
 				recordId = String(rows[0].id);
+				recordTypeId = -30; // Resolved from transaction table
+			} else {
+				return textResult(
+					`❌ Record '${recordId}' could not be resolved to a numeric internal ID. Please verify the document number (tranid) or provide the numeric internal ID directly.`,
+					true,
+				);
 			}
-		} catch {
-			// Continue with recordId
+		} catch (err: unknown) {
+			const msg = err instanceof Error ? err.message : String(err);
+			return textResult(
+				`❌ Failed to resolve document number '${recordId}': ${msg}`,
+				true,
+			);
 		}
 	}
 
+	const whereConditions: string[] = [];
+	if (recordTypeId !== undefined) {
+		whereConditions.push(`sn.recordtypeid = ${recordTypeId}`);
+	}
+	whereConditions.push(`sn.recordid = ${recordId}`);
+
 	// Standalone query complying with SAFE Guide Pitfall 11
-	const sql = `SELECT sn.date, sn.field, sn.oldvalue, sn.newvalue, sn.name AS author_id, BUILTIN.DF(sn.name) AS author_name, BUILTIN.DF(sn.role) AS role_name FROM systemnote sn WHERE sn.recordid = ${recordId} ORDER BY sn.date DESC FETCH FIRST ${limit} ROWS ONLY`;
+	// Optimized: composite index prefix (sn.recordtypeid), primary key ordering (ORDER BY sn.id DESC), and second-level timestamp formatting
+	const sql = `SELECT sn.id, TO_CHAR(sn.date, 'YYYY-MM-DD HH24:MI:SS') AS date, sn.field, sn.oldvalue, sn.newvalue, sn.name AS author_id, BUILTIN.DF(sn.name) AS author_name, BUILTIN.DF(sn.role) AS role_name FROM systemnote sn WHERE ${whereConditions.join(" AND ")} ORDER BY sn.id DESC FETCH FIRST ${limit} ROWS ONLY`;
 
 	try {
 		const res = await mcpTools.executeTool("ns_runCustomSuiteQL", {

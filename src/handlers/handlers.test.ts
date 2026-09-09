@@ -728,8 +728,8 @@ describe("MCP Handler Wires", () => {
 				expect(parsed.data[0].type).toBe("ERROR");
 				// Default limit should be 50
 				expect(parsed.query).toContain("FETCH FIRST 50 ROWS ONLY");
-				// No WHERE clause when no filters
-				expect(parsed.query).not.toContain("WHERE");
+				// SAFE Guide performance optimization: partition pruning defaults to last 7 days
+				expect(parsed.query).toContain("sn.date >= SYSDATE - 7");
 			});
 
 			it("should generate query with all filters applied", async () => {
@@ -756,9 +756,14 @@ describe("MCP Handler Wires", () => {
 				const sqlArg = mockMCPTools.executeTool.mock.calls[0][1]
 					.sqlQuery as string;
 				expect(sqlArg).toContain(
+					"SELECT TO_CHAR(sn.date, 'YYYY-MM-DD HH24:MI:SS') AS date",
+				);
+				expect(sqlArg).toContain(
 					"LEFT JOIN Script AS s ON sn.scripttype = s.id",
 				);
-				expect(sqlArg).toContain("s.scriptid = 'customscript_my_ue'");
+				expect(sqlArg).toContain(
+					"sn.scripttype = (SELECT s_sub.id FROM Script s_sub WHERE s_sub.scriptid = 'customscript_my_ue' FETCH FIRST 1 ROWS ONLY)",
+				);
 				expect(sqlArg).toContain(
 					"sn.scripttype IN (SELECT sd.script FROM ScriptDeployment sd WHERE sd.scriptid = 'customdeploy_my_ue')",
 				);
@@ -1118,9 +1123,53 @@ describe("MCP Handler Wires", () => {
 					},
 				});
 
+				expect(mockMCPTools.executeTool).toHaveBeenCalledWith(
+					"ns_runCustomSuiteQL",
+					expect.objectContaining({
+						sqlQuery: expect.stringContaining("ORDER BY sn.id DESC"),
+					}),
+				);
 				expect(res.content[0].text).toContain("System Notes Audit Trail");
 				expect(res.content[0].text).toContain("Admin User");
 				expect(res.content[0].text).toContain("Pending Fulfillment");
+			});
+
+			it("should inject recordtypeid = -30 when recordType is a transaction type", async () => {
+				const callFn = registeredHandlers.get("tools/call");
+				mockMCPTools.executeTool.mockResolvedValueOnce({
+					data: [],
+				});
+
+				await callFn?.({
+					params: {
+						name: "netsuite_get_system_notes",
+						arguments: { recordId: "12345", recordType: "salesorder" },
+					},
+				});
+
+				expect(mockMCPTools.executeTool).toHaveBeenCalledWith(
+					"ns_runCustomSuiteQL",
+					expect.objectContaining({
+						sqlQuery: expect.stringContaining("sn.recordtypeid = -30 AND sn.recordid = 12345"),
+					}),
+				);
+			});
+
+			it("should return error when non-numeric recordId cannot be resolved", async () => {
+				const callFn = registeredHandlers.get("tools/call");
+				mockMCPTools.executeTool.mockResolvedValueOnce({
+					data: [],
+				});
+
+				const res = await callFn?.({
+					params: {
+						name: "netsuite_get_system_notes",
+						arguments: { recordId: "SO-NONEXISTENT" },
+					},
+				});
+
+				expect(res.isError).toBe(true);
+				expect(res.content[0].text).toContain("could not be resolved to a numeric internal ID");
 			});
 
 			it("should handle netsuite_get_error_summary successfully", async () => {

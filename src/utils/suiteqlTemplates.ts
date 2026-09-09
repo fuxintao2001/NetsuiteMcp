@@ -175,8 +175,7 @@ FETCH FIRST 100 ROWS ONLY`,
 		description:
 			"Query script execution failures and exceptions with script ID, deployment, timestamp, title, and error stack trace.",
 		sqlTemplate: `SELECT 
-  sn.id,
-  sn.date,
+  TO_CHAR(sn.date, 'YYYY-MM-DD HH24:MI:SS') AS date,
   sn.type,
   sn.title,
   sn.detail,
