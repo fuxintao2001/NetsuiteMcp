@@ -5,28 +5,62 @@
 
 ---
 
-## 🚨 EXECUTION GATES & DUAL-PATH ROUTING
+## 👑 1. Official Documentation Absolute Priority (官方权威文档最高效力)
 
-1. **👑 Dual-Path Routing (Zero Unnecessary Reconnaissance)**:
-   - ⚡ **Fast-Path (Standard Core Business — Direct 1-Turn Execution)**:
-     - For queries involving the standard tables listed in 【🏛️ In-Context Core Schema】 (`transaction`, `transactionline`, `customer`, `vendor`, `item`, `account`, `subsidiary`, `aggregateitemlocation`, `accountingperiod`, `transactionaccountingline`, `employee`) or common transaction lineages:
-     - **DO NOT call reconnaissance tools** (e.g. `netsuite_get_record_definition`, `ns_getSuiteQLMetadata`, `netsuite_get_query_template`).
-     - **MUST generate precise SuiteQL and call `ns_runCustomSuiteQL` directly in Turn 1.** Detailed rules: [Fast-Path Routing](file://{{PROJECT_PATH}}/.agents/rules/fast-path-routing.md).
-   - 🔍 **Slow-Path (Unknown or Custom Records — Reconnaissance First)**:
-     - Only when operating on unverified custom records (`customrecord_*`), custom fields (`custbody_*`, `custcol_*`, `custrecord_*`), or unlisted niche tables, call `ns_getSuiteQLMetadata` or `netsuite_get_record_definition` before querying.
+AI agents must unconditionally enforce a **Strict Zero Hallucination** policy:
+
+1. **Hierarchy of Authoritative Truth**:
+   - **Tier 1 (Authoritative Standard)**: Oracle NetSuite Official Documentation (Help Center, SuiteAnswers, Records Catalog, SuiteScript 2.1 API Reference, SAFE Guide 2025.2). This unconditionally supersedes third-party forum posts, outdated tutorials, and LLM intuition.
+   - **Tier 2 (Account Live Schema)**: Real-time metadata retrieved directly from the active NetSuite account via `ns_getSuiteQLMetadata`, `netsuite_get_record_definition`, or `netsuite_inspect_record`.
+   - **Tier 3 (Curated Agent Skills)**: Antigravity Skills located at `~/.gemini/config/skills/`.
+   - **Tier 4 (LLM Parametric Knowledge)**: General training knowledge — MUST always be verified against Tier 1/2 before proposing code changes.
 2. **Strict Zero Hallucination**:
-   - NEVER fabricate non-existent tables or fields (e.g. `transaction.createdfrom`, `item.recordtype`). Fields listed in the In-Context Core Schema below are officially verified; unlisted fields must cite official schema/metadata.
+   - NEVER fabricate non-existent tables or field IDs (e.g. `transaction.createdfrom`, `item.recordtype`, `LotNumberedAssemblyItemLocations`).
+   - Every technical proposal or schema reference should cite its official source (`📖 Official Source: [...]`).
 3. **Permission Hard-Stop**:
    - On authorization errors (`INSUFFICIENT_PERMISSION`, HTTP 403, `Permission Violation`), immediately cease further tool calls. Never mock or fake data. Report the failed record type and required NetSuite permissions.
 4. **Adaptive Communication**:
    - Match the user's conversational language for explanations, analysis summaries, and UI messages (default to Simplified Chinese if the user prompts in Chinese).
-   - Keep all code identifiers, SQL keywords, table names, field IDs, and API syntax in standard English.
-5. **🚫 Single Authoritative Implementation & Zero Bloat**:
-   - Strictly adhere to [Code Craftsmanship](file://{{PROJECT_PATH}}/.agents/rules/code-craftsmanship.md): Clean replacement only, no dual-track compatibility wrappers (`try/catch` fallbacks, obsolete sniffing). Eliminate dead code physically.
+   - Keep all code identifiers, SQL keywords, table names, field IDs, and API syntax strictly in standard English.
+5. **🚫 Single Authoritative Implementation & Zero Defensive Compatibility Bloat**:
+   - Strictly adhere to [Code Craftsmanship](file://{{PROJECT_PATH}}/.agents/rules/code-craftsmanship.md): Clean Replacement only, no dual-track compatibility wrappers (`try/catch` fallbacks, obsolete sniffing). Eliminate dead code physically.
+   - **Current-State-Only Explanations**: In all code comments, technical responses, and documentation, describe ONLY the current, definitive state and logic of the latest code. Strictly prohibit narrating code evolution history, migration trajectories, or past vs present comparisons.
 
 ---
 
-## 🧰 TOOL EXECUTION & CONCURRENCY SOP
+## 📚 2. On-Demand Skills & Documentation Routing Matrix (技能与文档按需检索路由)
+
+To ensure high-density reasoning without context bloat, deep domain knowledge is loaded on demand. The AI agent **MUST proactively read the corresponding skill or documentation** via `view_file`:
+
+| Development Domain | On-Demand Target Path / Resource | Key Engineering Directives & Standards |
+|:---|:---|:---|
+| **SuiteScript 2.1 & SAFE Guide Review** | `~/.gemini/config/skills/netsuite-sdf-safe-guide/SKILL.md` | Enforce 12 SAFE principles, 14 script types, governance budgets, `N/query` over `N/search`, and 140+ pitfalls. Never load records in loops; use Map/Reduce for bulk processing. |
+| **SuiteScript Records & Fields Schema** | `~/.gemini/config/skills/netsuite-suitescript-records-reference/SKILL.md`<br>Resource: `netsuite://records/reference` | Lookup exact field IDs, sublists, mandatory fields, and search filters across all 272 standard records. Zero guesswork on field names. |
+| **SuiteQL Modeling & Anti-Slow-Query** | `~/.gemini/config/skills/netsuite-ai-connector-instructions/SKILL.md`<br>Resource: `netsuite://queries/golden-templates`<br>Tool: `netsuite_get_query_template` | Follow SuiteQL safety checklist: explicit column projections (no `SELECT *`), mandatory `mainline = 'F'`, pagination via `FETCH FIRST N ROWS ONLY`, driving index filters. |
+| **SuiteScript 1.0 → 2.1 Modernization** | `~/.gemini/config/skills/netsuite-suitescript-upgrade/SKILL.md` | 125+ API mappings, 34 object conversions, modern ES6+ features, breaking behavioral changes migration. |
+| **OWASP & Secure Coding Standards** | `~/.gemini/config/skills/netsuite-owasp-secure-coding/SKILL.md` | Context-aware output encoding, SQL injection prevention, CSP headers, credential protection, parameter sanitization. |
+| **Financial Operations & Reporting** | `~/.gemini/config/skills/netsuite-finance-analyst/SKILL.md` | Accounting periods, multi-book, multi-currency, GL impact validation, balance sheet, and cash flow logic. |
+| **SDF Roles & Permissions Config** | `~/.gemini/config/skills/netsuite-sdf-roles-and-permissions/SKILL.md` | Role permission XML (`customrole*`, `permkey`, `permlevel`), least-privilege role design, SDF object deployment. |
+| **UIF SPA Component Development** | `~/.gemini/config/skills/netsuite-uif-spa-reference/SKILL.md` | Modern NetSuite UIF SPA development, `@uif-js/core` and `@uif-js/component` APIs and hooks. |
+
+---
+
+## 🚨 3. Dual-Path Routing & Execution Gates (双轨路由与执行门禁)
+
+1. **👑 Dual-Path Routing (Zero Unnecessary Reconnaissance)**:
+   - ⚡ **Fast-Path (Standard Core Business — Direct 1-Turn Execution)**:
+     - For queries involving standard core tables (`transaction`, `transactionline`, `customer`, `vendor`, `item`, `account`, `subsidiary`, `aggregateitemlocation`, `accountingperiod`, `transactionaccountingline`, `employee`) or common document lineage:
+     - **DO NOT call reconnaissance tools** (e.g. `netsuite_get_record_definition`, `ns_getSuiteQLMetadata`, `netsuite_get_query_template`).
+     - **MUST generate precise SuiteQL and call `ns_runCustomSuiteQL` directly in Turn 1.** Detailed rules: [Fast-Path Routing](file://{{PROJECT_PATH}}/.agents/rules/fast-path-routing.md).
+   - 🔍 **Slow-Path (Unknown or Custom Records — Reconnaissance First)**:
+     - Only when operating on unverified custom records (`customrecord_*`), custom fields (`custbody_*`, `custcol_*`, `custrecord_*`), or unlisted niche tables, call `ns_getSuiteQLMetadata` or `netsuite_get_record_definition` before querying.
+2. **SuiteQL Guardrails & On-Demand Patterns**:
+   - Ensure all queries conform strictly to [SuiteQL Guardrails](file://{{PROJECT_PATH}}/.agents/rules/suiteql-guardrails.md) (No `SELECT *`, explicit `mainline = 'F'`, pagination via `FETCH FIRST N ROWS ONLY`, index driving filter).
+   - Complex SuiteQL domain patterns (AR aging, GL journal impact, multi-location inventory, period close) must be retrieved on demand via `netsuite_get_query_template` or `netsuite://queries/golden-templates`.
+
+---
+
+## 🧰 4. Tool Execution & Concurrency SOP
 
 1. **Tool Execution Hierarchy**:
    - **Routine Queries (Fast-Path)**: `ns_runCustomSuiteQL` (Direct 1-turn execution).
@@ -40,246 +74,15 @@
    - **🚫 Pruned & Prohibited Tools**: `ns_prompt_library_app`, `ns_selector_app`, `ns_report_filters_app` (interactive browser modals that cause headless agent deadlocks; strictly blocked).
      - For Accounting Contexts: Query via `SELECT id, name FROM accountingbook`.
      - For Nexus IDs: Query via `SELECT id, description FROM nexus`.
-2. **Concurrency & Batching**:
-   - When executing multiple independent reads or checks, issue parallel tool calls or use `netsuite_batch_execute` in a single turn to eliminate serial latency.
+2. **Concurrency & Batching (`netsuite_batch_execute`)**:
+   - When executing multiple independent reads or checks (≥ 2 independent items), issue parallel tool calls or use `netsuite_batch_execute` in a single turn to eliminate serial latency.
 3. **File Deployment Confirmation Protocol (`netsuite_suitecloud_upload`)**:
    - Before uploading code, display an interactive confirmation card via `ask_question` with ONLY the file's absolute path and choices: `接受` and `拒绝`.
    - Execute immediately upon acceptance; abort immediately upon rejection.
 
 ---
 
-## 🏛️ IN-CONTEXT CORE SCHEMA (Zero-Latency Standard Reference)
-
-Officially verified core tables and field IDs available for direct SuiteQL queries without metadata lookups:
-
-- **`transaction` (Header Record)**:
-  - `id` (PK, Integer), `tranid` (Document #, e.g. 'SO1002'), `type` ('SalesOrd','PurchOrd','CustInvc','ItemShip','CashSale','CustCred','VendBill','VendPymt','Journal')
-  - `trandate` (Date), `entity` (FK -> customer.id / vendor.id), `subsidiary` (Subsidiary ID)
-  - `status` (Status code), `postingperiod` (Accounting Period ID), `memo` (Memo string), `foreigntotal` (Transaction Total), `currency` (Currency ID)
-- **`transactionline` (Line Item Record)**:
-  - `transaction` (FK -> transaction.id), `linesequencenumber` (Line sequence, ASC), `item` (FK -> item.id)
-  - `quantity` (Quantity), `rate` (Unit rate), `amount` (Line amount), `foreignamount` (Foreign line amount)
-  - `mainline` ('T' = Header summary virtual line; 'F' = Individual line item), `taxline` ('T' = Tax line; 'F' = Non-tax line)
-  - `createdfrom` (FK -> upstream transaction.id; standard foreign key for document lineage)
-  - `subsidiary`, `department`, `class`, `location`
-- **`customer` (Customer Master)**:
-  - `id` (PK), `entityid` (Customer Name/ID), `companyname` (Company Name), `email`, `phone`
-  - `subsidiary` (Primary Subsidiary ID), `datecreated`, `isinactive` ('T'/'F'), `salesrep` (Sales Rep ID)
-- **`vendor` (Vendor Master)**:
-  - `id` (PK), `entityid` (Vendor ID), `companyname`, `email`, `phone`, `subsidiary`, `isinactive` ('T'/'F')
-- **`item` (Item Master)**:
-  - `id` (PK), `itemid` (Item name/number), `displayname` (Display name), `itemtype` ('InvtPart','NonInvtPart','Service','Assembly','Kit')
-  - `subsidiary`, `isinactive` ('T'/'F'), `baseunit`, `saleunit`, `purchaseunit`
-- **`account` (General Ledger Account)**:
-  - `id` (PK), `acctnumber` (Account number), `acctname` (Account name), `accttype` ('Bank','AcctRec','AcctPay','COGS','Expense','Income')
-- **`subsidiary` (Subsidiary)**:
-  - `id` (PK), `name` (Full name), `legalname`, `currency` (Base currency ID), `isinactive` ('T'/'F')
-- **`aggregateitemlocation` (Unified Inventory by Location)**:
-  - `item` (FK -> item.id), `location` (FK -> location.id), `quantityonhand`, `quantityavailable`, `quantityonorder`, `quantityintransit`, `quantitycommitted`
-- **`accountingperiod` (Fiscal Periods)**:
-  - `id` (PK), `periodname` (Period Name), `startdate`, `enddate`, `closed` ('T'/'F'), `isquarter` ('T'/'F'), `isyear` ('T'/'F'), `alllocked` ('T'/'F')
-- **`transactionaccountingline` (GL Impact Postings)**:
-  - `transaction` (FK -> transaction.id), `account` (FK -> account.id), `amount`, `debit`, `credit`, `subsidiary`, `posting` ('T'/'F')
-- **`employee` (Employee Directory)**:
-  - `id` (PK), `entityid`, `firstname`, `lastname`, `email`, `supervisor` (FK -> employee.id), `department`, `subsidiary`, `isinactive` ('T'/'F')
-
----
-
-## ⚡ GOLDEN SUITEQL TEMPLATES (High-Frequency Patterns)
-
-> 🛡️ Ensure queries conform strictly to [SuiteQL Guardrails](file://{{PROJECT_PATH}}/.agents/rules/suiteql-guardrails.md) (No `SELECT *`, explicit `mainline = 'F'`, pagination via `FETCH FIRST N ROWS ONLY`, index driving filter).
-
-#### 1. Transaction Line Items (Lines & Amounts)
-```sql
-SELECT 
-  t.id AS tran_id,
-  t.tranid AS doc_number,
-  t.type AS tran_type,
-  t.trandate,
-  tl.linesequencenumber,
-  tl.item AS item_id,
-  BUILTIN.DF(tl.item) AS item_name,
-  tl.quantity,
-  tl.rate,
-  tl.amount
-FROM 
-  transaction t
-  JOIN transactionline tl ON t.id = tl.transaction
-WHERE 
-  t.type = 'SalesOrd' 
-  AND (t.id = :tranId OR t.tranid = :docNumber)
-  AND tl.mainline = 'F'
-  AND tl.taxline = 'F'
-ORDER BY 
-  tl.linesequencenumber ASC
-FETCH FIRST 100 ROWS ONLY
-```
-
-#### 2. Downstream Transaction Lineage
-```sql
-SELECT 
-  t.id AS downstream_id,
-  t.tranid AS downstream_doc_number,
-  t.type AS downstream_type,
-  BUILTIN.DF(t.type) AS downstream_type_name,
-  t.trandate AS downstream_date,
-  t.status AS downstream_status
-FROM 
-  transaction t
-  JOIN transactionline tl ON t.id = tl.transaction
-WHERE 
-  tl.createdfrom = :upstreamId
-  AND tl.mainline = 'T'
-ORDER BY 
-  t.trandate DESC
-FETCH FIRST 50 ROWS ONLY
-```
-
-#### 3. Customer Recent Transactions
-```sql
-SELECT 
-  t.id AS tran_id,
-  t.tranid AS doc_number,
-  t.type AS tran_type,
-  t.trandate,
-  t.foreigntotal AS total_amount,
-  t.status
-FROM 
-  transaction t
-WHERE 
-  t.entity = :customerId
-  AND t.trandate >= TO_DATE(':startDate', 'YYYY-MM-DD') -- e.g. '2025-01-01'
-ORDER BY 
-  t.trandate DESC
-FETCH FIRST 50 ROWS ONLY
-```
-
-#### 4. Standalone SystemNote Audit Log
-```sql
-SELECT 
-  recordid,
-  field,
-  oldvalue,
-  newvalue,
-  date,
-  BUILTIN.DF(name) AS author
-FROM 
-  systemnote
-WHERE 
-  recordtypeid = -30 
-  AND recordid = :recordId
-  AND date >= TO_DATE(':startDate', 'YYYY-MM-DD') -- e.g. '2025-01-01'
-ORDER BY 
-  date DESC
-FETCH FIRST 50 ROWS ONLY
-```
-
-#### 5. Inventory Stock by Location (Cross-Item Unified)
-```sql
-SELECT 
-  a.item AS item_id,
-  BUILTIN.DF(a.item) AS item_name,
-  a.location AS location_id,
-  BUILTIN.DF(a.location) AS location_name,
-  a.quantityonhand,
-  a.quantityavailable,
-  a.quantityonorder
-FROM 
-  aggregateitemlocation a
-WHERE 
-  a.item = :itemId
-  AND a.quantityonhand > 0
-ORDER BY 
-  a.quantityonhand DESC
-FETCH FIRST 50 ROWS ONLY
-```
-
-#### 6. General Ledger Journal Impact
-```sql
-SELECT 
-  t.id AS tran_id,
-  t.tranid AS doc_number,
-  t.trandate,
-  tal.account AS account_id,
-  BUILTIN.DF(tal.account) AS account_name,
-  tal.debit,
-  tal.credit,
-  tal.amount
-FROM 
-  transaction t
-  JOIN transactionaccountingline tal ON t.id = tal.transaction
-WHERE 
-  t.id = :tranId
-  AND tal.posting = 'T'
-ORDER BY 
-  tal.account ASC
-FETCH FIRST 100 ROWS ONLY
-```
-
-#### 7. Open Accounts Receivable / Aging Buckets
-```sql
-SELECT 
-  t.id AS invoice_id,
-  t.tranid AS invoice_number,
-  t.entity AS customer_id,
-  BUILTIN.DF(t.entity) AS customer_name,
-  t.duedate,
-  t.foreigntotal AS amount_due,
-  ROUND(SYSDATE - t.duedate) AS days_overdue
-FROM 
-  transaction t
-WHERE 
-  t.type = 'CustInvc'
-  AND t.status = 'CustInvc:A' -- Open / Unpaid
-  AND t.trandate >= TO_DATE(':startDate', 'YYYY-MM-DD')
-ORDER BY 
-  days_overdue DESC
-FETCH FIRST 50 ROWS ONLY
-```
-
-#### 8. Fiscal Period Close & Locking Status
-```sql
-SELECT 
-  id AS period_id,
-  periodname,
-  startdate,
-  enddate,
-  closed,
-  alllocked
-FROM 
-  accountingperiod
-WHERE 
-  isquarter = 'F'
-  AND isyear = 'F'
-  AND enddate >= ADD_MONTHS(SYSDATE, -6)
-ORDER BY 
-  startdate DESC
-FETCH FIRST 12 ROWS ONLY
-```
-
-#### 9. Multi-Subsidiary Aggregated Performance
-```sql
-SELECT 
-  t.subsidiary AS subsidiary_id,
-  BUILTIN.DF(t.subsidiary) AS subsidiary_name,
-  COUNT(DISTINCT t.id) AS total_orders,
-  SUM(tl.amount) AS total_sales_amount
-FROM 
-  transaction t
-  JOIN transactionline tl ON t.id = tl.transaction
-WHERE 
-  t.type = 'SalesOrd'
-  AND t.trandate >= TO_DATE(':startDate', 'YYYY-MM-DD')
-  AND tl.mainline = 'F'
-  AND tl.taxline = 'F'
-GROUP BY 
-  t.subsidiary
-FETCH FIRST 20 ROWS ONLY
-```
-
----
-
-## 🔄 SELF-HEALING ERROR RECOVERY SOP
+## 🔄 5. Self-Healing Error Recovery SOP
 
 When NetSuite MCP tools return errors, the response includes structured diagnostic tags. Execute the corresponding self-healing actions without repeating failing requests:
 
@@ -299,7 +102,7 @@ When NetSuite MCP tools return errors, the response includes structured diagnost
 
 ---
 
-## 🔒 ENVIRONMENT & WRITE OPERATIONS
+## 🔒 6. Environment & Write Operations
 
 {{WRITE_TOOLS_TABLE}}
 
@@ -307,7 +110,7 @@ When NetSuite MCP tools return errors, the response includes structured diagnost
 
 ---
 
-## ⚙️ ANTIGRAVITY NATIVE CUSTOMIZATION ARCHITECTURE (.agents/)
+## ⚙️ 7. Antigravity Native Customization Architecture (.agents/)
 
 This workspace adheres strictly to the official Google Antigravity Customization Architecture (`agy-customizations`):
 
