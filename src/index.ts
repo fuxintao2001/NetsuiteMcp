@@ -49,6 +49,10 @@ const packageJson = JSON.parse(
 ) as { version: string };
 const SERVER_VERSION = packageJson.version;
 
+import { createLogger } from "./utils/logger.js";
+
+const logger = createLogger("server");
+
 // ---------------------------------------------------------------------------
 // Server class
 // ---------------------------------------------------------------------------
@@ -57,6 +61,7 @@ class NetSuiteMCPServer {
 	private readonly mcpTools: NetSuiteMCPTools;
 	private readonly cacheProvider: RedisCacheProvider;
 	private readonly server: Server;
+	private readonly enablePrompts: boolean;
 	private isAuthenticated = false;
 
 	constructor() {
@@ -65,13 +70,13 @@ class NetSuiteMCPServer {
 		const callbackPort = envConfig.OAUTH_CALLBACK_PORT;
 
 		if (!envConfig.NETSUITE_ACCOUNT_ID) {
-			console.error(
-				"⚠️  NETSUITE_ACCOUNT_ID not set. User must provide accountId during authentication.",
+			logger.warn(
+				"NETSUITE_ACCOUNT_ID not set. User must provide accountId during authentication.",
 			);
 		}
 		if (!envConfig.NETSUITE_CLIENT_ID) {
-			console.error(
-				"⚠️  NETSUITE_CLIENT_ID not set. User must provide clientId during authentication.",
+			logger.warn(
+				"NETSUITE_CLIENT_ID not set. User must provide clientId during authentication.",
 			);
 		}
 
@@ -91,7 +96,7 @@ class NetSuiteMCPServer {
 		});
 		this.mcpTools = new NetSuiteMCPTools(this.oauthManager);
 
-		const enablePrompts =
+		this.enablePrompts =
 			process.env.ENABLE_MCP_PROMPTS === "true" ||
 			process.env.ENABLE_MCP_PROMPTS === "1";
 
@@ -101,7 +106,7 @@ class NetSuiteMCPServer {
 				capabilities: {
 					tools: {},
 					resources: {},
-					...(enablePrompts ? { prompts: {} } : {}),
+					...(this.enablePrompts ? { prompts: {} } : {}),
 				},
 			},
 		);
@@ -124,10 +129,7 @@ class NetSuiteMCPServer {
 
 		registerToolHandlers(deps);
 		registerResourceHandlers(this.server, projectRoot);
-		if (
-			process.env.ENABLE_MCP_PROMPTS === "true" ||
-			process.env.ENABLE_MCP_PROMPTS === "1"
-		) {
+		if (this.enablePrompts) {
 			registerPromptHandlers(this.server);
 		}
 	}
@@ -254,7 +256,7 @@ class NetSuiteMCPServer {
 				await this.mcpTools.prefetchCommonMetadata();
 			} catch (err: unknown) {
 				const message = err instanceof Error ? err.message : String(err);
-				console.error(`⚠️ Background prefetch failed: ${message}`);
+				logger.warn(`Background prefetch failed: ${message}`);
 			}
 		})();
 	}
@@ -264,7 +266,7 @@ class NetSuiteMCPServer {
 	// -------------------------------------------------------------------------
 
 	async start(): Promise<void> {
-		console.error("🚀 NetSuite MCP Server starting...");
+		logger.info("NetSuite MCP Server starting...");
 
 		// Connect to Redis
 		try {
@@ -273,10 +275,10 @@ class NetSuiteMCPServer {
 			const lockProvider = this.cacheProvider.createLockProvider();
 			if (lockProvider) {
 				this.oauthManager.setLockProvider(lockProvider);
-				console.error("🔒 Redis distributed lock provider initialized");
+				logger.info("Redis distributed lock provider initialized");
 			}
 		} catch (err) {
-			console.error("❌ Failed to connect to Redis on startup:", err);
+			logger.error({ err }, "Failed to connect to Redis on startup");
 			throw err;
 		}
 
@@ -287,9 +289,9 @@ class NetSuiteMCPServer {
 			const expiresIn = sessionDiag.expiresAt
 				? `${Math.round((sessionDiag.expiresAt - Date.now()) / 1000)}s`
 				: "unknown";
-			console.error(`📋 [Startup] Session: ${sessionDiag.storagePath}`);
-			console.error(
-				`📋 [Startup] Account: ${sessionDiag.accountId || "none"} | Authenticated: ${sessionDiag.authenticated} | Token expires in: ${expiresIn}`,
+			logger.info(`[Startup] Session: ${sessionDiag.storagePath}`);
+			logger.info(
+				`[Startup] Account: ${sessionDiag.accountId || "none"} | Authenticated: ${sessionDiag.authenticated} | Token expires in: ${expiresIn}`,
 			);
 		}
 
@@ -309,11 +311,11 @@ class NetSuiteMCPServer {
 			this.backgroundPrefetch();
 		}
 
-		console.error("✅ NetSuite MCP Server ready!\n");
+		logger.info("NetSuite MCP Server ready!");
 	}
 
 	async shutdown(): Promise<void> {
-		console.error("🔌 Shutting down NetSuite MCP Server...");
+		logger.info("Shutting down NetSuite MCP Server...");
 		this.oauthManager.stopProactiveRefresh();
 		await this.cacheProvider.disconnect();
 		await flushToolErrorLogger();
@@ -347,7 +349,7 @@ async function main(): Promise<void> {
 			try {
 				await server.shutdown();
 			} catch (err) {
-				console.error("Error during shutdown:", err);
+				logger.error({ err }, "Error during shutdown");
 			}
 			process.exit(0);
 		};
@@ -370,7 +372,7 @@ async function main(): Promise<void> {
 
 		await server.start();
 	} catch (error) {
-		console.error("❌ Fatal error starting MCP server:", error);
+		logger.error({ err: error }, "Fatal error starting MCP server");
 		process.exit(1);
 	}
 }

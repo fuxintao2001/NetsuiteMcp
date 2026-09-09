@@ -332,6 +332,35 @@ describe("SuiteQL, Search & Query Utilities", () => {
 				expect(res.valid).toBe(true);
 				expect(res.tables).toContain("item");
 			});
+
+			it("should accept inventoryitemlocations when qualified with table alias like i.itemtype = 'InvtPart'", () => {
+				const res = validateSuiteQL(
+					"SELECT loc.item, loc.quantityonhand FROM inventoryitemlocations loc JOIN item i ON loc.item = i.id WHERE i.itemtype = 'InvtPart'",
+				);
+				expect(res.valid).toBe(true);
+			});
+
+			it("should accept transactionline with aliased mainline filter", () => {
+				const res = validateSuiteQL(
+					"SELECT tl.item, tl.amount FROM transaction t JOIN transactionline tl ON t.id = tl.transaction WHERE t.type = 'SalesOrd' AND tl.mainline = 'F' AND t.id = 123",
+				);
+				expect(res.valid).toBe(true);
+			});
+
+			it("should reject unindexed aggregation query using HAVING without driving indexed filter in WHERE", () => {
+				const res = validateSuiteQL(
+					"SELECT entity, SUM(foreigntotal) AS total FROM transaction GROUP BY entity HAVING SUM(foreigntotal) > 5000",
+				);
+				expect(res.valid).toBe(false);
+				expect(res.reason).toContain("Unindexed aggregation query with HAVING");
+			});
+
+			it("should allow aggregation query with HAVING when indexed driving filter is present in WHERE", () => {
+				const res = validateSuiteQL(
+					"SELECT entity, SUM(foreigntotal) AS total FROM transaction WHERE type = 'SalesOrd' AND trandate >= TO_DATE('2025-01-01', 'YYYY-MM-DD') GROUP BY entity HAVING SUM(foreigntotal) > 5000",
+				);
+				expect(res.valid).toBe(true);
+			});
 		});
 
 		describe("assertValidSuiteQL", () => {

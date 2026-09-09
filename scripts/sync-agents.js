@@ -107,8 +107,8 @@ try {
 			workspace;
 
 		try {
-			if (!fs.existsSync(projectPath)) {
-				console.warn(`⚠️  Skipped (directory not found): ${projectPath}`);
+			if (!path.isAbsolute(projectPath) || !fs.existsSync(projectPath)) {
+				console.warn(`⚠️  Skipped (invalid or missing directory): ${projectPath}`);
 				errorCount++;
 				continue;
 			}
@@ -153,7 +153,7 @@ try {
 					`   - AGENTS.md (${Buffer.byteLength(renderedAgents, "utf-8")} bytes)`,
 				);
 				console.log(`   - .agents/hooks.json`);
-				console.log(`   - .agents/rules/*.md (5 modular rules)`);
+				console.log(`   - .agents/rules/*.md (6 modular rules)`);
 				console.log(
 					`   - scripts/ (pre-upload-check.js, suitescript-safe-check.js)`,
 				);
@@ -241,6 +241,9 @@ try {
 								cwd: projectPath,
 								encoding: "utf-8",
 							}).trim();
+							if (!/^[a-zA-Z0-9_\-./]+$/.test(currentBranch)) {
+								throw new Error(`Invalid git branch name: ${currentBranch}`);
+							}
 							execSync(`git push origin ${currentBranch}`, {
 								cwd: projectPath,
 								stdio: "pipe",

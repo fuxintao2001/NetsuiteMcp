@@ -1150,7 +1150,9 @@ describe("MCP Handler Wires", () => {
 				expect(mockMCPTools.executeTool).toHaveBeenCalledWith(
 					"ns_runCustomSuiteQL",
 					expect.objectContaining({
-						sqlQuery: expect.stringContaining("sn.recordtypeid = -30 AND sn.recordid = 12345"),
+						sqlQuery: expect.stringContaining(
+							"sn.recordtypeid = -30 AND sn.recordid = 12345",
+						),
 					}),
 				);
 			});
@@ -1169,7 +1171,9 @@ describe("MCP Handler Wires", () => {
 				});
 
 				expect(res.isError).toBe(true);
-				expect(res.content[0].text).toContain("could not be resolved to a numeric internal ID");
+				expect(res.content[0].text).toContain(
+					"could not be resolved to a numeric internal ID",
+				);
 			});
 
 			it("should handle netsuite_get_error_summary successfully", async () => {

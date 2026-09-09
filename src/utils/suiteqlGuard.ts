@@ -307,7 +307,9 @@ export function validateSuiteQL(sqlQuery: string): SuiteQLValidationResult {
 	// Anti-Pattern 3: Suboptimal table 'inventoryitemlocations' for general inventory
 	if (
 		tables.includes("inventoryitemlocations") &&
-		!/\b(itemtype|type)\s*=\s*['"]?InvtPart['"]?/i.test(trimmed)
+		!/\b(?:[a-zA-Z0-9_]+\.)?(?:itemtype|type)\s*=\s*['"]?InvtPart['"]?/i.test(
+			trimmed,
+		)
 	) {
 		return {
 			valid: false,
@@ -319,7 +321,7 @@ export function validateSuiteQL(sqlQuery: string): SuiteQLValidationResult {
 	// Anti-Pattern 4: 'transactionline' missing 'mainline' filter
 	if (
 		tables.includes("transactionline") &&
-		!/\bmainline\s*=\s*['"]?[TF]['"]?/i.test(trimmed)
+		!/\b(?:[a-zA-Z0-9_]+\.)?mainline\s*(?:=|IS)\s*['"]?[TF]['"]?/i.test(trimmed)
 	) {
 		return {
 			valid: false,
@@ -403,6 +405,30 @@ export function validateSuiteQL(sqlQuery: string): SuiteQLValidationResult {
 				valid: false,
 				reason:
 					"Unindexed query against 'transaction' + 'transactionline': Queries joining transaction tables MUST include at least one indexed driving filter in the WHERE clause (such as 'trandate', 'type', 'id', 'tranid', 'entity', 'subsidiary', or 'item') to prevent full-table scan timeouts. Example: `WHERE t.type = 'SalesOrd' AND t.trandate >= TO_DATE('2025-01-01', 'YYYY-MM-DD') AND tl.mainline = 'F'`.",
+			};
+		}
+	}
+
+	// Anti-Pattern 7: Heavy aggregation with HAVING but missing driving WHERE filter
+	if (
+		tables.includes("transaction") &&
+		/\bGROUP\s+BY\b/i.test(maskedSql) &&
+		/\bHAVING\b/i.test(maskedSql)
+	) {
+		const whereMatch = /\bWHERE\s+([\s\S]+?)(?:\s+GROUP\s+BY)/i.exec(maskedSql);
+		const whereClause = whereMatch?.[1] || "";
+		const hasIndexedWhere =
+			/\b(tranid|otherrefnum|trandate|datecreated|type|recordtype|entity|item|subsidiary|location|createdfrom)\s*(?:=|IN|<|>|BETWEEN|LIKE|>=|<=)/i.test(
+				whereClause,
+			) ||
+			/\b(?:t\.|tl\.|transaction\.|transactionline\.)?(?:id|internalid)\s*(?:=|IN|<|>|BETWEEN|LIKE|>=|<=)\s*(?:\d+|__STR_LITERAL_\d+__|\?|\()/i.test(
+				whereClause,
+			);
+		if (!hasIndexedWhere) {
+			return {
+				valid: false,
+				reason:
+					"Unindexed aggregation query with HAVING: Filtering aggregated groups using HAVING without a driving indexed filter in the WHERE clause forces a full-table scan across transactions before grouping. Add driving WHERE filters (e.g. `WHERE t.trandate >= TO_DATE(...) AND t.type = 'SalesOrd'`) before the GROUP BY clause.",
 			};
 		}
 	}
@@ -637,6 +663,22 @@ export function diagnoseSuiteQLError(
 				"WHERE t.type = 'SalesOrd' AND t.trandate >= TO_DATE('2025-01-01', 'YYYY-MM-DD') AND tl.mainline = 'F'",
 			selfHealingAction:
 				"Add indexed driving filters to the WHERE clause before executing.",
+		};
+	}
+
+	// 9. Unindexed aggregation with HAVING
+	if (/Unindexed aggregation query with HAVING/i.test(err)) {
+		return {
+			isDiagnosed: true,
+			summary: "Unindexed Aggregation Query with HAVING (Timeout Risk)",
+			rootCause:
+				"Using HAVING to filter grouped transactions without indexed filters in the WHERE clause forces a full-table scan before aggregation.",
+			officialGuidance:
+				"Add driving WHERE filters (e.g. `WHERE t.trandate >= TO_DATE(...) AND t.type = 'SalesOrd'`) before the GROUP BY clause to narrow candidate rows.",
+			suggestedFix:
+				"WHERE t.type = 'SalesOrd' AND t.trandate >= TO_DATE('2025-01-01', 'YYYY-MM-DD') GROUP BY t.id HAVING SUM(tl.amount) > 1000",
+			selfHealingAction:
+				"Add indexed driving filters to the WHERE clause before the GROUP BY/HAVING clause.",
 		};
 	}
 

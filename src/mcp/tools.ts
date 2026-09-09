@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { OAuthManager } from "../oauth/manager.js";
+import { resolveRecordTypeParam } from "../utils/args.js";
 import { cacheService } from "../utils/cache.js";
 import {
 	formatNetSuiteAccountHost,
@@ -10,6 +11,7 @@ import {
 } from "../utils/environment.js";
 import { parseNetSuiteError } from "../utils/errors.js";
 import { httpClient } from "../utils/httpClient.js";
+import { createLogger } from "../utils/logger.js";
 import { type JsonSchemaProperty, mapFieldType } from "../utils/metadata.js";
 import { ConcurrencyLimiter, retryWithBackoff } from "../utils/resilience.js";
 import {
@@ -18,6 +20,8 @@ import {
 	extractReferencedTables,
 	SchemaReconnaissanceTracker,
 } from "../utils/suiteqlGuard.js";
+
+const logger = createLogger("mcp");
 
 interface RecordFieldInfo {
 	internalId?: string;
@@ -46,6 +50,7 @@ export class NetSuiteMCPTools {
 	private readonly oauthManager: OAuthManager;
 	customRecordMappings: Map<string, number> = new Map();
 	hasFetchedMappings = false;
+	private hasSeededFromDisk = false;
 
 	private netsuiteLimiter = new ConcurrencyLimiter(5);
 
@@ -55,7 +60,7 @@ export class NetSuiteMCPTools {
 		// Load cached mappings from disk (fire-and-forget, no API call)
 		this.loadCustomRecordMappingsCache().catch((err: unknown) => {
 			const msg = err instanceof Error ? err.message : String(err);
-			console.error(`⚠️ Failed to load custom record mappings cache: ${msg}`);
+			logger.warn(`Failed to load custom record mappings cache: ${msg}`);
 		});
 	}
 
@@ -103,16 +108,7 @@ export class NetSuiteMCPTools {
 
 		// --- Cache check & schema reconnaissance tracking for metadata tools ---
 		if (this.isMetadataTool(toolName)) {
-			const targetTableRaw =
-				parameters.recordType ??
-				parameters.tableName ??
-				parameters.table_name ??
-				parameters.record_type ??
-				parameters.table;
-			const targetTable =
-				typeof targetTableRaw === "string" && targetTableRaw.trim().length > 0
-					? targetTableRaw.toLowerCase().trim()
-					: undefined;
+			const targetTable = resolveRecordTypeParam(parameters);
 			if (targetTable) {
 				parameters.recordType = targetTable;
 				SchemaReconnaissanceTracker.record(targetTable);
@@ -128,7 +124,7 @@ export class NetSuiteMCPTools {
 			}
 		}
 
-		console.error(`🔧 Executing tool: ${toolName}`);
+		logger.info(`Executing tool: ${toolName}`);
 
 		if (toolName === "ns_runCustomSuiteQL") {
 			let sqlQuery = (parameters.sqlQuery ||
@@ -183,8 +179,8 @@ export class NetSuiteMCPTools {
 					}
 				}
 				if (tableNames.length > 0) {
-					console.error(
-						`🩹 [Self-heal] Invalidated metadata cache for: ${tableNames.join(", ")}`,
+					logger.warn(
+						`[Self-heal] Invalidated metadata cache for: ${tableNames.join(", ")}`,
 					);
 				}
 			}
@@ -195,7 +191,7 @@ export class NetSuiteMCPTools {
 			throw new Error(`Tool '${toolName}' returned no result`);
 		}
 
-		console.error(`✅ Tool executed successfully`);
+		logger.info(`Tool executed successfully`);
 
 		// --- Slim SuiteQL response payload ---
 		const finalResult =
@@ -255,7 +251,7 @@ export class NetSuiteMCPTools {
 					},
 				);
 			});
-			console.error("✅ NetSuite REST session cache refreshed");
+			logger.info("NetSuite REST session cache refreshed");
 		} catch (error: unknown) {
 			const msg = error instanceof Error ? error.message : String(error);
 			throw new Error(`Failed to refresh NetSuite REST session cache: ${msg}`);
@@ -273,7 +269,7 @@ export class NetSuiteMCPTools {
 			}
 		} catch (err: unknown) {
 			const msg = err instanceof Error ? err.message : String(err);
-			console.error(`⚠️ Failed to clear metadata cache: ${msg}`);
+			logger.warn(`Failed to clear metadata cache: ${msg}`);
 		}
 	}
 
@@ -293,13 +289,11 @@ export class NetSuiteMCPTools {
 					accountId,
 					`ns_getRecordTypeMetadata_${cleanName}`,
 				);
-				console.error(`🗑️ Metadata cache cleared for table: ${cleanName}`);
+				logger.info(`Metadata cache cleared for table: ${cleanName}`);
 			}
 		} catch (err: unknown) {
 			const msg = err instanceof Error ? err.message : String(err);
-			console.error(
-				`⚠️ Failed to clear metadata cache for ${tableName}: ${msg}`,
-			);
+			logger.warn(`Failed to clear metadata cache for ${tableName}: ${msg}`);
 		}
 	}
 
@@ -312,7 +306,7 @@ export class NetSuiteMCPTools {
 		this.hasFetchedMappings = true;
 
 		try {
-			console.error("🔍 Fetching custom record mappings from NetSuite...");
+			logger.info("Fetching custom record mappings from NetSuite...");
 			const rawResult = await this.executeTool("ns_runCustomSuiteQL", {
 				sqlQuery: "SELECT internalId, scriptId FROM customrecordtype",
 			});
@@ -338,13 +332,13 @@ export class NetSuiteMCPTools {
 			const accountId = await this.oauthManager.getAccountId();
 			if (accountId) {
 				await cacheService.set(accountId, "customrecord_mappings", newMappings);
-				console.error(
-					`✅ Saved ${this.customRecordMappings.size} custom record mappings`,
+				logger.info(
+					`Saved ${this.customRecordMappings.size} custom record mappings`,
 				);
 			}
 		} catch (err: unknown) {
 			const msg = err instanceof Error ? err.message : String(err);
-			console.error(`⚠️ Failed to fetch custom record mappings: ${msg}`);
+			logger.warn(`Failed to fetch custom record mappings: ${msg}`);
 		}
 	}
 
@@ -352,6 +346,7 @@ export class NetSuiteMCPTools {
 	 * Seed metadata cache from local records.json reference if it exists.
 	 */
 	async seedMetadataFromLocalRecords(accountId: string): Promise<void> {
+		if (this.hasSeededFromDisk) return;
 		try {
 			const __filename = fileURLToPath(import.meta.url);
 			const __dirname = dirname(__filename);
@@ -367,11 +362,11 @@ export class NetSuiteMCPTools {
 			try {
 				await fs.access(recordsJsonPath);
 			} catch {
-				console.error("ℹ️ Local records.json not found. Skipping cache seed.");
+				logger.info("Local records.json not found. Skipping cache seed.");
 				return;
 			}
 
-			console.error("🚀 Seeding metadata cache from local records.json...");
+			logger.info("Seeding metadata cache from local records.json...");
 			const fileContent = await fs.readFile(recordsJsonPath, "utf-8");
 			const data = JSON.parse(fileContent);
 			if (!data?.records) return;
@@ -408,18 +403,15 @@ export class NetSuiteMCPTools {
 				}
 			}
 
+			this.hasSeededFromDisk = true;
 			if (seedCount > 0) {
-				console.error(
-					`✅ Seeded ${seedCount} record types into metadata cache.`,
-				);
+				logger.info(`Seeded ${seedCount} record types into metadata cache.`);
 			} else {
-				console.error("ℹ️ Metadata cache already seeded.");
+				logger.info("Metadata cache already seeded.");
 			}
 		} catch (err: unknown) {
 			const msg = err instanceof Error ? err.message : String(err);
-			console.error(
-				`⚠️ Failed to seed metadata cache from records.json: ${msg}`,
-			);
+			logger.warn(`Failed to seed metadata cache from records.json: ${msg}`);
 		}
 	}
 
@@ -487,7 +479,7 @@ export class NetSuiteMCPTools {
 		}
 
 		const types = ["customer", "salesorder", "item", "transaction"];
-		console.error(`🚀 Prefetching metadata for: ${types.join(", ")}...`);
+		logger.info(`Prefetching metadata for: ${types.join(", ")}...`);
 
 		await Promise.all(
 			types.map(async (recordType) => {
@@ -495,14 +487,12 @@ export class NetSuiteMCPTools {
 					await this.executeTool("ns_getRecordTypeMetadata", { recordType });
 				} catch (err: unknown) {
 					const msg = err instanceof Error ? err.message : String(err);
-					console.error(
-						`⚠️ Failed to prefetch metadata for ${recordType}: ${msg}`,
-					);
+					logger.warn(`Failed to prefetch metadata for ${recordType}: ${msg}`);
 				}
 			}),
 		);
 
-		console.error("✅ Prefetching common metadata completed.");
+		logger.info("Prefetching common metadata completed.");
 	}
 
 	// ---------------------------------------------------------------------------
@@ -536,8 +526,8 @@ export class NetSuiteMCPTools {
 				},
 				(error: unknown, attempt: number, delayMs: number) => {
 					const msg = error instanceof Error ? error.message : String(error);
-					console.error(
-						`⚠️ [NetSuite Request Retry] Attempt ${attempt} failed. ` +
+					logger.warn(
+						`[NetSuite Request Retry] Attempt ${attempt} failed. ` +
 							`Retrying in ${Math.round(delayMs)}ms... Error: ${msg}`,
 					);
 				},
@@ -614,7 +604,7 @@ export class NetSuiteMCPTools {
 
 			// --- 401 retry: force-refresh token and try once more ---
 			if (axiosErr.response?.status === 401) {
-				console.error("🔄 [401 Retry] Force-refreshing token and retrying...");
+				logger.info("[401 Retry] Force-refreshing token and retrying...");
 				accessToken = await this.oauthManager.forceRefreshToken(accessToken);
 				return await this.callNetSuiteApi(() => makeRequest(accessToken));
 			}
@@ -645,17 +635,7 @@ export class NetSuiteMCPTools {
 		toolName: string,
 		params: Record<string, unknown>,
 	): string {
-		const recordTypeRaw =
-			params.recordType ??
-			params.tableName ??
-			params.table_name ??
-			params.record_type ??
-			params.table ??
-			"all";
-		const recordType =
-			typeof recordTypeRaw === "string" && recordTypeRaw.trim().length > 0
-				? recordTypeRaw.toLowerCase().trim()
-				: "all";
+		const recordType = resolveRecordTypeParam(params) || "all";
 		return `${toolName}_${recordType}`;
 	}
 
@@ -716,8 +696,8 @@ export class NetSuiteMCPTools {
 		);
 		if (mappingsObj) {
 			this.customRecordMappings = new Map(Object.entries(mappingsObj));
-			console.error(
-				`⚡ Loaded ${this.customRecordMappings.size} custom record mappings from cache`,
+			logger.info(
+				`Loaded ${this.customRecordMappings.size} custom record mappings from cache`,
 			);
 		}
 	}
@@ -726,9 +706,21 @@ export class NetSuiteMCPTools {
 	 * Extract a data array from various NetSuite response shapes.
 	 */
 	public extractDataArray(result: unknown): Array<Record<string, unknown>> {
-		if (!result || typeof result !== "object") return [];
+		if (!result) return [];
 
-		let data = result as Record<string, unknown>;
+		let data: Record<string, unknown>;
+
+		if (typeof result === "string") {
+			try {
+				data = JSON.parse(result) as Record<string, unknown>;
+			} catch {
+				return [];
+			}
+		} else if (typeof result === "object") {
+			data = result as Record<string, unknown>;
+		} else {
+			return [];
+		}
 
 		// Unwrap content wrapper
 		if (Array.isArray(data.content)) {
@@ -740,15 +732,6 @@ export class NetSuiteMCPTools {
 				} catch {
 					return [];
 				}
-			}
-		}
-
-		// Unwrap string result
-		if (typeof result === "string") {
-			try {
-				data = JSON.parse(result) as Record<string, unknown>;
-			} catch {
-				return [];
 			}
 		}
 

@@ -21,3 +21,8 @@
 - **`item`**: `id`, `itemid`, `displayname`, `itemtype`, `subsidiary`, `isinactive`
 - **`account`**: `id`, `acctnumber`, `acctname`, `accttype`
 - **`subsidiary`**: `id`, `name`, `legalname`, `currency`, `isinactive`
+- **`aggregateitemlocation`**: `item`, `location`, `quantityonhand`, `quantityavailable`, `quantityonorder`, `quantityintransit`, `quantitycommitted`
+- **`accountingperiod`**: `id`, `periodname`, `startdate`, `enddate`, `closed` ('T'/'F'), `isquarter` ('T'/'F'), `isyear` ('T'/'F'), `alllocked` ('T'/'F')
+- **`transactionaccountingline`**: `transaction`, `account`, `amount`, `debit`, `credit`, `subsidiary`, `posting` ('T'/'F')
+- **`employee`**: `id`, `entityid`, `firstname`, `lastname`, `email`, `supervisor`, `department`, `subsidiary`, `isinactive` ('T'/'F')
+

@@ -25,3 +25,24 @@ export const httpClient = axios.create({
 	httpsAgent,
 	timeout: 30000,
 });
+
+/**
+ * Creates an AbortController with an optional auto-abort timeout.
+ */
+export function createAbortController(timeoutMs?: number): {
+	controller: AbortController;
+	signal: AbortSignal;
+	clear: () => void;
+} {
+	const controller = new AbortController();
+	let timer: NodeJS.Timeout | undefined;
+	if (timeoutMs && timeoutMs > 0) {
+		timer = setTimeout(() => {
+			controller.abort(new Error(`Request timed out after ${timeoutMs}ms`));
+		}, timeoutMs);
+	}
+	const clear = () => {
+		if (timer) clearTimeout(timer);
+	};
+	return { controller, signal: controller.signal, clear };
+}
