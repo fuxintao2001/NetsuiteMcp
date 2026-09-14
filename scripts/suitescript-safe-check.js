@@ -13,6 +13,7 @@
  *   node scripts/suitescript-safe-check.js [files...]
  */
 
+import { execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -45,13 +46,10 @@ export function analyzeSuiteScriptContent(content, filename = "anonymous.js") {
 		// Skip comments
 		if (trimmed.startsWith("//") || trimmed.startsWith("*")) continue;
 
-		// Track loop depth simply
-		if (/\b(for|while)\s*\(|\.forEach\s*\(/.test(line)) {
+		// Track loop depth
+		const isLoopHeader = /\b(for|while)\s*\(|\.forEach\s*\(/.test(line);
+		if (isLoopHeader) {
 			inLoopDepth++;
-		}
-		if (inLoopDepth > 0 && line.includes("}")) {
-			// simplistic block closure
-			inLoopDepth = Math.max(0, inLoopDepth - 1);
 		}
 
 		// Rule 1: Governance abuse - record.load / submit inside loop
@@ -137,6 +135,90 @@ export function analyzeSuiteScriptContent(content, filename = "anonymous.js") {
 						"Transaction search should specify 'mainline' filter ('IS', 'T' or 'F') to avoid line multiplication or duplicated header records.",
 					severity: "WARNING",
 				});
+			}
+		}
+
+		// Rule 7: SystemNote cross-table JOIN (SAFE Guide Pitfall 11)
+		if (/\bJOIN\s+SystemNote\b/i.test(line)) {
+			issues.push({
+				file: filename,
+				line: lineNum,
+				rule: "SAFE-SQL-003",
+				message:
+					"Prohibited 'JOIN SystemNote' detected (SAFE Guide Pitfall 11). Cross-table joins with SystemNote cause severe 45s+ timeouts. Use a standalone query with date/recordid pruning instead.",
+				severity: "ERROR",
+			});
+		}
+
+		// Rule 8: Invalid createdfrom field location on transaction header
+		if (
+			/\b(?:transaction|t)\.createdfrom\b/i.test(line) ||
+			(/\bFROM\s+transaction\b/i.test(line) &&
+				/\bcreatedfrom\b/i.test(line) &&
+				!/\btransactionline\b/i.test(line))
+		) {
+			issues.push({
+				file: filename,
+				line: lineNum,
+				rule: "SAFE-SQL-004",
+				message:
+					"Invalid field location 'createdfrom': In NetSuite2.com, 'createdfrom' does NOT exist on the 'transaction' header. Join 'transactionline tl' and query 'tl.createdfrom'.",
+				severity: "ERROR",
+			});
+		}
+
+		// Rule 9: Invalid recordtype column on item table
+		if (
+			/\bitem\.recordtype\b/i.test(line) ||
+			(/\bFROM\s+item\b/i.test(line) && /\brecordtype\b/i.test(line))
+		) {
+			issues.push({
+				file: filename,
+				line: lineNum,
+				rule: "SAFE-SQL-005",
+				message:
+					"Invalid column 'item.recordtype': In NetSuite Records Catalog, the 'item' table does not have 'recordtype'. Use 'itemtype' or 'subtype' instead.",
+				severity: "ERROR",
+			});
+		}
+
+		// Rule 10: Search or Query inside loop (SAFE Governance budget exhaustion)
+		if (
+			inLoopDepth > 0 &&
+			/\b(search\.create|query\.runSuiteQL|search\.load)\s*\(/.test(line)
+		) {
+			issues.push({
+				file: filename,
+				line: lineNum,
+				rule: "SAFE-GOV-002",
+				message:
+					"Executing searches or SuiteQL queries inside loops will rapidly exhaust governance units (10 units per search). Hoist queries outside loops or use Map/Reduce.",
+				severity: "ERROR",
+			});
+		}
+
+		// Rule 11: Hardcoded credentials or API secrets (OWASP & Secret Hygiene)
+		if (
+			/\b(?:password|tokenSecret|consumerSecret|api[_-]?key)\s*[:=]\s*['"][a-zA-Z0-9_\-\.]{8,}['"]/i.test(
+				line,
+			)
+		) {
+			issues.push({
+				file: filename,
+				line: lineNum,
+				rule: "SAFE-SEC-001",
+				message:
+					"Hardcoded credential or API secret literal detected in source code. Use NetSuite N/crypto or secure script parameters instead.",
+				severity: "ERROR",
+			});
+		}
+
+		// Update block closures based on net brace changes
+		if (inLoopDepth > 0) {
+			const opens = (line.match(/\{/g) || []).length;
+			const closes = (line.match(/\}/g) || []).length;
+			if (closes > opens && !isLoopHeader) {
+				inLoopDepth = Math.max(0, inLoopDepth - (closes - opens));
 			}
 		}
 	}

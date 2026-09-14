@@ -293,7 +293,8 @@ FETCH FIRST 10 ROWS ONLY`,
 			"Use customer.unbilledorders to see pipeline commitment against credit limit.",
 			"BUILTIN.DF(c.credithold) displays human-readable status (Auto Hold, On Hold, Off).",
 		],
-		officialSource: "Tim Dietrich SuiteQL Library - Customer Queries",
+		officialSource:
+			"Oracle NetSuite Records Catalog & SAFE Guide Section 3.3.7 (Tim Dietrich SuiteQL Library)",
 	},
 ];
 

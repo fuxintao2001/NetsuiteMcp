@@ -318,7 +318,7 @@ Logs are stored in:
 | `npm run fetch-skills` | Download official Oracle SuiteCloud Agent Skills |
 | `npm run sync-agents` | Sync AGENTS.md and .agents/ rules to connected client workspaces |
 | `npm run sync:push` | Sync rules and automatically commit & push across all connected client workspaces |
-| `npm run score` | Run the 360° architecture & runtime guardrail scoring suite |
+| `npm run score` | Run the ISO/IEC 25010 & Oracle SAFE quality benchmark & architecture scoring suite |
 
 ---
 

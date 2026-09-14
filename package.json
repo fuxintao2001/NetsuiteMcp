@@ -26,6 +26,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "score": "tsx scripts/test-system-architecture-score.ts",
+    "test:compliance": "tsx scripts/test-official-docs-compliance.ts",
     "logs:summary": "tsx scripts/summarize-errors.ts"
   },
   "keywords": [
