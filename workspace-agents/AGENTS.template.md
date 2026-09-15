@@ -57,6 +57,11 @@ To ensure high-density reasoning without context bloat, deep domain knowledge is
 2. **SuiteQL Guardrails & On-Demand Patterns**:
    - Ensure all queries conform strictly to [SuiteQL Guardrails](file://{{PROJECT_PATH}}/.agents/rules/suiteql-guardrails.md) (No `SELECT *`, explicit `mainline = 'F'`, pagination via `FETCH FIRST N ROWS ONLY`, index driving filter).
    - Complex SuiteQL domain patterns (AR aging, GL journal impact, multi-location inventory, period close) must be retrieved on demand via `netsuite_get_query_template` or `netsuite://queries/golden-templates`.
+3. **Saved Search Avoidance Policy (SavedSearch 严格受限原则)**:
+   - In the vast majority of scenarios, **DO NOT call SavedSearch tools (`ns_listSavedSearches`, `ns_runSavedSearch`)**. SuiteQL (`ns_runCustomSuiteQL`) is the authoritative and primary query mechanism.
+   - Invoke Saved Search tools **ONLY** when strictly necessary:
+     1. The user explicitly requests a specific Saved Search by name or internal ID.
+     2. The required business metrics or complex aggregations are exclusively encapsulated in an existing pre-configured NetSuite Saved Search that cannot be replicated via SuiteQL.
 
 ---
 
@@ -68,7 +73,8 @@ To ensure high-density reasoning without context bloat, deep domain knowledge is
    - **Record Inspection (High Signal, Low Token)**: `netsuite_inspect_record` (Preferred: strips null noise, supports doc numbers/tranid, compact JSON & controllable line items via `maxLines`, saving 85%+ tokens). Use `ns_getRecord` only when an unpruned raw JSON tree is strictly required.
    - **Logs, Diagnostics & Audit**: `netsuite_get_script_logs` ➔ `netsuite_get_system_notes` ➔ `netsuite_get_error_summary` (Tool invocation failure analysis & self-healing diagnostics).
    - **Cache Maintenance**: `netsuite_refresh_cache` (Force clear local & NetSuite session metadata cache when schema changes).
-   - **Reports & Saved Searches**: `ns_runReport` / `ns_runSavedSearch`.
+   - **Financial Reports**: `ns_runReport` (Only for standard NetSuite financial statement reports).
+   - **Saved Searches (`ns_runSavedSearch`, `ns_listSavedSearches`)**: ⚠️ **Strictly on-demand & prohibited by default (默认禁用)**. In the vast majority of cases, query data via `ns_runCustomSuiteQL`. Never call SavedSearch tools unless explicitly requested by the user or strictly necessary for pre-existing Saved Searches that cannot be queried via SuiteQL.
    - **Record Mutations (Sandbox only)**: `netsuite_inspect_record` / `ns_getRecord` ➔ `ns_createRecord` / `ns_updateRecord`.
    - **Deployment & Links**: `netsuite_get_record_link` / `netsuite_suitecloud_upload`.
    - **🚫 Pruned & Prohibited Tools**: `ns_prompt_library_app`, `ns_selector_app`, `ns_report_filters_app` (interactive browser modals that cause headless agent deadlocks; strictly blocked).

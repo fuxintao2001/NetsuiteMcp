@@ -6,12 +6,17 @@
 
 1. **⚡ Fast-Path (Standard Core Business — Direct 1-Turn Execution)**:
    - For queries involving standard core tables (`transaction`, `transactionline`, `customer`, `vendor`, `item`, `account`, `subsidiary`) or known transaction lineages:
-   - **DO NOT call reconnaissance tools** (`ns_getSuiteQLMetadata`, `netsuite_get_record_definition`, `netsuite_get_query_template`).
+   - **DO NOT call reconnaissance tools** (`ns_getSuiteQLMetadata`, `netsuite_get_record_definition`, `netsuite_get_query_template`) **nor Saved Search tools** (`ns_runSavedSearch`, `ns_listSavedSearches`).
    - **MUST generate precise SuiteQL and call `ns_runCustomSuiteQL` directly in Turn 1.**
 
 2. **🔍 Slow-Path (Unknown Custom Records — Reconnaissance First)**:
    - Only when operating on unverified custom records (`customrecord_*`), custom fields (`custbody_*`, `custcol_*`, `custrecord_*`), or unlisted niche tables:
    - Call `ns_getSuiteQLMetadata` or `netsuite_get_record_definition` to inspect the live schema before executing queries or mutations.
+
+3. **🚫 Saved Search Non-Invocation Policy (严禁默认调用 SavedSearch)**:
+   - In the vast majority of scenarios, **DO NOT call SavedSearch tools (`ns_listSavedSearches`, `ns_runSavedSearch`)**.
+   - Data querying should always be performed via SuiteQL (`ns_runCustomSuiteQL`).
+   - Only call Saved Search tools if explicitly instructed by the user or if a complex metric is exclusively available in an existing Saved Search that cannot be replicated in SuiteQL.
 
 ## 2. In-Context Standard Core Schema
 
