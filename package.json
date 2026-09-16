@@ -4,6 +4,10 @@
   "description": "NetSuite MCP server with OAuth 2.0 PKCE authentication. Works seamlessly with Claude Code, Cursor IDE, and other MCP clients.",
   "type": "module",
   "main": "dist/index.js",
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "bin": {
     "netsuite-mcp": "./dist/index.js"
   },
@@ -27,7 +31,10 @@
     "test:watch": "vitest",
     "score": "tsx scripts/test-system-architecture-score.ts",
     "test:compliance": "tsx scripts/test-official-docs-compliance.ts",
-    "logs:summary": "tsx scripts/summarize-errors.ts"
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json",
+    "logs:summary": "tsx scripts/summarize-errors.ts",
+    "check:safe": "node scripts/suitescript-safe-check.js",
+    "check:upload": "node scripts/pre-upload-check.js"
   },
   "keywords": [
     "netsuite",

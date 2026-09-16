@@ -11,6 +11,7 @@ import {
 	isPermissionError,
 	PERMISSION_HARD_STOP_ADVICE,
 } from "../utils/errors.js";
+import { createLogger } from "../utils/logger.js";
 import {
 	formatTableCatalogMarkdown,
 	searchSuiteQLCatalog,
@@ -32,6 +33,7 @@ import {
 	handleGetRecordLink,
 	handleGetSystemNotes,
 	handleInspectRecord,
+	handleNetsuiteSchema,
 } from "./recordHandlers.js";
 import {
 	AUTH_TOOL,
@@ -83,6 +85,7 @@ export function getToolAnnotations(name: string): Record<string, boolean> {
 		"netsuite_get_record_link",
 		"netsuite_get_script_logs",
 		"netsuite_inspect_record",
+		"netsuite_schema",
 		"netsuite_get_record_definition",
 		"netsuite_get_query_template",
 		"netsuite_get_system_notes",
@@ -141,7 +144,7 @@ function enhanceToolDescriptions(
 
 		if (t.name === "ns_runCustomSuiteQL") {
 			enhanced.description =
-				"Primary 1-turn tool for querying multiple NetSuite records, filtered lists, aggregations, and financial analytics via SuiteQL. Do NOT use for inspecting a single record's full details (use netsuite_inspect_record instead).";
+				"Primary 1-turn tool for querying NetSuite records, filtered lists, aggregations, and financial analytics via SuiteQL. Standard core tables (transaction, customer, item, vendor, subsidiary, etc.) can be queried directly without prior metadata reconnaissance. For single record inspection by ID or document number, prefer netsuite_inspect_record.";
 			if (enhanced.inputSchema && typeof enhanced.inputSchema === "object") {
 				const schema = { ...(enhanced.inputSchema as Record<string, unknown>) };
 				if (schema.properties && typeof schema.properties === "object") {
@@ -162,13 +165,13 @@ function enhanceToolDescriptions(
 
 		if (t.name === "ns_getRecord") {
 			enhanced.description =
-				"Retrieve raw, uncleaned NetSuite record JSON by internal numeric ID. Only use when strictly requiring the complete raw payload from NetSuite API. For inspecting populated fields, line items, and avoiding empty noise, use netsuite_inspect_record instead.";
+				"Retrieve NetSuite record JSON by internal numeric ID. Returns cleaned payload with empty fields pruned. For inspecting transactions by document number or viewing line item summaries, prefer netsuite_inspect_record.";
 			return enhanced;
 		}
 
 		if (t.name === "ns_getSuiteQLMetadata") {
 			enhanced.description =
-				"Inspect live NetSuite database table schema, column names, and data types before executing SuiteQL. Use only when table or column names are unverified or for custom records. Do NOT use for standard core tables (use Fast-Path direct query) or for SuiteScript field definitions (use netsuite_get_record_definition).";
+				"Inspect live NetSuite database table schema, column names, and data types before executing SuiteQL. For unified 1-turn schema exploration, you can also use netsuite_schema.";
 			if (enhanced.inputSchema && typeof enhanced.inputSchema === "object") {
 				const schema = { ...(enhanced.inputSchema as Record<string, unknown>) };
 				const props = {
@@ -187,7 +190,7 @@ function enhanceToolDescriptions(
 
 		if (t.name === "ns_getRecordTypeMetadata") {
 			enhanced.description =
-				"Fetch live tenant-specific record type metadata and custom fields (custbody_*, custcol_*, custrecord_*) from active NetSuite account. Do NOT use for standard record fields (use netsuite_get_record_definition instead) or for SuiteQL database tables (use ns_getSuiteQLMetadata).";
+				"Fetch live tenant-specific record type metadata and custom fields (custbody_*, custcol_*, custrecord_*) from active NetSuite account. For unified 1-turn schema exploration, you can also use netsuite_schema.";
 			return enhanced;
 		}
 
@@ -205,6 +208,8 @@ const PRUNED_TOOLS = new Set([
 	"ns_getAccountingContexts",
 	"ns_getNexusIds",
 ]);
+
+const telemetryLogger = createLogger("telemetry");
 
 // ---------------------------------------------------------------------------
 // Handler Registration
@@ -264,7 +269,7 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
 				parameters: {},
 			});
 			return {
-				tools: [...LOCAL_TOOLS, LOGOUT_TOOL].map((t) =>
+				tools: [...LOCAL_TOOLS].map((t) =>
 					enhanceDescription(
 						t as unknown as Record<string, unknown>,
 						envSuffix,
@@ -294,7 +299,7 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
 
 		const enhancedRemote = enhanceToolDescriptions(filteredRemote);
 
-		const allTools = [...LOCAL_TOOLS, LOGOUT_TOOL, ...enhancedRemote].map((t) =>
+		const allTools = [...LOCAL_TOOLS, ...enhancedRemote].map((t) =>
 			enhanceDescription(t as unknown as Record<string, unknown>, envSuffix),
 		);
 
@@ -374,6 +379,23 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
 					parameters: safeArgs,
 				});
 			}
+
+			const durationMs = Date.now() - callStartTime;
+			const payloadChars =
+				res.content?.reduce(
+					(acc, c) => acc + (c.type === "text" ? c.text.length : 0),
+					0,
+				) || 0;
+			telemetryLogger.info(
+				{
+					tool: name,
+					durationMs,
+					isError: !!res.isError,
+					payloadChars,
+				},
+				"Tool call completed",
+			);
+
 			return res;
 		};
 
@@ -421,6 +443,9 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
 				}
 				if (name === "netsuite_inspect_record") {
 					return await handleInspectRecord(safeArgs, mcpTools);
+				}
+				if (name === "netsuite_schema") {
+					return await handleNetsuiteSchema(safeArgs, mcpTools);
 				}
 				if (name === "netsuite_get_record_definition") {
 					return await handleGetRecordDefinition(safeArgs);

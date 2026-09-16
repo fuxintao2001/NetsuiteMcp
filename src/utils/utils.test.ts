@@ -238,11 +238,16 @@ SPACED = trimmed
 				expect(sanitizeMessage(original)).toBe(expected);
 			});
 
-			it("should redact local home and users paths", () => {
+			it("should redact local home and users paths including Windows paths", () => {
 				const original =
 					"Error occurred at /Users/fuxintao/WebstormProjects/NetsuiteMcp/src/index.ts";
 				expect(sanitizeMessage(original)).toContain(
 					"<PROJECT_ROOT>/src/index.ts",
+				);
+
+				const winPath = "C:\\Users\\JohnDoe\\AppData\\Local\\temp.log";
+				expect(sanitizeMessage(winPath)).toBe(
+					"<USER_HOME>\\AppData\\Local\\temp.log",
 				);
 			});
 		});
@@ -291,6 +296,43 @@ SPACED = trimmed
 				expect(result.message).toContain("Invalid Column 'docnum'");
 				expect(result.message).toContain(
 					"ns_getSuiteQLMetadata({ recordType: '<target_table>' })",
+				);
+			});
+
+			it("should correctly capture dot-notation column names in SQL troubleshooting advice", () => {
+				const mockError = {
+					response: {
+						status: 400,
+						data: {
+							"o:errorDetails": [
+								{
+									"o:errorCode": "INVALID_SQL",
+									detail: "Unknown identifier 't.invalidcol' in query",
+								},
+							],
+						},
+					},
+				};
+
+				const result = parseNetSuiteError(mockError);
+				expect(result.message).toContain("Invalid Column 't.invalidcol'");
+			});
+
+			it("should provide re-authentication action for OAuth invalid_grant error", () => {
+				const mockError = {
+					response: {
+						status: 400,
+						data: {
+							error: "invalid_grant",
+							error_description: "The refresh token is invalid or expired.",
+						},
+					},
+				};
+
+				const result = parseNetSuiteError(mockError);
+				expect(result.message).toContain("OAuth Error [invalid_grant]");
+				expect(result.message).toContain(
+					"Call 'netsuite_authenticate' to re-authenticate",
 				);
 			});
 

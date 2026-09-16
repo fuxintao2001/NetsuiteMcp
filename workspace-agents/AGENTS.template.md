@@ -43,6 +43,9 @@ To ensure high-density reasoning without context bloat, deep domain knowledge is
 | **SDF Roles & Permissions Config** | `~/.gemini/config/skills/netsuite-sdf-roles-and-permissions/SKILL.md` | Role permission XML (`customrole*`, `permkey`, `permlevel`), least-privilege role design, SDF object deployment. |
 | **UIF SPA Component Development** | `~/.gemini/config/skills/netsuite-uif-spa-reference/SKILL.md` | Modern NetSuite UIF SPA development, `@uif-js/core` and `@uif-js/component` APIs and hooks. |
 
+> [!TIP]
+> **Schema Quick Discovery**: Use `netsuite_schema` as a single-entry-point tool for schema reconnaissance. It automatically routes to the correct backend source (offline reference for 272 standard records, live REST for custom records, SuiteQL catalog for table discovery).
+
 ---
 
 ## 🚨 3. Dual-Path Routing & Execution Gates (双轨路由与执行门禁)
@@ -52,8 +55,10 @@ To ensure high-density reasoning without context bloat, deep domain knowledge is
      - For queries involving standard core tables (`transaction`, `transactionline`, `customer`, `vendor`, `item`, `account`, `subsidiary`, `aggregateitemlocation`, `accountingperiod`, `transactionaccountingline`, `employee`) or common document lineage:
      - **DO NOT call reconnaissance tools** (e.g. `netsuite_get_record_definition`, `ns_getSuiteQLMetadata`, `netsuite_get_query_template`).
      - **MUST generate precise SuiteQL and call `ns_runCustomSuiteQL` directly in Turn 1.** Detailed rules: [Fast-Path Routing](file://{{PROJECT_PATH}}/.agents/rules/fast-path-routing.md).
-   - 🔍 **Slow-Path (Unknown or Custom Records — Reconnaissance First)**:
-     - Only when operating on unverified custom records (`customrecord_*`), custom fields (`custbody_*`, `custcol_*`, `custrecord_*`), or unlisted niche tables, call `ns_getSuiteQLMetadata` or `netsuite_get_record_definition` before querying.
+   - 🔍 **Slow-Path (Unknown Custom Records — Reconnaissance First)**:
+     - Only when operating on unverified custom records (`customrecord_*`), custom fields (`custbody_*`, `custcol_*`, `custrecord_*`), or unlisted niche tables:
+     - **Preferred**: Call `netsuite_schema` (unified 1-turn schema tool with automatic routing: standard → offline fields, custom records → live REST, omitted recordType → SuiteQL table catalog search).
+     - **Alternatively**: Call `ns_getSuiteQLMetadata` (for SuiteQL tables) or `netsuite_get_record_definition` (for SuiteScript record scripts) individually.
 2. **SuiteQL Guardrails & On-Demand Patterns**:
    - Ensure all queries conform strictly to [SuiteQL Guardrails](file://{{PROJECT_PATH}}/.agents/rules/suiteql-guardrails.md) (No `SELECT *`, explicit `mainline = 'F'`, pagination via `FETCH FIRST N ROWS ONLY`, index driving filter).
    - Complex SuiteQL domain patterns (AR aging, GL journal impact, multi-location inventory, period close) must be retrieved on demand via `netsuite_get_query_template` or `netsuite://queries/golden-templates`.
@@ -69,9 +74,9 @@ To ensure high-density reasoning without context bloat, deep domain knowledge is
 
 1. **Tool Execution Hierarchy**:
    - **Routine Queries (Fast-Path)**: `ns_runCustomSuiteQL` (Direct 1-turn execution).
-   - **Schema Reconnaissance (Slow-Path)**: `ns_getSuiteQLMetadata` ➔ `netsuite_get_record_definition` (Only for custom/unverified entities).
+   - **Schema Reconnaissance (Slow-Path)**: `netsuite_schema` (unified auto-routing: standard offline ➔ custom REST ➔ SuiteQL catalog). Alternatively, `ns_getSuiteQLMetadata` ➔ `netsuite_get_record_definition` individually (Only for custom/unverified entities).
    - **Record Inspection (High Signal, Low Token)**: `netsuite_inspect_record` (Preferred: strips null noise, supports doc numbers/tranid, compact JSON & controllable line items via `maxLines`, saving 85%+ tokens). Use `ns_getRecord` only when an unpruned raw JSON tree is strictly required.
-   - **Logs, Diagnostics & Audit**: `netsuite_get_script_logs` ➔ `netsuite_get_system_notes` ➔ `netsuite_get_error_summary` (Tool invocation failure analysis & self-healing diagnostics).
+   - **Logs, Diagnostics & Audit**: `netsuite_get_script_logs` (script execution logs) ➔ `netsuite_get_system_notes` (record-level audit trail by ID or document number) ➔ `netsuite_get_error_summary` (structured error frequency & self-healing diagnostics).
    - **Cache Maintenance**: `netsuite_refresh_cache` (Force clear local & NetSuite session metadata cache when schema changes).
    - **Financial Reports**: `ns_runReport` (Only for standard NetSuite financial statement reports).
    - **Saved Searches (`ns_runSavedSearch`, `ns_listSavedSearches`)**: ⚠️ **Strictly on-demand & prohibited by default (默认禁用)**. In the vast majority of cases, query data via `ns_runCustomSuiteQL`. Never call SavedSearch tools unless explicitly requested by the user or strictly necessary for pre-existing Saved Searches that cannot be queried via SuiteQL.
@@ -85,6 +90,9 @@ To ensure high-density reasoning without context bloat, deep domain knowledge is
 3. **File Deployment Confirmation Protocol (`netsuite_suitecloud_upload`)**:
    - Before uploading code, display an interactive confirmation card via `ask_question` with ONLY the file's absolute path and choices: `接受` and `拒绝`.
    - Execute immediately upon acceptance; abort immediately upon rejection.
+4. **Observability & Telemetry**:
+   - Every MCP tool call automatically records structured metrics (`tool`, `durationMs`, `isError`, `payloadChars`) in the server telemetry log.
+   - When diagnosing performance or Token cost anomalies, call `netsuite_get_error_summary` to inspect aggregated invocation patterns.
 
 ---
 
@@ -101,6 +109,8 @@ When NetSuite MCP tools return errors, the response includes structured diagnost
 | `PERMISSION DENIED — HARD STOP` | Role lacks NetSuite permission | **Immediately halt tool execution.** Report missing permission key and role adjustment advice. Do not fake data. |
 | `[Production Safety Violation]` | Record mutation blocked in Prod | Inform user that mutations are permitted exclusively in Sandbox environments. |
 | `[Interactive App Unsupported]` | Browser app called in headless mode | Switch immediately to `ns_runCustomSuiteQL` or `netsuite_inspect_record`. |
+| `[suiteqlGuard] Use FETCH FIRST N ROWS ONLY` | MySQL-style `LIMIT` or bare non-standard `OFFSET` syntax | Replace with Oracle-standard `OFFSET M ROWS FETCH NEXT N ROWS ONLY` or `FETCH FIRST N ROWS ONLY`. Standard `OFFSET M ROWS FETCH` syntax passes cleanly. |
+| `NETWORK_OR_TIMEOUT` (ETIMEDOUT, 504, etc.) | Network connectivity or gateway timeout | Do NOT modify SQL. Retry after brief delay or reduce result size. Check `netsuite_get_error_summary` for frequency patterns. |
 
 **Self-Healing Protocol**:
 1. Limit auto-recovery retries to at most **2 turns**. If still failing, explain the exact root cause to the user.

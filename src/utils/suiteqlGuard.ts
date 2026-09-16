@@ -129,7 +129,12 @@ export function hasPaginationClause(sqlQuery: string): boolean {
 	const { maskedSql } = maskStringLiterals(sqlQuery);
 	return (
 		/\bROWNUM\b/i.test(maskedSql) ||
-		/\bFETCH\s+(FIRST|NEXT)\s+\d+\s+ROWS?\s+ONLY\b/i.test(maskedSql)
+		/\bFETCH\s+(?:FIRST|NEXT)\s+(?:\d+|\?|:\w+)\s+ROWS?\s+ONLY\b/i.test(
+			maskedSql,
+		) ||
+		/\bOFFSET\s+(?:\d+|\?|:\w+)\s+ROWS?\s+FETCH\s+(?:FIRST|NEXT)\s+(?:\d+|\?|:\w+)\s+ROWS?\s+ONLY\b/i.test(
+			maskedSql,
+		)
 	);
 }
 
@@ -258,12 +263,26 @@ export function validateSuiteQL(sqlQuery: string): SuiteQLValidationResult {
 		};
 	}
 
-	// Check for MySQL/Postgres-style LIMIT / OFFSET (Gate 2 Syntax Mandate)
-	if (/\b(LIMIT|OFFSET)\b/i.test(withoutTrailingSemicolon)) {
+	// Check for MySQL/Postgres-style LIMIT (e.g. LIMIT 10 or LIMIT 0, 10)
+	if (/\bLIMIT\s+\d+/i.test(withoutTrailingSemicolon)) {
 		return {
 			valid: false,
 			reason:
-				"SuiteQL does not support 'LIMIT/OFFSET' keywords. Use 'WHERE ROWNUM <= N' or 'FETCH FIRST N ROWS ONLY' for pagination.",
+				"SuiteQL does not support 'LIMIT/OFFSET' keywords in MySQL style. Use Oracle-standard 'FETCH FIRST N ROWS ONLY', 'WHERE ROWNUM <= N', or 'OFFSET M ROWS FETCH NEXT N ROWS ONLY' for pagination.",
+		};
+	}
+
+	// Check for invalid standalone OFFSET (Oracle SuiteQL requires: OFFSET M ROWS FETCH NEXT N ROWS ONLY)
+	if (
+		/\bOFFSET\s+(?:\d+|\?|:\w+)/i.test(withoutTrailingSemicolon) &&
+		!/\bOFFSET\s+(?:\d+|\?|:\w+)\s+ROWS?\s+FETCH\s+(?:FIRST|NEXT)\s+(?:\d+|\?|:\w+)\s+ROWS?\s+ONLY\b/i.test(
+			withoutTrailingSemicolon,
+		)
+	) {
+		return {
+			valid: false,
+			reason:
+				"Invalid OFFSET syntax. SuiteQL requires Oracle-standard offset syntax: 'OFFSET M ROWS FETCH NEXT N ROWS ONLY', or 'FETCH FIRST N ROWS ONLY'.",
 		};
 	}
 
@@ -291,17 +310,52 @@ export function validateSuiteQL(sqlQuery: string): SuiteQLValidationResult {
 	}
 
 	// Anti-Pattern 2: 'createdfrom' field location on transaction header
-	if (
-		/\b(?:transaction|t)\.createdfrom\b/i.test(trimmed) ||
-		(tables.includes("transaction") &&
-			!tables.includes("transactionline") &&
-			/\bcreatedfrom\b/i.test(trimmed))
-	) {
-		return {
-			valid: false,
-			reason:
-				"Invalid field location 'createdfrom': In NetSuite SuiteQL, 'createdfrom' does NOT exist on the 'transaction' header table; it is a column on 'transactionline'. Please join transactionline to query lineage (e.g. `JOIN transactionline tl ON t.id = tl.transaction WHERE tl.createdfrom = :id AND tl.mainline = 'T'`).",
-		};
+	if (tables.includes("transaction")) {
+		const tranAliasRegex =
+			/\b(?:FROM|JOIN)\s+transaction\s+(?:AS\s+)?([a-zA-Z0-9_]+)/gi;
+		const tranAliases = new Set<string>(["transaction", "t"]);
+		let tranAliasMatch: RegExpExecArray | null;
+		while (true) {
+			tranAliasMatch = tranAliasRegex.exec(maskedSql);
+			if (!tranAliasMatch) break;
+			const alias = tranAliasMatch[1]?.toLowerCase().trim();
+			if (
+				alias &&
+				![
+					"where",
+					"join",
+					"left",
+					"right",
+					"inner",
+					"outer",
+					"cross",
+					"on",
+					"group",
+					"order",
+				].includes(alias)
+			) {
+				tranAliases.add(alias);
+			}
+		}
+
+		let hasHeaderCreatedFrom = false;
+		for (const alias of tranAliases) {
+			if (new RegExp(`\\b${alias}\\.createdfrom\\b`, "i").test(maskedSql)) {
+				hasHeaderCreatedFrom = true;
+				break;
+			}
+		}
+
+		if (
+			hasHeaderCreatedFrom ||
+			(!tables.includes("transactionline") && /\bcreatedfrom\b/i.test(trimmed))
+		) {
+			return {
+				valid: false,
+				reason:
+					"Invalid field location 'createdfrom': In NetSuite SuiteQL, 'createdfrom' does NOT exist on the 'transaction' header table; it is a column on 'transactionline'. Please join transactionline to query lineage (e.g. `JOIN transactionline tl ON t.id = tl.transaction WHERE tl.createdfrom = :id AND tl.mainline = 'T'`).",
+			};
+		}
 	}
 
 	// Anti-Pattern 3: Suboptimal table 'inventoryitemlocations' for general inventory
@@ -392,12 +446,19 @@ export function validateSuiteQL(sqlQuery: string): SuiteQLValidationResult {
 			);
 		const whereClause = whereMatch?.[1] || "";
 
+		// Also extract all ON conditions across JOINs so driving index filters in ON clauses are recognized
+		const onMatches =
+			maskedSql.match(
+				/\bON\s+([\s\S]+?)(?:\b(?:JOIN|WHERE|GROUP\s+BY|ORDER\s+BY|FETCH\s+FIRST)\b|;|$)/gi,
+			) || [];
+		const combinedSearchTarget = `${whereClause} ${onMatches.join(" ")}`;
+
 		const hasDrivingFilter =
 			/\b(tranid|otherrefnum|trandate|datecreated|type|recordtype|entity|item|subsidiary|location|createdfrom|status)\s*(?:=|IN|<|>|BETWEEN|LIKE|>=|<=)/i.test(
-				whereClause,
+				combinedSearchTarget,
 			) ||
 			/\b(?:t\.|tl\.|transaction\.|transactionline\.)?(?:id|internalid|transaction)\s*(?:=|IN|<|>|BETWEEN|LIKE|>=|<=)\s*(?:\d+|__STR_LITERAL_\d+__|\?|\()/i.test(
-				whereClause,
+				combinedSearchTarget,
 			);
 
 		if (!hasDrivingFilter) {
@@ -417,12 +478,20 @@ export function validateSuiteQL(sqlQuery: string): SuiteQLValidationResult {
 	) {
 		const whereMatch = /\bWHERE\s+([\s\S]+?)(?:\s+GROUP\s+BY)/i.exec(maskedSql);
 		const whereClause = whereMatch?.[1] || "";
+
+		// Also extract ON conditions (consistent with Anti-Pattern 6)
+		const onMatchesAP7 =
+			maskedSql.match(
+				/\bON\s+([\s\S]+?)(?:\b(?:JOIN|WHERE|GROUP\s+BY|ORDER\s+BY|FETCH\s+FIRST)\b|;|$)/gi,
+			) || [];
+		const combinedSearchTargetAP7 = `${whereClause} ${onMatchesAP7.join(" ")}`;
+
 		const hasIndexedWhere =
 			/\b(tranid|otherrefnum|trandate|datecreated|type|recordtype|entity|item|subsidiary|location|createdfrom|status|previousType|nextType|previousDoc|nextDoc)\s*(?:=|IN|<|>|BETWEEN|LIKE|>=|<=)/i.test(
-				whereClause,
+				combinedSearchTargetAP7,
 			) ||
 			/\b(?:t\.|tl\.|transaction\.|transactionline\.)?(?:id|internalid|transaction)\s*(?:=|IN|<|>|BETWEEN|LIKE|>=|<=)\s*(?:\d+|__STR_LITERAL_\d+__|\?|\()/i.test(
-				whereClause,
+				combinedSearchTargetAP7,
 			);
 		if (!hasIndexedWhere) {
 			return {
@@ -614,18 +683,23 @@ export function diagnoseSuiteQLError(
 	}
 
 	// 6. LIMIT / OFFSET dialect error
-	if (/\b(LIMIT|OFFSET)\b/i.test(err) || /\b(LIMIT|OFFSET)\b/i.test(sql)) {
+	if (
+		/\bLIMIT\s+\d+/i.test(err) ||
+		/\bLIMIT\s+\d+/i.test(sql) ||
+		/Invalid OFFSET syntax/i.test(err) ||
+		/does not support MySQL-style 'LIMIT'/i.test(err)
+	) {
 		return {
 			isDiagnosed: true,
-			summary: "Unsupported Dialect Keyword: LIMIT / OFFSET",
+			summary: "Unsupported Dialect Keyword: LIMIT / Invalid OFFSET",
 			rootCause:
-				"NetSuite SuiteQL does not support MySQL/Postgres-style 'LIMIT' or 'OFFSET' keywords.",
+				"NetSuite SuiteQL does not support MySQL/Postgres-style 'LIMIT' syntax.",
 			officialGuidance:
-				"Use Oracle-standard pagination: 'ROWNUM <= N' or 'FETCH FIRST N ROWS ONLY' (and 'OFFSET M ROWS FETCH NEXT N ROWS ONLY').",
+				"Use Oracle-standard pagination: 'FETCH FIRST N ROWS ONLY', 'WHERE ROWNUM <= N', or 'OFFSET M ROWS FETCH NEXT N ROWS ONLY'.",
 			suggestedFix:
 				"SELECT id, tranid FROM transaction WHERE type = 'SalesOrd' FETCH FIRST 100 ROWS ONLY",
 			selfHealingAction:
-				"Replace LIMIT/OFFSET with ROWNUM <= N or FETCH FIRST N ROWS ONLY.",
+				"Replace MySQL LIMIT with 'FETCH FIRST N ROWS ONLY' or Oracle 'OFFSET M ROWS FETCH NEXT N ROWS ONLY'.",
 		};
 	}
 

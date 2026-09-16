@@ -1,0 +1,45 @@
+# Development files
+authenticate.js
+.gitignore
+
+# Session data (contains tokens)
+sessions/
+
+# Development and testing
+node_modules/
+*.log
+npm-debug.log*
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Git files
+.git/
+.gitattributes
+
+# Project-specific (not needed in npm package)
+skills/
+workspace-agents/
+scripts/
+.agents/
+AGENTS.md
+vitest.config.ts
+tsconfig.json
+tsconfig.test.json
+.cache/
+
+# Source files (published package uses dist/ only)
+src/
+biome.json
+skills-lock.json
+.github/
+.githooks/
+netsuite.config.example.json

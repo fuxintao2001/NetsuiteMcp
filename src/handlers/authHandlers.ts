@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { CallToolResult } from "@modelcontextprotocol/server";
 import type { OAuthManager } from "../oauth/manager.js";
 import { cacheService } from "../utils/cache.js";
@@ -9,6 +12,19 @@ import {
 import { GetErrorSummaryArgsSchema } from "./toolSchemas.js";
 
 type ToolResponse = CallToolResult;
+
+const __filename_auth = fileURLToPath(import.meta.url);
+const __dirname_auth = dirname(__filename_auth);
+const PKG_VERSION: string = (() => {
+	try {
+		const pkg = JSON.parse(
+			readFileSync(join(__dirname_auth, "../../package.json"), "utf-8"),
+		);
+		return pkg.version || "unknown";
+	} catch {
+		return "unknown";
+	}
+})();
 
 function textResult(text: string, isError?: boolean): CallToolResult {
 	return {
@@ -28,7 +44,7 @@ export async function handleStatus(
 
 	const status: Record<string, unknown> = {
 		server: "netsuite-mcp",
-		version: "1.0.0",
+		version: PKG_VERSION,
 		authenticated: sessionInfo.authenticated,
 		refreshSchedulerActive: sessionInfo.refreshSchedulerActive,
 		cache: cacheStats,

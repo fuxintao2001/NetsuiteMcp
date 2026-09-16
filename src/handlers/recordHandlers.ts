@@ -1,7 +1,12 @@
 import type { CallToolResult } from "@modelcontextprotocol/server";
 import type { NetSuiteMCPTools } from "../mcp/tools.js";
 import type { OAuthManager } from "../oauth/manager.js";
-import { unwrapMcpContent } from "../utils/metadata.js";
+import { formatMetadataToCompactMarkdown } from "../utils/contextSlimmer.js";
+import {
+	formatTableCatalogMarkdown,
+	searchSuiteQLCatalog,
+	unwrapMcpContent,
+} from "../utils/metadata.js";
 import { generateNetSuiteUrl } from "../utils/netsuiteUrls.js";
 import { recordsReferenceService } from "../utils/recordsReference.js";
 import {
@@ -9,6 +14,7 @@ import {
 	GetRecordLinkArgsSchema,
 	GetSystemNotesArgsSchema,
 	InspectRecordArgsSchema,
+	NetsuiteSchemaArgsSchema,
 } from "./toolSchemas.js";
 
 type ToolResponse = CallToolResult;
@@ -464,6 +470,74 @@ export async function handleGetRecordDefinition(
 	}
 
 	return textResult(md);
+}
+
+export async function handleNetsuiteSchema(
+	args: Record<string, unknown>,
+	mcpTools: NetSuiteMCPTools,
+): Promise<ToolResponse> {
+	const parsed = NetsuiteSchemaArgsSchema.safeParse(args);
+	if (!parsed.success) {
+		return textResult(
+			`❌ Invalid arguments: ${parsed.error.issues[0]?.message}`,
+			true,
+		);
+	}
+	const { recordType, source = "auto", keyword } = parsed.data;
+
+	// Case 1: Catalog search if recordType is missing or keyword provided without recordType
+	if (!recordType) {
+		const entries = searchSuiteQLCatalog(keyword);
+		return textResult(formatTableCatalogMarkdown(entries, keyword));
+	}
+
+	const isCustom = recordType.startsWith("customrecord");
+
+	// Case 2: Explicit source routing
+	if (source === "offline") {
+		return await handleGetRecordDefinition({ recordType, keyword });
+	}
+	if (source === "live_sql") {
+		const res = await mcpTools.executeTool("ns_getSuiteQLMetadata", {
+			recordType,
+		});
+		return textResult(formatMetadataToCompactMarkdown(res));
+	}
+	if (source === "live_rest") {
+		const res = await mcpTools.executeTool("ns_getRecordTypeMetadata", {
+			recordType,
+		});
+		return textResult(formatMetadataToCompactMarkdown(res));
+	}
+
+	// Case 3: 'auto' intelligent routing
+	// If custom record, route to live_rest metadata to discover tenant custom fields
+	if (isCustom) {
+		const res = await mcpTools.executeTool("ns_getRecordTypeMetadata", {
+			recordType,
+		});
+		return textResult(formatMetadataToCompactMarkdown(res));
+	}
+
+	// Check if record exists in offline standard reference
+	const offlineDef = recordsReferenceService.getRecordDefinition(
+		recordType,
+		keyword,
+	);
+	if (offlineDef?.found) {
+		return await handleGetRecordDefinition({ recordType, keyword });
+	}
+
+	// Fallback for non-standard or SuiteQL database table name
+	try {
+		const sqlMeta = await mcpTools.executeTool("ns_getSuiteQLMetadata", {
+			recordType,
+		});
+		return textResult(formatMetadataToCompactMarkdown(sqlMeta));
+	} catch {
+		// If SQL metadata fails, fallback to standard record definition error message
+		return await handleGetRecordDefinition({ recordType, keyword });
+	}
 }
 
 const TRANSACTION_RECORD_TYPES = new Set([

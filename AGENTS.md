@@ -10,7 +10,7 @@ AI agents must unconditionally enforce a **Strict Zero Hallucination** policy:
 
 1. **Hierarchy of Authoritative Truth**:
    - **Tier 1 (Authoritative Standard)**: Oracle NetSuite Official Documentation (Help Center, SuiteAnswers, Records Catalog, SuiteScript 2.1 API Reference, SAFE Guide 2025.2). This unconditionally supersedes third-party forum posts, outdated tutorials, and LLM intuition.
-   - **Tier 2 (Account Live Schema)**: Real-time metadata retrieved directly from the active NetSuite account via `ns_getSuiteQLMetadata`, `netsuite_get_record_definition`, or `netsuite_inspect_record`.
+   - **Tier 2 (Account Live Schema)**: Real-time metadata retrieved directly from the active NetSuite account via `netsuite_schema` (unified live/offline introspection), `ns_getSuiteQLMetadata`, `netsuite_get_record_definition`, or `netsuite_inspect_record`.
    - **Tier 3 (Curated Agent Skills)**: Antigravity Skills located at `~/.gemini/config/skills/`.
    - **Tier 4 (LLM Parametric Knowledge)**: General training knowledge — MUST always be verified against Tier 1/2 before proposing code changes.
 2. **Strict Zero Hallucination**:
@@ -27,7 +27,7 @@ When developing or refactoring code in specific domains, the AI agent **MUST pro
 |:---|:---|:---|
 | **SuiteScript 2.1 & SAFE Guide Review** | `~/.gemini/config/skills/netsuite-sdf-safe-guide/SKILL.md` | Enforce 12 SAFE principles, 14 script types, governance budgets, `N/query` over `N/search`, and 140+ pitfalls. Never load records in loops; use Map/Reduce for bulk processing. |
 | **SuiteScript Records & Fields Schema** | `~/.gemini/config/skills/netsuite-suitescript-records-reference/SKILL.md`<br>Resource: `netsuite://records/reference` | Lookup exact field IDs, sublists, mandatory fields, and search filters across all 272 standard records. Zero guesswork on field names. |
-| **SuiteQL Modeling & Anti-Slow-Query** | `~/.gemini/config/skills/netsuite-ai-connector-instructions/SKILL.md`<br>Resource: `netsuite://queries/golden-templates` | Follow SuiteQL safety checklist: explicit column projections (no `SELECT *`), mandatory `mainline = 'F'`, pagination via `FETCH FIRST N ROWS ONLY`, driving index filters. |
+| **SuiteQL Modeling & Anti-Slow-Query** | `~/.gemini/config/skills/netsuite-ai-connector-instructions/SKILL.md`<br>Resource: `netsuite://queries/golden-templates`<br>Tool: `netsuite_get_query_template` | Follow SuiteQL safety checklist: explicit column projections (no `SELECT *`), mandatory `mainline = 'F'`, pagination via `FETCH FIRST N ROWS ONLY`, `ROWNUM <= N`, or Oracle-standard `OFFSET M ROWS FETCH NEXT N ROWS ONLY`, driving index filters. |
 | **SuiteScript 1.0 → 2.1 Modernization** | `~/.gemini/config/skills/netsuite-suitescript-upgrade/SKILL.md` | 125+ API mappings, 34 object conversions, modern ES6+ features, breaking behavioral changes migration. |
 | **OWASP & Secure Coding Standards** | `~/.gemini/config/skills/netsuite-owasp-secure-coding/SKILL.md` | Context-aware output encoding, SQL injection prevention, CSP headers, credential protection, parameter sanitization. |
 | **Financial Operations & Reporting** | `~/.gemini/config/skills/netsuite-finance-analyst/SKILL.md` | Accounting periods, multi-book, multi-currency, GL impact validation, balance sheet, and cash flow logic. |
@@ -60,14 +60,18 @@ When writing, debugging, or refactoring code (SuiteScript, TypeScript, JavaScrip
 ## 🛡️ 4. Runtime Guardrails & Operational Gates (运行时安全门禁)
 
 1. **Reconnaissance First & Error-Driven Self-Healing**:
-   - For unverified custom records (`customrecord_*`) or custom fields (`custbody_*`), always call `ns_getSuiteQLMetadata` or `netsuite_get_record_definition` before querying.
+   - For unverified custom records (`customrecord_*`) or custom fields (`custbody_*`), **preferred**: call `netsuite_schema` (unified 1-turn auto-routing: standard → offline fields, custom records → live REST, omitted recordType → SuiteQL table catalog). Alternatively, call `ns_getSuiteQLMetadata` or `ns_getRecordTypeMetadata` individually.
    - On syntax or validation errors (`suiteqlGuard`), parse the structured diagnostic response, directly fix the query, and re-execute without blind retries.
+   - Distinguish transient network timeouts (`NETWORK_OR_TIMEOUT`: ETIMEDOUT, ECONNRESET, 504 Gateway Timeout) from SQL syntax errors (`SUITEQL_SYNTAX`). Do NOT rewrite valid queries when experiencing gateway timeouts; retry after a brief delay or reduce result set size.
 2. **Environment Lock & Write Protection**:
    - **Record Mutations (`ns_createRecord`, `ns_updateRecord`)**: Strictly blocked in Production accounts; allowed only in Sandbox/Test (`_SB`, `TSTDRV`).
    - **Code Deployment (`netsuite_suitecloud_upload`)**: Display an interactive confirmation card (`ask_question`) showing only the file's absolute path and choices `接受` / `拒绝` prior to uploading.
-3. **Permission Hard-Stop**:
+3. **Observability & Telemetry**:
+   - Every MCP tool call automatically records structured metrics (`tool`, `durationMs`, `isError`, `payloadChars`) in the server telemetry log.
+   - When diagnosing performance or Token cost anomalies, call `netsuite_get_error_summary` to inspect aggregated invocation patterns and error frequency.
+4. **Permission Hard-Stop**:
    - On authorization or permission errors (`INSUFFICIENT_PERMISSION`, 403 Forbidden, `Permission Violation`), immediately halt tool execution. Never simulate fake data. Report the failed record type and required permission configuration.
-4. **Adaptive Communication & English Code Standards**:
+5. **Adaptive Communication & English Code Standards**:
    - Adapt conversational explanations, summaries, and interactive messages to the user's language (default to Simplified Chinese if prompted in Chinese).
    - Keep all code symbols, SQL keywords, table names, field IDs, and API syntax strictly in standard English.
    - **Current-State-Only Communication**: Focus solely on describing the latest codebase and logic; never narrate historical version changes, diffs, or migration trajectories.

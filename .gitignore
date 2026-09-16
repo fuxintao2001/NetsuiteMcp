@@ -35,11 +35,6 @@ Thumbs.db
 # Build outputs
 dist/
 
-
-
-
-.npmignore
-
 # Scratch directory
 scratch/
 
@@ -51,3 +46,13 @@ workspace-agents/workspaces.json
 
 # Audit & temporary artifacts
 artifact/
+
+# Sensitive local configuration
+netsuite.config.json
+
+# Test artifacts
+.test-handlers-root/
+coverage/
+
+# Temporary SDK clone
+temp-sdk/

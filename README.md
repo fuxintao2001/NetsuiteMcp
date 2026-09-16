@@ -17,7 +17,7 @@ Built for seamless integration with MCP clients including **Claude Code**, **Cur
 - 🔒 **Distributed Cache & Concurrency Safety**: Pure Redis caching (`ioredis`) backed by Redlock distributed locks (`redlock`) to prevent concurrent token refresh race conditions across multi-worker environments.
 - 🛡️ **Runtime SQL Guardrails & Self-Healing (`suiteqlGuard`)**:
   - Hard-blocks dangerous wildcard projections (`SELECT *`) to preserve LLM token context.
-  - Intercepts dialect mistakes (e.g. MySQL `LIMIT/OFFSET`) and guides to Oracle NetSuite standards (`FETCH FIRST N ROWS ONLY` or `ROWNUM <= N`).
+  - Intercepts MySQL-dialect `LIMIT` and bare non-standard `OFFSET`; Oracle-standard `OFFSET M ROWS FETCH NEXT N ROWS ONLY` passes cleanly. Guides to Oracle NetSuite standards (`FETCH FIRST N ROWS ONLY`, `ROWNUM <= N`, or `OFFSET M ROWS FETCH NEXT N ROWS ONLY`).
   - Blocks high-latency anti-patterns (e.g. `JOIN SystemNote` which triggers 45s+ timeouts) and directs to optimized standalone alternatives.
   - Prevents schema hallucinations (e.g. redirects `transaction.createdfrom` to `transactionline.createdfrom`, and `item.recordtype` to `itemtype`).
   - Auto-injects `tl.mainline = 'F'` and pagination bounds when missing.
@@ -41,6 +41,10 @@ Built for seamless integration with MCP clients including **Claude Code**, **Cur
 - 🔄 **Daemon & Background Keepalive**:
   - Background scheduler proactively refreshes OAuth tokens before expiration.
   - Native macOS LaunchAgent daemon keeps tokens fresh 24/7 without manual user re-authentication.
+- 📊 **Structured Telemetry & Error Analytics**:
+  - Every MCP tool call is instrumented with structured metrics (`tool`, `durationMs`, `isError`, `payloadChars`) for latency and Token cost monitoring.
+  - Rolling JSONL error logs with automatic sensitive data masking, categorized into 8 standard error types.
+  - Built-in `netsuite_get_error_summary` diagnostic tool provides aggregated error frequency patterns and actionable remediation advice.
 
 ---
 
@@ -96,6 +100,8 @@ Built for seamless integration with MCP clients including **Claude Code**, **Cur
 | `netsuite_get_script_logs` | Query NetSuite Script Execution Logs (`ScriptNote`) with filters for log level (DEBUG, AUDIT, ERROR, EMERGENCY), date range, and script IDs. | `readOnly` |
 | `netsuite_get_record_link` | Generate direct, clickable NetSuite UI deep links for standard and custom records. | `readOnly` |
 | `netsuite_suitecloud_upload` | Upload script and asset files to NetSuite File Cabinet using SuiteCloud CLI. Supports multi-file arrays, directory batch expansion, smart SDF project discovery, Auth ID auto-alignment, pre-flight syntax checks, rich dry-run preview, and production safeguards. | `destructive` |
+| `netsuite_schema` | Unified 1-turn schema exploration with automatic intelligent routing: standard records → offline field definitions (0ms), custom records → live REST tenant metadata, omitted recordType → SuiteQL table catalog search. | `readOnly` |
+| `netsuite_get_error_summary` | Structured error log analytics: aggregated error frequency, category breakdown, and actionable self-healing recommendations. Works without active authentication. | `readOnly` |
 
 ### 2. NetSuite AI Connector Proxied Tools (`ns_*`)
 
@@ -109,8 +115,8 @@ Built for seamless integration with MCP clients including **Claude Code**, **Cur
 | `ns_listSavedSearches` / `ns_runSavedSearch` | List and execute existing saved searches. | Read-Only |
 | `ns_getSubsidiaries` | Fetch subsidiary hierarchy in OneWorld accounts. | Read-Only |
 | `ns_getAccountingBooks` | Fetch active accounting books (Multi-Book Accounting). | Read-Only |
-| `ns_getAccountingContexts` | Fetch localized accounting contexts. | Read-Only |
-| `ns_getNexusIds` | Fetch tax nexus configurations. | Read-Only |
+| `ns_getAccountingContexts` | ~~Pruned in headless agent mode.~~ Use SuiteQL: `SELECT id, name FROM accountingbook`. | Pruned |
+| `ns_getNexusIds` | ~~Pruned in headless agent mode.~~ Use SuiteQL: `SELECT id, description FROM nexus`. | Pruned |
 | `ns_createRecord` | Create a new record in NetSuite. | **Sandbox / Test Only** (Blocked in Prod) |
 | `ns_updateRecord` | Update fields on an existing NetSuite record. | **Sandbox / Test Only** (Blocked in Prod) |
 

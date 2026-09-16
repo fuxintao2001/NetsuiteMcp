@@ -86,7 +86,8 @@ try {
 		throw new Error(`Template not found: ${templatePath}`);
 	}
 	if (!fs.existsSync(configPath)) {
-		throw new Error(`Config not found: ${configPath}`);
+		console.log("ℹ️  workspaces.json not found, skipping sync (run 'cp workspace-agents/workspaces.example.json workspace-agents/workspaces.json' to configure).");
+		process.exit(0);
 	}
 	const template = fs.readFileSync(templatePath, "utf-8");
 	const config = JSON.parse(fs.readFileSync(configPath, "utf-8"));
@@ -234,7 +235,7 @@ try {
 
 						if (hasChanges) {
 							execSync(
-								'git commit -m "docs(agents): 同步最新 Antigravity 原生规约、生命周期钩子与离线检测脚本"',
+								'git commit -m "docs(agents): 同步 netsuite_schema 统一路由、OFFSET 分页修正与遥测指标规约"',
 								{ cwd: projectPath, stdio: "pipe" },
 							);
 							const currentBranch = execSync("git rev-parse --abbrev-ref HEAD", {

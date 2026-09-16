@@ -129,6 +129,16 @@ describe("toolErrorLogger", () => {
 			expect(
 				classifyError("ns_runReport", "socket hang up - request timeout"),
 			).toBe("NETWORK_OR_TIMEOUT");
+			// Regression test: SuiteQL network/timeout must NOT be misclassified as SUITEQL_SYNTAX
+			expect(
+				classifyError(
+					"ns_runCustomSuiteQL",
+					"HTTP 504 Gateway Timeout: Server returned HTML response",
+				),
+			).toBe("NETWORK_OR_TIMEOUT");
+			expect(classifyError("ns_runCustomSuiteQL", "connect ETIMEDOUT")).toBe(
+				"NETWORK_OR_TIMEOUT",
+			);
 		});
 
 		it("should classify NetSuite general API errors", () => {

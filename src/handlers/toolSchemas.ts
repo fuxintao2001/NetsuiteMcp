@@ -352,6 +352,32 @@ export const GetErrorSummaryArgsSchema = z.object({
 });
 export type GetErrorSummaryArgs = z.infer<typeof GetErrorSummaryArgsSchema>;
 
+export const NetsuiteSchemaArgsSchema = z.object({
+	recordType: z
+		.string()
+		.trim()
+		.toLowerCase()
+		.optional()
+		.describe(
+			"NetSuite record type or table name (e.g. 'salesorder', 'customer', 'item', 'customrecord_xxx'). If omitted with keyword, searches all SuiteQL tables.",
+		),
+	source: z
+		.enum(["auto", "offline", "live_rest", "live_sql"])
+		.optional()
+		.default("auto")
+		.describe(
+			"Schema source: 'auto' (default: standard types use offline, custom records use live_rest, missing recordType searches live_sql catalog), 'offline' (fast 0ms standard field definitions), 'live_rest' (custom fields and tenant-specific schema), or 'live_sql' (SuiteQL table columns & data types).",
+		),
+	keyword: z
+		.string()
+		.trim()
+		.optional()
+		.describe(
+			"Optional search keyword to filter field names, labels, or table names.",
+		),
+});
+export type NetsuiteSchemaArgs = z.infer<typeof NetsuiteSchemaArgsSchema>;
+
 // ---------------------------------------------------------------------------
 // Static Tool Schema Definitions (local tools)
 // ---------------------------------------------------------------------------
@@ -629,7 +655,7 @@ export const GET_QUERY_TEMPLATE_TOOL = {
 export const GET_SYSTEM_NOTES_TOOL = {
 	name: "netsuite_get_system_notes",
 	description:
-		"Investigate audit trail and field modification history for a specific record. Uses high-performance standalone query adhering to SAFE Guide Pitfall 11 to prevent query timeouts. Identifies who changed what, when, and old vs new values. Supports both numeric internal ID (e.g. 12345) and document number tranid (e.g. 'SO1002').",
+		"Investigate audit trail and field modification history for a specific record. Returns timestamped change events, modifier user, and old vs new values. Supports numeric internal ID (e.g. 12345) and document number tranid (e.g. 'SO1002').",
 	inputSchema: {
 		type: "object" as const,
 		properties: {
@@ -745,6 +771,33 @@ export const GET_ERROR_SUMMARY_TOOL = {
 	},
 };
 
+export const NETSUITE_SCHEMA_TOOL = {
+	name: "netsuite_schema",
+	description:
+		"Inspect NetSuite record and table schema across standard fields, tenant custom fields, and SuiteQL database columns. Unified 1-turn schema exploration tool with automatic intelligent routing.",
+	inputSchema: {
+		type: "object" as const,
+		properties: {
+			recordType: {
+				type: "string",
+				description:
+					"NetSuite record type or table name (e.g. 'salesorder', 'customer', 'item', 'customrecord_xxx'). If omitted with keyword, searches all SuiteQL tables.",
+			},
+			source: {
+				type: "string",
+				enum: ["auto", "offline", "live_rest", "live_sql"],
+				description:
+					"Schema source: 'auto' (default: standard types use offline, custom records use live_rest, missing recordType searches live_sql catalog), 'offline' (fast 0ms standard field definitions), 'live_rest' (custom fields and tenant-specific schema), or 'live_sql' (SuiteQL table columns & data types).",
+			},
+			keyword: {
+				type: "string",
+				description:
+					"Optional search keyword to filter field names, labels, or table names.",
+			},
+		},
+	},
+};
+
 /** All locally-handled tools (excluding AUTH_TOOL which has special routing). */
 export const LOCAL_TOOLS = [
 	RECORD_LINK_TOOL,
@@ -754,6 +807,7 @@ export const LOCAL_TOOLS = [
 	BATCH_EXECUTE_TOOL,
 	SCRIPT_LOGS_TOOL,
 	INSPECT_RECORD_TOOL,
+	NETSUITE_SCHEMA_TOOL,
 	GET_RECORD_DEFINITION_TOOL,
 	GET_QUERY_TEMPLATE_TOOL,
 	GET_SYSTEM_NOTES_TOOL,

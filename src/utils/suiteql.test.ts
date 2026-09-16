@@ -68,6 +68,21 @@ describe("SuiteQL, Search & Query Utilities", () => {
 					),
 				).toBe(true);
 				expect(hasPaginationClause("SELECT id FROM customer")).toBe(false);
+				expect(
+					hasPaginationClause(
+						"SELECT id FROM customer OFFSET 10 ROWS FETCH NEXT 20 ROWS ONLY",
+					),
+				).toBe(true);
+				expect(
+					hasPaginationClause(
+						"SELECT id FROM customer FETCH FIRST ? ROWS ONLY",
+					),
+				).toBe(true);
+				expect(
+					hasPaginationClause(
+						"SELECT id FROM customer FETCH FIRST :limit ROWS ONLY",
+					),
+				).toBe(true);
 			});
 
 			it("should ensure pagination by appending FETCH FIRST when missing", () => {
@@ -166,6 +181,35 @@ describe("SuiteQL, Search & Query Utilities", () => {
 				const res = validateSuiteQL("SELECT id FROM customer LIMIT 10");
 				expect(res.valid).toBe(false);
 				expect(res.reason).toContain("does not support 'LIMIT/OFFSET'");
+			});
+
+			it("should allow Oracle-standard OFFSET pagination", () => {
+				const res = validateSuiteQL(
+					"SELECT id, tranid FROM transaction WHERE type = 'SalesOrd' OFFSET 10 ROWS FETCH NEXT 20 ROWS ONLY",
+				);
+				expect(res.valid).toBe(true);
+			});
+
+			it("should not reject column alias named limit (creditlimit AS limit)", () => {
+				const res = validateSuiteQL(
+					"SELECT id, creditlimit AS limit FROM customer FETCH FIRST 10 ROWS ONLY",
+				);
+				expect(res.valid).toBe(true);
+			});
+
+			it("should recognize driving index filters inside JOIN ON clauses", () => {
+				const res = validateSuiteQL(
+					"SELECT t.id, tl.item FROM transaction t JOIN transactionline tl ON t.id = tl.transaction AND t.type = 'SalesOrd' WHERE tl.mainline = 'F' FETCH FIRST 10 ROWS ONLY",
+				);
+				expect(res.valid).toBe(true);
+			});
+
+			it("should reject createdfrom on transaction header with arbitrary alias like tr", () => {
+				const res = validateSuiteQL(
+					"SELECT tr.id, tr.createdfrom FROM transaction tr JOIN transactionline tl ON tr.id = tl.transaction WHERE tl.mainline = 'F'",
+				);
+				expect(res.valid).toBe(false);
+				expect(res.reason).toContain("Invalid field location 'createdfrom'");
 			});
 
 			it("should reject an empty query", () => {

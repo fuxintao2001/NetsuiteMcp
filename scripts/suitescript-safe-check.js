@@ -226,72 +226,112 @@ export function analyzeSuiteScriptContent(content, filename = "anonymous.js") {
 	return issues;
 }
 
+async function readStdin() {
+	return new Promise((resolve) => {
+		let data = "";
+		process.stdin.setEncoding("utf-8");
+		process.stdin.on("data", (chunk) => {
+			data += chunk;
+		});
+		process.stdin.on("end", () => {
+			resolve(data);
+		});
+		setTimeout(() => resolve(data), 500);
+	});
+}
+
 // CLI Execution if executed directly
 if (
 	process.argv[1] &&
 	path.resolve(process.argv[1]) ===
 		path.resolve(new URL(import.meta.url).pathname)
 ) {
-	const args = process.argv.slice(2);
-	let targetFiles = args;
+	async function runCli() {
+		const args = process.argv.slice(2);
+		let targetFiles = args;
 
-	if (targetFiles.length === 0) {
-		const scanDirs = ["FileCabinet", "src/suitescript", "suitescripts"];
-		targetFiles = [];
-		for (const dir of scanDirs) {
-			const fullDir = path.resolve(process.cwd(), dir);
-			if (fs.existsSync(fullDir)) {
-				const files = fs.readdirSync(fullDir).filter((f) => f.endsWith(".js"));
-				targetFiles.push(...files.map((f) => path.join(fullDir, f)));
+		// Antigravity PostToolUse hook protocol fallback
+		if (targetFiles.length === 0) {
+			try {
+				const rawInput = await readStdin();
+				if (rawInput.trim()) {
+					const parsed = JSON.parse(rawInput);
+					const hookFile =
+						parsed?.toolCall?.args?.TargetFile ||
+						parsed?.toolCall?.args?.targetFile ||
+						parsed?.toolCall?.args?.path;
+					if (typeof hookFile === "string" && (hookFile.endsWith(".js") || hookFile.endsWith(".ts"))) {
+						targetFiles = [hookFile];
+					}
+				}
+			} catch {
+				// Non-JSON stdin or empty — fall through to default directory scanning
 			}
+		}
+
+		if (targetFiles.length === 0) {
+			const scanDirs = ["FileCabinet", "src/suitescript", "suitescripts"];
+			targetFiles = [];
+			for (const dir of scanDirs) {
+				const fullDir = path.resolve(process.cwd(), dir);
+				if (fs.existsSync(fullDir)) {
+					const files = fs.readdirSync(fullDir).filter((f) => f.endsWith(".js"));
+					targetFiles.push(...files.map((f) => path.join(fullDir, f)));
+				}
+			}
+		}
+
+		if (targetFiles.length === 0) {
+			console.log(
+				"🛡️ [SuiteScript SAFE Check] No target SuiteScript files specified or found. Static check passed.",
+			);
+			process.stdout.write("{}");
+			process.exit(0);
+		}
+
+		let totalErrors = 0;
+		let totalWarnings = 0;
+
+		console.log(
+			`🔍 [SuiteScript SAFE Check] Scanning ${targetFiles.length} file(s) for Oracle SAFE Guide 2025.2 compliance...\n`,
+		);
+
+		for (const f of targetFiles) {
+			if (!fs.existsSync(f)) continue;
+			const content = fs.readFileSync(f, "utf-8");
+			const issues = analyzeSuiteScriptContent(content, path.basename(f));
+
+			if (issues.length > 0) {
+				console.log(`📄 File: ${f}`);
+				for (const iss of issues) {
+					const icon = iss.severity === "ERROR" ? "❌" : "⚠️";
+					console.log(
+						`  ${icon} [Line ${iss.line}] [${iss.rule}] ${iss.message}`,
+					);
+					if (iss.severity === "ERROR") totalErrors++;
+					if (iss.severity === "WARNING") totalWarnings++;
+				}
+				console.log("");
+			}
+		}
+
+		console.log("------------------------------------------------------------");
+		console.log(
+			`Audit Summary: ${totalErrors} error(s), ${totalWarnings} warning(s).`,
+		);
+
+		if (totalErrors > 0) {
+			console.error("🛑 [SuiteScript SAFE Check] Failed with compliance errors.");
+			process.stdout.write("{}");
+			process.exit(1);
+		} else {
+			console.log(
+				"✨ [SuiteScript SAFE Check] Codebase is compliant with Oracle SAFE Guide 2025.2.",
+			);
+			process.stdout.write("{}");
+			process.exit(0);
 		}
 	}
 
-	if (targetFiles.length === 0) {
-		console.log(
-			"🛡️ [SuiteScript SAFE Check] No target SuiteScript files specified or found. Static check passed.",
-		);
-		process.exit(0);
-	}
-
-	let totalErrors = 0;
-	let totalWarnings = 0;
-
-	console.log(
-		`🔍 [SuiteScript SAFE Check] Scanning ${targetFiles.length} file(s) for Oracle SAFE Guide 2025.2 compliance...\n`,
-	);
-
-	for (const f of targetFiles) {
-		if (!fs.existsSync(f)) continue;
-		const content = fs.readFileSync(f, "utf-8");
-		const issues = analyzeSuiteScriptContent(content, path.basename(f));
-
-		if (issues.length > 0) {
-			console.log(`📄 File: ${f}`);
-			for (const iss of issues) {
-				const icon = iss.severity === "ERROR" ? "❌" : "⚠️";
-				console.log(
-					`  ${icon} [Line ${iss.line}] [${iss.rule}] ${iss.message}`,
-				);
-				if (iss.severity === "ERROR") totalErrors++;
-				if (iss.severity === "WARNING") totalWarnings++;
-			}
-			console.log("");
-		}
-	}
-
-	console.log("------------------------------------------------------------");
-	console.log(
-		`Audit Summary: ${totalErrors} error(s), ${totalWarnings} warning(s).`,
-	);
-
-	if (totalErrors > 0) {
-		console.error("🛑 [SuiteScript SAFE Check] Failed with compliance errors.");
-		process.exit(1);
-	} else {
-		console.log(
-			"✨ [SuiteScript SAFE Check] Codebase is compliant with Oracle SAFE Guide 2025.2.",
-		);
-		process.exit(0);
-	}
+	runCli();
 }

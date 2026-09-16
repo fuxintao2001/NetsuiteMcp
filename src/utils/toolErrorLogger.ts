@@ -125,6 +125,20 @@ export function classifyError(
 	}
 
 	if (
+		lower.includes("etimedout") ||
+		lower.includes("econnreset") ||
+		lower.includes("econnrefused") ||
+		lower.includes("timeout") ||
+		lower.includes("network error") ||
+		lower.includes("socket hang up") ||
+		lower.includes("gateway timeout") ||
+		lower.includes("504") ||
+		lower.includes("502 bad gateway")
+	) {
+		return "NETWORK_OR_TIMEOUT";
+	}
+
+	if (
 		toolName === "ns_runCustomSuiteQL" ||
 		lower.includes("suiteql") ||
 		lower.includes("invalid_search") ||
@@ -145,17 +159,6 @@ export function classifyError(
 		lower.includes("404 not found")
 	) {
 		return "RECORD_NOT_FOUND";
-	}
-
-	if (
-		lower.includes("etimedout") ||
-		lower.includes("econnreset") ||
-		lower.includes("econnrefused") ||
-		lower.includes("timeout") ||
-		lower.includes("network error") ||
-		lower.includes("socket hang up")
-	) {
-		return "NETWORK_OR_TIMEOUT";
 	}
 
 	if (lower.includes("netsuite error") || lower.includes("api error")) {

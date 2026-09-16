@@ -60,7 +60,7 @@ function getActionableAdvice(code: string, message: string): string {
 		normalizedMessage.includes("column")
 	) {
 		const fieldMatch =
-			/(?:field|column|identifier)\s*['"]?([a-zA-Z0-9_]+)['"]?/i.exec(message);
+			/(?:field|column|identifier)\s*['"]?([a-zA-Z0-9_.]+)['"]?/i.exec(message);
 		const offendingField = fieldMatch?.[1] || null;
 
 		let advice = "\n💡 [Troubleshooting Advice - SuiteQL/SQL]:";
@@ -75,7 +75,7 @@ function getActionableAdvice(code: string, message: string): string {
 		advice +=
 			"\n  - Dates: Format date parameters with TO_DATE('<value>', '<format>'), e.g. TO_DATE('2025-01-15', 'YYYY-MM-DD').";
 		advice +=
-			'\n  - Pagination: "LIMIT" and "OFFSET" are NOT supported. Use "FETCH FIRST N ROWS ONLY" or "WHERE ROWNUM <= N".';
+			'\n  - Pagination: "LIMIT" is NOT supported. Use Oracle-standard "FETCH FIRST N ROWS ONLY", "WHERE ROWNUM <= N", or "OFFSET M ROWS FETCH NEXT N ROWS ONLY".';
 		advice +=
 			"\n  - Display Names: Use BUILTIN.DF(<field>) to extract foreign key text labels (e.g. BUILTIN.DF(entity), BUILTIN.DF(status)).";
 		advice +=
@@ -227,7 +227,14 @@ export function parseNetSuiteError(error: unknown): Error {
 				const errDesc = String(
 					dataObj.error_description || dataObj.errorDescription || "",
 				);
-				const advice = getActionableAdvice(errCode, errDesc);
+				let advice = getActionableAdvice(errCode, errDesc);
+				if (
+					errCode.toLowerCase().includes("invalid_grant") ||
+					errDesc.toLowerCase().includes("refresh token")
+				) {
+					advice +=
+						"\n💡 [Troubleshooting Advice - OAuth Session]:\n  👉 Immediate Action: Refresh token is invalid or expired. Call 'netsuite_authenticate' to re-authenticate.";
+				}
 				return new Error(
 					`OAuth Error [${errCode}]: ${errDesc || "No details provided"}${advice}`,
 				);
@@ -306,12 +313,16 @@ export function sanitizeMessage(message: string): string {
 	if (cwd) {
 		const registrySafe = cwd.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 		sanitized = sanitized.replace(
-			new RegExp(registrySafe, "g"),
+			new RegExp(registrySafe, "gi"),
 			"<PROJECT_ROOT>",
 		);
 	}
 	sanitized = sanitized.replace(/\/Users\/[a-zA-Z0-9_\-.]+/gi, "/Users/<USER>");
 	sanitized = sanitized.replace(/\/home\/[a-zA-Z0-9_\-.]+/gi, "/home/<USER>");
+	sanitized = sanitized.replace(
+		/[a-zA-Z]:[/\\](?:Users|Documents and Settings)[/\\][^\s/\\]+/gi,
+		"<USER_HOME>",
+	);
 
 	return sanitized;
 }

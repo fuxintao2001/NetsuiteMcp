@@ -12,7 +12,10 @@
 5. **No SystemNote JOINs**:
    - NEVER JOIN `SystemNote` directly with transactional tables (causes Cartesian explosion and 45s+ timeouts). Query `SystemNote` as a standalone table or call `netsuite_get_system_notes`.
 6. **Pagination & Date Standards**:
-   - ALWAYS paginate via `FETCH FIRST N ROWS ONLY` or `ROWNUM <= N` (NEVER MySQL `LIMIT / OFFSET`).
+   - **Recommended**: `FETCH FIRST N ROWS ONLY` for simple pagination, or Oracle-standard `OFFSET M ROWS FETCH NEXT N ROWS ONLY` for skip-pagination.
+   - **Allowed**: `ROWNUM <= N` as an alternative.
+   - **Prohibited**: MySQL-style `LIMIT N` and bare non-standard `OFFSET N` (without `ROWS FETCH`).
+   - **Parameterized Binding**: `FETCH FIRST ? ROWS ONLY` and `FETCH FIRST :limit ROWS ONLY` are recognized correctly; do not manually append additional pagination clauses.
    - ALWAYS cast date literals using `TO_DATE('YYYY-MM-DD', 'YYYY-MM-DD')`.
 7. **Driving Index Requirement**:
    - Queries against large tables MUST filter on at least one indexed column: `type`, `trandate`, `id`, `tranid`, `entity`, `subsidiary`.

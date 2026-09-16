@@ -127,6 +127,13 @@ describe("MCP Handler Wires", () => {
 			expect(names).toContain("ns_updateRecord");
 			expect(names).toContain("ns_getRecord");
 			expect(names).toContain("netsuite_get_record_link");
+			expect(names).toContain("netsuite_schema");
+
+			// Ensure netsuite_logout is not duplicated in tools list
+			const logoutCount = names.filter(
+				(n: string) => n === "netsuite_logout",
+			).length;
+			expect(logoutCount).toBe(1);
 		});
 
 		it("should attach standard MCP annotations to tools", async () => {
@@ -875,6 +882,45 @@ describe("MCP Handler Wires", () => {
 				});
 
 				expect(res.content[0].text).toContain("Official Records Definition");
+			});
+
+			it("should handle netsuite_schema tool with standard recordType in auto mode", async () => {
+				const callFn = registeredHandlers.get("tools/call");
+				const res = await callFn?.({
+					params: {
+						name: "netsuite_schema",
+						arguments: { recordType: "salesorder" },
+					},
+				});
+
+				expect(res.content[0].text).toContain("Official Records Definition");
+				expect(res.content[0].text).toContain("salesorder");
+			});
+
+			it("should handle netsuite_schema table catalog discovery when recordType is omitted", async () => {
+				const callFn = registeredHandlers.get("tools/call");
+				const res = await callFn?.({
+					params: {
+						name: "netsuite_schema",
+						arguments: { keyword: "transaction" },
+					},
+				});
+
+				expect(res.content[0].text).toContain("NetSuite SuiteQL Table Catalog");
+				expect(res.content[0].text).toContain("transaction");
+			});
+
+			it("should handle netsuite_schema with explicit offline source", async () => {
+				const callFn = registeredHandlers.get("tools/call");
+				const res = await callFn?.({
+					params: {
+						name: "netsuite_schema",
+						arguments: { recordType: "customer", source: "offline" },
+					},
+				});
+
+				expect(res.content[0].text).toContain("Official Records Definition");
+				expect(res.content[0].text).toContain("customer");
 			});
 
 			it("should handle netsuite_get_query_template with templateId", async () => {

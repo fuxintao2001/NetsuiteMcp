@@ -12,7 +12,8 @@
 
 2. **🔍 Slow-Path (Unknown Custom Records — Reconnaissance First)**:
    - Only when operating on unverified custom records (`customrecord_*`), custom fields (`custbody_*`, `custcol_*`, `custrecord_*`), or unlisted niche tables:
-   - Call `ns_getSuiteQLMetadata` (for SuiteQL tables) or `netsuite_get_record_definition` (for SuiteScript 2.1 standard record scripts) before executing queries or mutations.
+   - **Preferred**: Call `netsuite_schema` (unified 1-turn auto-routing) for schema discovery.
+   - **Alternatively**: Call `ns_getSuiteQLMetadata` (for SuiteQL tables) or `netsuite_get_record_definition` (for SuiteScript 2.1 standard record scripts).
 
 3. **🚫 Saved Search Non-Invocation Policy (严禁默认调用 SavedSearch)**:
    - In the vast majority of scenarios, **DO NOT call SavedSearch tools (`ns_listSavedSearches`, `ns_runSavedSearch`)**.
@@ -28,7 +29,7 @@ These schemas are certified production standards. AI agents must project directl
 | Core Table | Certified Whitelist Columns | Notes / Golden Patterns |
 |:---|:---|:---|
 | **`transaction`** | `id`, `tranid`, `type`, `trandate`, `entity`, `subsidiary`, `status`, `postingperiod`, `memo`, `foreigntotal`, `currency` | Filter by `type` (e.g. `'SalesOrd'`, `'CustInvc'`, `'PurchOrd'`). Use `BUILTIN.DF(entity)`. |
-| **`transactionline`** | `transaction`, `linesequencenumber`, `item`, `quantity`, `rate`, `amount`, `foreignamount`, `mainline`, `taxline`, `createdfrom` | **Mandatory** `mainline = 'F'` and `taxline = 'F'` for line items. Upstream lineage is `createdfrom`. |
+| **`transactionline`** | `transaction`, `linesequencenumber`, `item`, `quantity`, `rate`, `amount`, `foreignamount`, `mainline`, `taxline`, `createdfrom` | **Mandatory** `mainline = 'F'` and `taxline = 'F'` for line items. Upstream lineage is `createdfrom`. **Note**: `createdfrom` exists on `transactionline` ONLY, never on `transaction` header — regardless of table alias (`t`, `tr`, `tran`, `tx`). |
 | **`customer`** | `id`, `entityid`, `companyname`, `email`, `phone`, `subsidiary`, `isinactive` | Primary key is `id`. |
 | **`vendor`** | `id`, `entityid`, `companyname`, `email`, `phone`, `subsidiary`, `isinactive` | Primary key is `id`. |
 | **`item`** | `id`, `itemid`, `displayname`, `itemtype`, `subsidiary`, `isinactive` | Type field is `itemtype` (NEVER `recordtype`). |

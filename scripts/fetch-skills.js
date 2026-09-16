@@ -52,7 +52,7 @@ try {
 	fs.rmSync(tempDir, { recursive: true, force: true });
 
 	console.log(
-		"✨ NetSuite Agent Skills fetched and installed successfully in /skills!",
+		"✨ NetSuite Agent Skills fetched and installed successfully in ~/.gemini/config/skills/",
 	);
 } catch (error) {
 	console.error("❌ Error fetching skills:", error);
