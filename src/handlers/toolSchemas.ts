@@ -387,7 +387,7 @@ export const LOGOUT_TOOL = {
 export const RECORD_LINK_TOOL = {
 	name: "netsuite_get_record_link",
 	description:
-		"Generate a direct NetSuite UI browser link to view a specific record.",
+		"Generate a direct NetSuite UI browser link to view a specific record. Supports both numeric internal ID (e.g. 12345) and document number tranid (e.g. 'SO1002').",
 	inputSchema: {
 		type: "object" as const,
 		properties: {
@@ -520,7 +520,7 @@ export const SCRIPT_LOGS_TOOL = {
 export const INSPECT_RECORD_TOOL = {
 	name: "netsuite_inspect_record",
 	description:
-		"Deeply inspect a real NetSuite record's populated fields and line items in the current environment. Eliminates null/empty noise, separates system header fields from custom fields (custbody_*, custcol_*, custrecord_*), and formats a clean developer-friendly overview. Supports compact JSON or Markdown, and controllable line-item depth. Ideal for writing SuiteScript and SuiteQL.",
+		"Primary tool for inspecting single record details, populated fields, and line items without empty noise. Use when examining a specific record by ID or document number. Do NOT use for querying multiple records or lists (use ns_runCustomSuiteQL instead).",
 	inputSchema: {
 		type: "object" as const,
 		properties: {
@@ -575,7 +575,7 @@ export const INSPECT_RECORD_TOOL = {
 export const GET_RECORD_DEFINITION_TOOL = {
 	name: "netsuite_get_record_definition",
 	description:
-		"Lookup official standard field definitions, types, required flags, and help texts for 272 NetSuite record types from Oracle SuiteScript Records Reference. Zero guesswork.",
+		"Fast offline lookup of standard field definitions, types, and mandatory flags across 272 NetSuite record types for SuiteScript development. Do NOT use for custom fields (custbody_*) or live tenant schema (use ns_getRecordTypeMetadata), or for SuiteQL column names (use ns_getSuiteQLMetadata).",
 	inputSchema: {
 		type: "object" as const,
 		properties: {
@@ -629,7 +629,7 @@ export const GET_QUERY_TEMPLATE_TOOL = {
 export const GET_SYSTEM_NOTES_TOOL = {
 	name: "netsuite_get_system_notes",
 	description:
-		"Investigate audit trail and field modification history for a specific record. Uses high-performance standalone query adhering to SAFE Guide Pitfall 11 to prevent query timeouts. Identifies who changed what, when, and old vs new values.",
+		"Investigate audit trail and field modification history for a specific record. Uses high-performance standalone query adhering to SAFE Guide Pitfall 11 to prevent query timeouts. Identifies who changed what, when, and old vs new values. Supports both numeric internal ID (e.g. 12345) and document number tranid (e.g. 'SO1002').",
 	inputSchema: {
 		type: "object" as const,
 		properties: {
@@ -744,42 +744,6 @@ export const GET_ERROR_SUMMARY_TOOL = {
 		},
 	},
 };
-
-// ---------------------------------------------------------------------------
-// Tool description enhancement suffixes
-// ---------------------------------------------------------------------------
-
-/**
- * SuiteQL rules to append to the `ns_runCustomSuiteQL` tool description.
- * These rules are embedded directly in the tool description so the AI agent
- * sees them at tool-discovery time, before writing any query.
- */
-export const SUITEQL_RULES_SUFFIX = `
-
-═══ MANDATORY SUITEQL PROTOCOL & FAST-PATH GUIDELINES ═══
-1. FAST-PATH & RECONNAISSANCE: For standard verified tables (transaction, transactionline, customer, vendor, item, account, subsidiary), construct queries directly. Call 'ns_getSuiteQLMetadata' only for unverified schemas, custom records, or after schema errors.
-2. GOLDEN PATTERNS: Use standard golden patterns (mainline='F' for lines, tl.createdfrom for lineage, BUILTIN.DF for names). Call 'netsuite_get_query_template' if an unfamiliar query pattern is needed.
-3. MANDATORY SYNTAX RULES:
-   • Explicit columns only — NEVER use 'SELECT *' or 'table.*'.
-   • Oracle pagination: MUST use 'ROWNUM <= N' or 'FETCH FIRST N ROWS ONLY'. NEVER use 'LIMIT' or 'OFFSET'.
-   • Dates: MUST wrap date literals in TO_DATE('YYYY-MM-DD', 'YYYY-MM-DD').
-   • Labels: Use BUILTIN.DF(field) instead of joining master tables.
-   • Driving filters: Always filter high-volume tables (transaction, transactionline) by indexed columns (id, tranid, trandate, type, entity, subsidiary).
-   • Prohibited joins: NEVER join 'SystemNote' directly (causes 45s+ timeouts; use 'netsuite_get_system_notes' instead).
-4. ERROR-DRIVEN DIRECT CORRECTION: On syntax or schema errors, parse the diagnostic guidance, fix the query directly, and re-execute. Blind identical retries are prohibited.
-5. PERMISSION HARD STOP: On 403 or INSUFFICIENT_PERMISSION, cease all operations immediately; never hallucinate fake data.`;
-
-/**
- * Metadata usage hint to append to the `ns_getSuiteQLMetadata` tool description.
- */
-export const METADATA_RULES_SUFFIX = `
-
-💡 RECONNAISSANCE (Slow-Path): Use this tool to verify exact field names, data types, and case-sensitivity for unverified schemas or custom tables. Not required for standard known tables in Fast-Path.
-- Fast Table Discovery: To discover available SuiteQL tables across all business domains (Inventory, Transactions, Manufacturing, Accounting, CRM, Custom Records) without network timeouts, pass a search keyword (e.g. \`{ keyword: 'inventory' }\`, \`{ keyword: 'transaction' }\`, \`{ keyword: 'order' }\`, \`{ keyword: 'account' }\`).
-- Column Schema Inspection: To view exact column names, data types, and nullability for a specific table, provide recordType (e.g. \`{ recordType: 'aggregateitemlocation' }\`).
-- Field names are CASE-SENSITIVE — use them exactly as returned (e.g., 'tranid' instead of 'TranId').
-- If a subsequent ns_runCustomSuiteQL query fails, re-call this tool to self-heal and inspect field definitions.
-- For custom records (customrecord_*), this returns both system and custom field definitions.`;
 
 /** All locally-handled tools (excluding AUTH_TOOL which has special routing). */
 export const LOCAL_TOOLS = [

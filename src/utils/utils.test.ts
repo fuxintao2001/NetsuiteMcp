@@ -272,6 +272,48 @@ SPACED = trimmed
 				);
 			});
 
+			it("should extract offending column and provide code-level fix template", () => {
+				const mockError = {
+					response: {
+						status: 400,
+						data: {
+							"o:errorDetails": [
+								{
+									"o:errorCode": "INVALID_SEARCH_SELECT_FIELD",
+									detail: "Unknown column 'docnum' in select list.",
+								},
+							],
+						},
+					},
+				};
+
+				const result = parseNetSuiteError(mockError);
+				expect(result.message).toContain("Invalid Column 'docnum'");
+				expect(result.message).toContain(
+					"ns_getSuiteQLMetadata({ recordType: '<target_table>' })",
+				);
+			});
+
+			it("should provide code-level self-healing template for invalid record type", () => {
+				const mockError = {
+					response: {
+						status: 400,
+						data: {
+							"o:errorDetails": [
+								{
+									"o:errorCode": "INVALID_RECORD_TYPE",
+									detail: "Record type 'salesorder_invalid' does not exist.",
+								},
+							],
+						},
+					},
+				};
+
+				const result = parseNetSuiteError(mockError);
+				expect(result.message).toContain("netsuite_get_record_definition");
+				expect(result.message).toContain("ns_getRecordTypeMetadata");
+			});
+
 			it("should append hard-stop permission advice on INSUFFICIENT_PERMISSION", () => {
 				const mockError = {
 					response: {

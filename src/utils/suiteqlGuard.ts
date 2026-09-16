@@ -393,10 +393,10 @@ export function validateSuiteQL(sqlQuery: string): SuiteQLValidationResult {
 		const whereClause = whereMatch?.[1] || "";
 
 		const hasDrivingFilter =
-			/\b(tranid|otherrefnum|trandate|datecreated|type|recordtype|entity|item|subsidiary|location|createdfrom)\s*(?:=|IN|<|>|BETWEEN|LIKE|>=|<=)/i.test(
+			/\b(tranid|otherrefnum|trandate|datecreated|type|recordtype|entity|item|subsidiary|location|createdfrom|status)\s*(?:=|IN|<|>|BETWEEN|LIKE|>=|<=)/i.test(
 				whereClause,
 			) ||
-			/\b(?:t\.|tl\.|transaction\.|transactionline\.)?(?:id|internalid)\s*(?:=|IN|<|>|BETWEEN|LIKE|>=|<=)\s*(?:\d+|__STR_LITERAL_\d+__|\?|\()/i.test(
+			/\b(?:t\.|tl\.|transaction\.|transactionline\.)?(?:id|internalid|transaction)\s*(?:=|IN|<|>|BETWEEN|LIKE|>=|<=)\s*(?:\d+|__STR_LITERAL_\d+__|\?|\()/i.test(
 				whereClause,
 			);
 
@@ -418,10 +418,10 @@ export function validateSuiteQL(sqlQuery: string): SuiteQLValidationResult {
 		const whereMatch = /\bWHERE\s+([\s\S]+?)(?:\s+GROUP\s+BY)/i.exec(maskedSql);
 		const whereClause = whereMatch?.[1] || "";
 		const hasIndexedWhere =
-			/\b(tranid|otherrefnum|trandate|datecreated|type|recordtype|entity|item|subsidiary|location|createdfrom)\s*(?:=|IN|<|>|BETWEEN|LIKE|>=|<=)/i.test(
+			/\b(tranid|otherrefnum|trandate|datecreated|type|recordtype|entity|item|subsidiary|location|createdfrom|status|previousType|nextType|previousDoc|nextDoc)\s*(?:=|IN|<|>|BETWEEN|LIKE|>=|<=)/i.test(
 				whereClause,
 			) ||
-			/\b(?:t\.|tl\.|transaction\.|transactionline\.)?(?:id|internalid)\s*(?:=|IN|<|>|BETWEEN|LIKE|>=|<=)\s*(?:\d+|__STR_LITERAL_\d+__|\?|\()/i.test(
+			/\b(?:t\.|tl\.|transaction\.|transactionline\.)?(?:id|internalid|transaction)\s*(?:=|IN|<|>|BETWEEN|LIKE|>=|<=)\s*(?:\d+|__STR_LITERAL_\d+__|\?|\()/i.test(
 				whereClause,
 			);
 		if (!hasIndexedWhere) {

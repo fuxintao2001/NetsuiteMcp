@@ -307,6 +307,18 @@ describe("SuiteQL, Search & Query Utilities", () => {
 				expect(res.tables).toContain("transactionline");
 			});
 
+			it("should allow transactionline + transaction joins driven by tl.transaction filter", () => {
+				const res1 = validateSuiteQL(
+					"SELECT tl.transaction, tl.id, tl.item, tl.quantity, t.custbody_vendor_deliv FROM transactionline tl JOIN transaction t ON t.id = tl.transaction WHERE tl.transaction IN (9024545, 9025081) AND tl.mainline = 'F' AND tl.quantity > 0",
+				);
+				expect(res1.valid).toBe(true);
+
+				const res2 = validateSuiteQL(
+					"SELECT tl.createdfrom, t.tranid FROM transactionline tl JOIN transaction t ON t.id = tl.transaction WHERE tl.transaction = 9024545 AND tl.mainline = 'T'",
+				);
+				expect(res2.valid).toBe(true);
+			});
+
 			it("should reject queries using invalid column 'recordtype' on item table", () => {
 				const res1 = validateSuiteQL(
 					"SELECT id, itemid, recordtype FROM item WHERE isinactive = 'F'",
@@ -668,6 +680,23 @@ describe("SuiteQL, Search & Query Utilities", () => {
 				const markdown = formatSuiteQLToCompactMarkdown(paginatedResult);
 				expect(markdown).toContain("*Total Results: 150 (Showing 2 rows)*");
 				expect(markdown).toContain("| 1 | Row 1 |");
+			});
+
+			it("should place truncation notice at the very top when rows exceed 100", () => {
+				const largeResult = {
+					data: Array.from({ length: 105 }, (_, i) => ({
+						id: String(i + 1),
+						name: `Item ${i + 1}`,
+					})),
+				};
+
+				const markdown = formatSuiteQLToCompactMarkdown(largeResult);
+				expect(
+					markdown.startsWith(
+						"> ⚠️ **Notice**: Result truncated to top 100 of 105 rows.",
+					),
+				).toBe(true);
+				expect(markdown).toContain("| id | name |");
 			});
 		});
 	});

@@ -215,6 +215,9 @@ export function formatSuiteQLToCompactMarkdown(result: unknown): string {
 	}
 
 	let output = "";
+	if (wasTruncated) {
+		output += `> ⚠️ **Notice**: Result truncated to top ${MAX_DISPLAY_ROWS} of ${totalInputRows} rows. Use WHERE, ROWNUM, or aggregation in SuiteQL for complete totals.\n\n`;
+	}
 	if (totalResults !== undefined && totalResults !== dataRows.length) {
 		output += `*Total Results: ${totalResults} (Showing ${dataRows.length} rows)*\n\n`;
 	}
@@ -234,10 +237,6 @@ export function formatSuiteQLToCompactMarkdown(result: unknown): string {
 			return String(val).replace(/\|/g, "\\|").replace(/\n/g, " ");
 		});
 		output += `| ${rowValues.join(" | ")} |\n`;
-	}
-
-	if (wasTruncated) {
-		output += `\n\n*(Showing top ${MAX_DISPLAY_ROWS} of ${totalInputRows} rows. Use ROWNUM or filters to narrow results)*`;
 	}
 
 	return output.trim();

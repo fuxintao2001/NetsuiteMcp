@@ -153,7 +153,7 @@ try {
 					`   - AGENTS.md (${Buffer.byteLength(renderedAgents, "utf-8")} bytes)`,
 				);
 				console.log(`   - .agents/hooks.json`);
-				console.log(`   - .agents/rules/*.md (6 modular rules)`);
+				console.log(`   - .agents/rules/*.md (5 modular rules)`);
 				console.log(
 					`   - scripts/ (pre-upload-check.js, suitescript-safe-check.js)`,
 				);

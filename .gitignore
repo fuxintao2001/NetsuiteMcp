@@ -48,3 +48,6 @@ keep-alive.mjs
 
 # Local workspace configurations
 workspace-agents/workspaces.json
+
+# Audit & temporary artifacts
+artifact/

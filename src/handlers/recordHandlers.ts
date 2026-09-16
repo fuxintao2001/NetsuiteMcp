@@ -54,7 +54,7 @@ export async function handleGetRecordLink(
 	}
 
 	// Detect if recordId might be a document number (tranid) instead of internal numeric ID
-	const isNumericId = /^\d+$/.test(recordId.trim());
+	const isNumericId = /^-?\d+$/.test(recordId.trim());
 	let idWarning = "";
 	if (!isNumericId) {
 		idWarning = `\n\n⚠️ **Warning:** The provided recordId ('${recordId}') appears to be a document number (tranid) rather than a numeric internal ID. NetSuite UI links require the numeric internal ID (e.g. '123456'). If this link fails to open the record, query its internal ID first via SuiteQL (e.g. \`SELECT id FROM transaction WHERE tranid = '${recordId}'\`).`;
@@ -112,7 +112,7 @@ export async function handleInspectRecord(
 	const shouldIncludeLines = includeLines !== false && linesMode !== "none";
 
 	// If recordId is not numeric (e.g. document tranid 'SO1002'), try resolving internal numeric ID
-	const isNumeric = /^\d+$/.test(recordId.trim());
+	const isNumeric = /^-?\d+$/.test(recordId.trim());
 	if (!isNumeric) {
 		try {
 			// OWASP injection prevention: sanitize and bound tranid
@@ -515,7 +515,7 @@ export async function handleGetSystemNotes(
 		recordTypeId = -30;
 	}
 
-	const isNumeric = /^\d+$/.test(recordId.trim());
+	const isNumeric = /^-?\d+$/.test(recordId.trim());
 	if (!isNumeric) {
 		try {
 			const safeTranid = recordId.trim().replace(/'/g, "''");

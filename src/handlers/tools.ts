@@ -37,9 +37,7 @@ import {
 	AUTH_TOOL,
 	LOCAL_TOOLS,
 	LOGOUT_TOOL,
-	METADATA_RULES_SUFFIX,
 	STATUS_TOOL,
-	SUITEQL_RULES_SUFFIX,
 } from "./toolSchemas.js";
 import type { ToolHandlerDeps } from "./types.js";
 
@@ -131,7 +129,7 @@ function enhanceDescription(
 }
 
 /**
- * Enhance fetched NetSuite tool descriptions with SuiteQL rules and parameter-level guidance.
+ * Enhance fetched NetSuite tool descriptions with precise boundaries and parameter-level guidance.
  */
 function enhanceToolDescriptions(
 	tools: Array<Record<string, unknown>>,
@@ -139,10 +137,11 @@ function enhanceToolDescriptions(
 	return tools.map((t) => {
 		const toolName = (t.name as string) || "";
 		const annotations = getToolAnnotations(toolName);
-		let enhanced: Record<string, unknown> = { ...t, annotations };
+		const enhanced: Record<string, unknown> = { ...t, annotations };
 
 		if (t.name === "ns_runCustomSuiteQL") {
-			enhanced = enhanceDescription(enhanced, SUITEQL_RULES_SUFFIX);
+			enhanced.description =
+				"Primary 1-turn tool for querying multiple NetSuite records, filtered lists, aggregations, and financial analytics via SuiteQL. Do NOT use for inspecting a single record's full details (use netsuite_inspect_record instead).";
 			if (enhanced.inputSchema && typeof enhanced.inputSchema === "object") {
 				const schema = { ...(enhanced.inputSchema as Record<string, unknown>) };
 				if (schema.properties && typeof schema.properties === "object") {
@@ -151,7 +150,7 @@ function enhanceToolDescriptions(
 						props.sqlQuery = {
 							...(props.sqlQuery as Record<string, unknown>),
 							description:
-								"The SuiteQL query string to execute. UNIVERSAL RULES: (1) Reconnaissance: Verify exact table and column names via 'ns_getSuiteQLMetadata' before querying unfamiliar schemas. (2) Dialect: Explicit columns only (no SELECT *), use ROWNUM <= N or FETCH FIRST N ROWS ONLY (no LIMIT/OFFSET), wrap dates in TO_DATE('YYYY-MM-DD', 'YYYY-MM-DD'), and use BUILTIN.DF(field) for labels. (3) Table Granularity: Distinguish header from line tables (filter line items with mainline='F'; relationship/upstream fields like createdfrom live on line tables); prefer domain-specialized tables over monolithic base tables for aggregations; never JOIN SystemNote directly. (4) Indexing: High-volume queries must include indexed filters (id, tranid, trandate, type, entity, subsidiary).",
+								"The SuiteQL query string to execute. Explicit columns only, Oracle pagination (ROWNUM <= N or FETCH FIRST N ROWS ONLY), and mainline='F' for line items.",
 						};
 					}
 					schema.properties = props;
@@ -161,8 +160,15 @@ function enhanceToolDescriptions(
 			return enhanced;
 		}
 
+		if (t.name === "ns_getRecord") {
+			enhanced.description =
+				"Retrieve raw, uncleaned NetSuite record JSON by internal numeric ID. Only use when strictly requiring the complete raw payload from NetSuite API. For inspecting populated fields, line items, and avoiding empty noise, use netsuite_inspect_record instead.";
+			return enhanced;
+		}
+
 		if (t.name === "ns_getSuiteQLMetadata") {
-			enhanced = enhanceDescription(enhanced, METADATA_RULES_SUFFIX);
+			enhanced.description =
+				"Inspect live NetSuite database table schema, column names, and data types before executing SuiteQL. Use only when table or column names are unverified or for custom records. Do NOT use for standard core tables (use Fast-Path direct query) or for SuiteScript field definitions (use netsuite_get_record_definition).";
 			if (enhanced.inputSchema && typeof enhanced.inputSchema === "object") {
 				const schema = { ...(enhanced.inputSchema as Record<string, unknown>) };
 				const props = {
@@ -171,7 +177,7 @@ function enhanceToolDescriptions(
 				props.keyword = {
 					type: "string",
 					description:
-						"Optional search keyword to discover available NetSuite SuiteQL tables across all business domains (e.g. 'inventory', 'transaction', 'invoice', 'order', 'account', 'customer', 'bom'). If provided without recordType, returns matching table names and descriptions in milliseconds without network timeout.",
+						"Optional search keyword to discover available NetSuite SuiteQL tables across all business domains (e.g. 'inventory', 'transaction', 'invoice', 'order', 'account', 'customer', 'bom') without network timeout.",
 				};
 				schema.properties = props;
 				enhanced.inputSchema = schema;
@@ -180,21 +186,8 @@ function enhanceToolDescriptions(
 		}
 
 		if (t.name === "ns_getRecordTypeMetadata") {
-			enhanced = enhanceDescription(enhanced, METADATA_RULES_SUFFIX);
-			return enhanced;
-		}
-
-		// Document number guidance for record operations
-		if (
-			t.name === "ns_getRecord" ||
-			t.name === "ns_updateRecord" ||
-			t.name === "netsuite_get_record_link" ||
-			t.name === "netsuite_get_system_notes"
-		) {
-			enhanced = enhanceDescription(
-				enhanced,
-				"\n\n💡 [Tranid Support]: Both numeric internal ID (e.g. 12345) and document number tranid (e.g. 'SO1002', 'INV-2025-01') are supported and will be automatically resolved.",
-			);
+			enhanced.description =
+				"Fetch live tenant-specific record type metadata and custom fields (custbody_*, custcol_*, custrecord_*) from active NetSuite account. Do NOT use for standard record fields (use netsuite_get_record_definition instead) or for SuiteQL database tables (use ns_getSuiteQLMetadata).";
 			return enhanced;
 		}
 
@@ -484,34 +477,32 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
 					}
 				}
 
-				// --- Zero-friction document number (tranid) resolution for ns_getRecord ---
+				// --- Explicit validation for ns_getRecord: numeric internal ID required ---
 				if (name === "ns_getRecord") {
 					const rawRecordId = String(
-						safeArgs.recordId || safeArgs.id || "",
+						safeArgs.recordId ?? safeArgs.id ?? "",
 					).trim();
-					if (rawRecordId && !/^\d+$/.test(rawRecordId)) {
-						try {
-							const safeTranid = rawRecordId.replace(/'/g, "''");
-							const lookupSql = `SELECT id, recordtype FROM transaction WHERE tranid = '${safeTranid}' FETCH FIRST 1 ROWS ONLY`;
-							const lookupRes = await mcpTools.executeTool(
-								"ns_runCustomSuiteQL",
-								{
-									sqlQuery: lookupSql,
-								},
-							);
-							const rows = mcpTools.extractDataArray(lookupRes);
-							if (rows.length > 0 && rows[0]?.id) {
-								safeArgs.recordId = String(rows[0].id);
-								safeArgs.id = String(rows[0].id);
-								if (rows[0].recordtype) {
-									safeArgs.recordType = String(
-										rows[0].recordtype,
-									).toLowerCase();
-								}
-							}
-						} catch {
-							// Continue with original recordId if lookup fails
-						}
+					if (!rawRecordId) {
+						return textResult(
+							`❌ [Missing Record ID] 'ns_getRecord' requires a numeric internal ID (e.g., '12345').\n` +
+								`👉 Immediate Action: Provide a valid numeric internal ID, or use 'ns_runCustomSuiteQL' to query records.`,
+							true,
+						);
+					}
+					if (!/^-?\d+$/.test(rawRecordId)) {
+						const safeTranid = rawRecordId.replace(/'/g, "''");
+						const recType = safeArgs.recordType
+							? String(safeArgs.recordType).toLowerCase()
+							: "salesorder";
+						return textResult(
+							`❌ [Invalid Record ID] 'ns_getRecord' requires a numeric internal ID (e.g., '12345'), but received document number/tranid '${rawRecordId}'.\n` +
+								`👉 Immediate Action:\n` +
+								`1. Preferred: Use 'netsuite_inspect_record' instead, which resolves document numbers automatically:\n` +
+								`   netsuite_inspect_record({ recordType: '${recType}', recordId: '${rawRecordId}' })\n` +
+								`2. Or resolve the internal ID via SuiteQL first:\n` +
+								`   SELECT id FROM transaction WHERE tranid = '${safeTranid}'`,
+							true,
+						);
 					}
 				}
 
@@ -656,11 +647,7 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
 					return textResult(formatSuiteQLToCompactMarkdown(result));
 				}
 
-				if (
-					name === "ns_getRecord" ||
-					name === "ns_createRecord" ||
-					name === "ns_updateRecord"
-				) {
+				if (name === "ns_createRecord" || name === "ns_updateRecord") {
 					result = cleanRecordPayload(result);
 				}
 

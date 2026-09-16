@@ -23,7 +23,7 @@ AI agents must unconditionally enforce a **Strict Zero Hallucination** policy:
    - Match the user's conversational language for explanations, analysis summaries, and UI messages (default to Simplified Chinese if the user prompts in Chinese).
    - Keep all code identifiers, SQL keywords, table names, field IDs, and API syntax strictly in standard English.
 5. **🚫 Single Authoritative Implementation & Zero Defensive Compatibility Bloat**:
-   - Strictly adhere to [Code Craftsmanship](file://{{PROJECT_PATH}}/.agents/rules/code-craftsmanship.md): Clean Replacement only, no dual-track compatibility wrappers (`try/catch` fallbacks, obsolete sniffing). Eliminate dead code physically.
+   - Strictly adhere to Code Craftsmanship directives in AGENTS.md: Clean Replacement only, no dual-track compatibility wrappers (`try/catch` fallbacks, obsolete sniffing). Eliminate dead code physically.
    - **Current-State-Only Explanations**: In all code comments, technical responses, and documentation, describe ONLY the current, definitive state and logic of the latest code. Strictly prohibit narrating code evolution history, migration trajectories, or past vs present comparisons.
 
 ---
@@ -126,7 +126,6 @@ This workspace adheres strictly to the official Google Antigravity Customization
 - **Modular Directory Rules ([`.agents/rules/`](file://{{PROJECT_PATH}}/.agents/rules))**:
   - [Fast-Path Routing](file://{{PROJECT_PATH}}/.agents/rules/fast-path-routing.md): 1-turn direct execution on standard tables.
   - [SuiteQL Guardrails](file://{{PROJECT_PATH}}/.agents/rules/suiteql-guardrails.md): 7 golden SQL defense rules.
-  - [Code Craftsmanship](file://{{PROJECT_PATH}}/.agents/rules/code-craftsmanship.md): Single authoritative implementation & anti-compatibility bloat.
   - [SAFE Guide Standards](file://{{PROJECT_PATH}}/.agents/rules/safe-guide-standards.md): SAFE Guide 2025.2 & OWASP secure coding directives.
   - [Environment Locks](file://{{PROJECT_PATH}}/.agents/rules/environment-locks.md): Production write lockout & upload card gates.
   - [Generative UI](file://{{PROJECT_PATH}}/.agents/rules/generative-ui.md): Antigravity Generative UI styling, CSS theme variables, and `<agent-embed>` directives.

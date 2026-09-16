@@ -59,11 +59,18 @@ function getActionableAdvice(code: string, message: string): string {
 		normalizedMessage.includes("query") ||
 		normalizedMessage.includes("column")
 	) {
+		const fieldMatch =
+			/(?:field|column|identifier)\s*['"]?([a-zA-Z0-9_]+)['"]?/i.exec(message);
+		const offendingField = fieldMatch?.[1] || null;
+
 		let advice = "\n💡 [Troubleshooting Advice - SuiteQL/SQL]:";
-		advice +=
-			'\n  - Explicit Columns: Avoid "SELECT *". Specify explicit column names.';
-		advice +=
-			"\n  - Case-Sensitivity: NetSuite table and field names are case-sensitive. Verify exact names using `ns_getSuiteQLMetadata`.";
+		advice += "\n  👉 Code-level immediate self-healing steps:";
+		if (offendingField) {
+			advice += `\n  - Invalid Column '${offendingField}': Replace with standard NetSuite column (e.g. 'id' instead of 'internalid', 'tranid' instead of 'docnum').`;
+		} else {
+			advice +=
+				"\n  - Explicit Columns: Avoid \"SELECT *\". Specify explicit column names, e.g.:\n    SELECT id, tranid, trandate FROM transaction WHERE type = 'SalesOrd'";
+		}
 		advice += '\n  - Primary Key: Primary key is "id" (not "internalid").';
 		advice +=
 			"\n  - Dates: Format date parameters with TO_DATE('<value>', '<format>'), e.g. TO_DATE('2025-01-15', 'YYYY-MM-DD').";
@@ -74,7 +81,7 @@ function getActionableAdvice(code: string, message: string): string {
 		advice +=
 			"\n  - Transaction Types: SalesOrd, CustInvc, PurchOrd, VendBill, Journal, CustCred, ItemRcpt, ItemShip, CashSale, CustPymt, VendPymt.";
 		advice +=
-			"\n  - Self-Healing Action: Call `ns_getSuiteQLMetadata` for the target table to verify actual field names, directly fix the query based on the diagnostic, and execute the corrected query.";
+			"\n  - Self-Healing Template: If table/column schema is uncertain, inspect live metadata directly:\n    ns_getSuiteQLMetadata({ recordType: '<target_table>' })";
 		return advice;
 	}
 
@@ -85,11 +92,16 @@ function getActionableAdvice(code: string, message: string): string {
 		normalizedMessage.includes("record type") ||
 		normalizedMessage.includes("does not exist")
 	) {
+		const recMatch = /(?:record\s*type|type)\s*['"]?([a-zA-Z0-9_]+)['"]?/i.exec(
+			message,
+		);
+		const recName = recMatch?.[1]?.toLowerCase() || "salesorder";
+
 		let advice = "\n💡 [Troubleshooting Advice - Record Type / ID]:";
-		advice +=
-			"\n  - Verify the record type is lowercase and valid (e.g., 'salesorder', 'customer', 'customrecord_xxx').";
-		advice +=
-			"\n  - Call `ns_getRecordTypeMetadata` to verify the record schema and existing field IDs.";
+		advice += "\n  👉 Code-level immediate self-healing steps:";
+		advice += `\n  - 0ms Offline Standard Schema: Check standard field definitions and types:\n    netsuite_get_record_definition({ recordType: '${recName}' })`;
+		advice += `\n  - Live Tenant Schema: For custom records or custom fields (custbody_*):\n    ns_getRecordTypeMetadata({ recordType: '${recName}' })`;
+		advice += `\n  - Verify record type is lowercase standard (e.g. 'salesorder', 'customer', 'item', 'invoice', 'customrecord_xxx').`;
 		return advice;
 	}
 
@@ -100,10 +112,11 @@ function getActionableAdvice(code: string, message: string): string {
 		normalizedMessage.includes("missing required")
 	) {
 		let advice = "\n💡 [Troubleshooting Advice - Missing Required Argument]:";
+		advice += "\n  👉 Code-level immediate self-healing steps:";
 		advice +=
-			"\n  - Inspect the record metadata using `ns_getRecordTypeMetadata` or `ns_getSuiteQLMetadata`.";
+			"\n  - 0ms Offline Mandatory Check: Inspect mandatory/required fields for the record:\n    netsuite_get_record_definition({ recordType: '<record_type>' })";
 		advice +=
-			"\n  - Ensure all non-nullable / mandatory fields are provided in the payload.";
+			"\n  - Ensure all non-nullable / mandatory fields (e.g. entity, subsidiary, trandate) are provided in the mutation payload.";
 		return advice;
 	}
 
@@ -113,10 +126,11 @@ function getActionableAdvice(code: string, message: string): string {
 		normalizedMessage.includes("invalid field value")
 	) {
 		let advice = "\n💡 [Troubleshooting Advice - Invalid Field Value]:";
+		advice += "\n  👉 Code-level immediate self-healing steps:";
 		advice +=
-			"\n  - Check data types: ensure numeric IDs are integers/strings as expected and booleans are passed correctly.";
+			"\n  - Select/List Fields: Pass internal numeric ID strings (e.g. { entity: '123' }) rather than display names (e.g. { entity: 'Acme Corp' }).";
 		advice +=
-			"\n  - For list/select fields, use internal IDs rather than display text labels.";
+			"\n  - Data Types: Check boolean/date/number formats against schema definitions using netsuite_get_record_definition.";
 		return advice;
 	}
 
@@ -135,9 +149,9 @@ function getActionableAdvice(code: string, message: string): string {
 		let advice = "\n💡 [Troubleshooting Advice - Concurrency]:";
 		advice += "\n  - You have exceeded NetSuite's concurrent request limit.";
 		advice +=
-			"\n  - Recommended: For multiple independent operations/queries, use `netsuite_batch_execute` to run them concurrently in parallel (up to 10 tasks, concurrency 5).";
+			"\n  👉 Code-level immediate self-healing steps:\n  - Recommended: Batch multiple independent operations into parallel execution:\n    netsuite_batch_execute({ tasks: [{ toolName: 'ns_runCustomSuiteQL', arguments: { sqlQuery: '...' } }] })";
 		advice +=
-			"\n  - Otherwise, reduce the frequency of your requests or add retries.";
+			"\n  - Otherwise, reduce request frequency or add exponential backoff.";
 		return advice;
 	}
 

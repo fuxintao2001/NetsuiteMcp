@@ -405,12 +405,14 @@ describe("MCP Handler Wires", () => {
 				(t: any) => t.name === "ns_getSuiteQLMetadata",
 			);
 
-			expect(suiteqlTool.description).toContain("MANDATORY SUITEQL PROTOCOL");
+			expect(suiteqlTool.description).toContain("Primary 1-turn tool");
 			expect(suiteqlTool.inputSchema.properties.sqlQuery.description).toContain(
-				"UNIVERSAL RULES",
+				"Explicit columns only",
 			);
 
-			expect(metaTool.description).toContain("Fast Table Discovery");
+			expect(metaTool.description).toContain(
+				"Inspect live NetSuite database table schema",
+			);
 			expect(metaTool.inputSchema.properties.keyword).toBeDefined();
 			expect(metaTool.inputSchema.properties.keyword.description).toContain(
 				"search keyword",
@@ -982,6 +984,32 @@ describe("MCP Handler Wires", () => {
 				expect(res.content[0].text).toContain("NetSuite Record Inspection");
 			});
 
+			it("should normalize type, tranid, and nested Arguments for netsuite_inspect_record", async () => {
+				const callFn = registeredHandlers.get("tools/call");
+				mockMCPTools.executeTool.mockResolvedValueOnce({
+					id: "9028600",
+					tranid: "IR-ZH-202609-000001",
+				});
+
+				const res = await callFn?.({
+					params: {
+						name: "netsuite_inspect_record",
+						arguments: {
+							Arguments: {
+								type: "itemreceipt",
+								tranid: "IR-ZH-202609-000001",
+							},
+						},
+					},
+				});
+
+				expect(mockMCPTools.executeTool).toHaveBeenCalledWith("ns_getRecord", {
+					recordType: "itemreceipt",
+					recordId: "IR-ZH-202609-000001",
+				});
+				expect(res.content[0].text).toContain("NetSuite Record Inspection");
+			});
+
 			it("should support format: compact_json and return clean structured JSON", async () => {
 				const callFn = registeredHandlers.get("tools/call");
 				mockMCPTools.executeTool.mockResolvedValueOnce({
@@ -1053,52 +1081,93 @@ describe("MCP Handler Wires", () => {
 				expect(parsed.sublists.item[0].rate).toBeUndefined(); // filtered by lineFields
 			});
 
-			it("should automatically resolve document number tranid for ns_getRecord", async () => {
+			it("should reject non-numeric document number tranid for ns_getRecord with actionable guidance", async () => {
 				const callFn = registeredHandlers.get("tools/call");
-				// 1st call: SuiteQL query to resolve tranid
-				mockMCPTools.executeTool.mockImplementationOnce(
-					(name: string, _args: any) => {
-						if (name === "ns_runCustomSuiteQL") {
-							return Promise.resolve({
-								data: [{ id: "9876", recordtype: "salesorder" }],
-							});
-						}
-						return Promise.resolve({});
-					},
-				);
-				// 2nd call: ns_getRecord with resolved internal ID
-				mockMCPTools.executeTool.mockImplementationOnce(
-					(name: string, args: any) => {
-						if (name === "ns_getRecord") {
-							return Promise.resolve({
-								id: args.recordId,
-								tranid: "SO9876",
-							});
-						}
-						return Promise.resolve({});
-					},
-				);
 
-				await callFn?.({
+				const res = (await callFn?.({
 					params: {
 						name: "ns_getRecord",
 						arguments: {
 							recordId: "SO9876",
 						},
 					},
+				})) as any;
+
+				expect(mockMCPTools.executeTool).not.toHaveBeenCalled();
+				expect(res.isError).toBe(true);
+				expect(res.content[0].text).toContain("Invalid Record ID");
+				expect(res.content[0].text).toContain("netsuite_inspect_record");
+			});
+
+			it("should reject empty or missing recordId for ns_getRecord without network call", async () => {
+				const callFn = registeredHandlers.get("tools/call");
+
+				const res = (await callFn?.({
+					params: {
+						name: "ns_getRecord",
+						arguments: {
+							recordType: "customer",
+							recordId: "",
+						},
+					},
+				})) as any;
+
+				expect(mockMCPTools.executeTool).not.toHaveBeenCalled();
+				expect(res.isError).toBe(true);
+				expect(res.content[0].text).toContain("Missing Record ID");
+			});
+
+			it("should allow negative numeric internal IDs for ns_getRecord", async () => {
+				const callFn = registeredHandlers.get("tools/call");
+				mockMCPTools.executeTool.mockResolvedValueOnce({
+					id: "-30",
+					recordType: "transaction",
 				});
 
-				expect(mockMCPTools.executeTool).toHaveBeenCalledWith(
-					"ns_runCustomSuiteQL",
-					{
-						sqlQuery: expect.stringContaining("WHERE tranid = 'SO9876'"),
+				const res = (await callFn?.({
+					params: {
+						name: "ns_getRecord",
+						arguments: {
+							recordType: "transaction",
+							recordId: "-30",
+						},
 					},
-				);
+				})) as any;
+
 				expect(mockMCPTools.executeTool).toHaveBeenCalledWith("ns_getRecord", {
-					recordId: "9876",
-					id: "9876",
-					recordType: "salesorder",
+					recordType: "transaction",
+					recordId: "-30",
+					id: "-30",
 				});
+				expect(res.isError).toBeFalsy();
+				expect(res.content[0].text).toContain('"-30"');
+			});
+
+			it("should preserve raw uncleaned JSON (with nulls and links) for ns_getRecord", async () => {
+				const callFn = registeredHandlers.get("tools/call");
+				const rawPayload = {
+					id: "12345",
+					memo: null,
+					emptyField: "",
+					links: [{ rel: "self", href: "https://example.com" }],
+				};
+				mockMCPTools.executeTool.mockResolvedValueOnce(rawPayload);
+
+				const res = (await callFn?.({
+					params: {
+						name: "ns_getRecord",
+						arguments: {
+							recordType: "salesorder",
+							recordId: "12345",
+						},
+					},
+				})) as any;
+
+				expect(res.isError).toBeFalsy();
+				const parsed = JSON.parse(res.content[0].text.split("\n\n")[0]);
+				expect(parsed.memo).toBeNull();
+				expect(parsed.emptyField).toBe("");
+				expect(parsed.links).toBeDefined();
 			});
 
 			it("should handle netsuite_get_system_notes successfully", async () => {
