@@ -5,7 +5,7 @@
 
 ---
 
-## 👑 1. Official Documentation Absolute Priority (官方权威文档最高效力)
+## 👑 1. Official Documentation Absolute Priority
 
 AI agents must unconditionally enforce a **Strict Zero Hallucination** policy:
 
@@ -32,19 +32,19 @@ AI agents must unconditionally enforce a **Strict Zero Hallucination** policy:
 
 ---
 
-## 🧼 2. Code Craftsmanship & Anti-Compatibility Bloat (代码重构与反伪兼容铁律)
+## 🧼 2. Code Craftsmanship & Anti-Compatibility Bloat
 
 When writing, debugging, or refactoring code (SuiteScript, TypeScript, JavaScript, SQL), AI agents must strictly adhere to the **Single Authoritative Implementation** principle:
 
-1. **Clean Replacement, Never Dual-Track (单一正解彻底替换，严禁双轨兼容)**:
+1. **Clean Replacement, Never Dual-Track**:
    - ❌ **PROHIBITED**: If an earlier implementation fails or throws errors, wrapping the new attempt in `try { newWay(); } catch (e) { oldWay(); }` to "support both ways".
    - ❌ **PROHIBITED**: Adding dual-branch sniffing `if (supportsNewWay) { ... } else { ... }` when the previous way was defective or obsolete.
    - ❌ **PROHIBITED**: Chaining speculative fallbacks due to unverified schemas (e.g., `rec.getValue('field_v2') || rec.getValue('field_v1')`).
    - ✅ **MANDATE**: Locate the root cause via official schema or documentation. Determine the single officially sanctioned correct approach, and execute a **100% clean, total replacement**.
-2. **Immediate Physical Dead-Code Elimination (彻底清除死代码)**:
+2. **Immediate Physical Dead-Code Elimination**:
    - When superseding an outdated implementation, immediately and physically delete obsolete functions, dead variables, deprecated arguments, and legacy logic.
    - NEVER leave dead code behind as comments or "just in case" fallbacks. Zero tolerance for defensive code bloat. Adhere strictly to the KISS principle.
-3. **Root Cause Resolution Over Defensive Masking (直面根因，拒绝防御掩盖)**:
+3. **Root Cause Resolution Over Defensive Masking**:
    - Errors signify invalid assumptions or schema mismatches. Confront errors directly, identify the exact defect (e.g., wrong field ID, API versioning, permission deficit), and fix it definitively at the source. Never mask unverified failures with defensive try-catch traps or silent fallback branching.
 4. **Current-State-Only Explanations (Zero Version Iteration Narrative)**:
    - ❌ **PROHIBITED**: Narrating code evolution history, migration trajectories, or past vs present comparisons (strictly prohibit narratives like "in the previous version it was X, now we upgraded to Y", "previously we used A, now refactored to B", "compared to earlier versions...").
@@ -53,7 +53,7 @@ When writing, debugging, or refactoring code (SuiteScript, TypeScript, JavaScrip
 
 ---
 
-## 📚 3. On-Demand Skills & Documentation Routing Matrix (技能与文档按需检索路由)
+## 📚 3. On-Demand Skills & Documentation Routing Matrix
 
 To ensure high-density reasoning without context bloat, deep domain knowledge is loaded on demand. The AI agent **MUST proactively read the corresponding skill or documentation** via `view_file`:
 
@@ -74,7 +74,7 @@ To ensure high-density reasoning without context bloat, deep domain knowledge is
 
 ---
 
-## 🚨 4. Dual-Path Routing & Execution Gates (双轨路由与执行门禁)
+## 🚨 4. Dual-Path Routing & Execution Gates
 
 1. **👑 Dual-Path Routing (Zero Unnecessary Reconnaissance)**:
    - ⚡ **Fast-Path (Standard Core Business — Direct 1-Turn Execution)**:
@@ -88,7 +88,7 @@ To ensure high-density reasoning without context bloat, deep domain knowledge is
 2. **SuiteQL Guardrails & On-Demand Patterns**:
    - Ensure all queries conform strictly to [SuiteQL Guardrails](file://{{PROJECT_PATH}}/.agents/rules/suiteql-guardrails.md) (No `SELECT *`, explicit `mainline = 'F'`, pagination via `FETCH FIRST N ROWS ONLY`, `ROWNUM <= N`, or Oracle-standard `OFFSET M ROWS FETCH NEXT N ROWS ONLY`, index driving filter).
    - Complex SuiteQL domain patterns (AR aging, GL journal impact, multi-location inventory, period close) must be retrieved on demand via `netsuite_get_query_template` or `netsuite://queries/golden-templates`.
-3. **Saved Search Avoidance Policy (SavedSearch 严格受限原则)**:
+3. **Saved Search Avoidance Policy**:
    - In the vast majority of scenarios, **DO NOT call SavedSearch tools (`ns_listSavedSearches`, `ns_runSavedSearch`)**. SuiteQL (`ns_runCustomSuiteQL`) is the authoritative and primary query mechanism.
    - Invoke Saved Search tools **ONLY** when strictly necessary:
      1. The user explicitly requests a specific Saved Search by name or internal ID.
@@ -105,7 +105,7 @@ To ensure high-density reasoning without context bloat, deep domain knowledge is
    - **Logs, Diagnostics & Audit**: `netsuite_get_script_logs` (script execution logs) ➔ `netsuite_get_system_notes` (record-level audit trail by ID or document number) ➔ `netsuite_get_error_summary` (structured error frequency & self-healing diagnostics).
    - **Cache Maintenance**: `netsuite_refresh_cache` (Force clear local & NetSuite session metadata cache when schema changes).
    - **Financial Reports**: `ns_runReport` (Only for standard NetSuite financial statement reports).
-   - **Saved Searches (`ns_runSavedSearch`, `ns_listSavedSearches`)**: ⚠️ **Strictly on-demand & prohibited by default (默认禁用)**. In the vast majority of cases, query data via `ns_runCustomSuiteQL`. Never call SavedSearch tools unless explicitly requested by the user or strictly necessary for pre-existing Saved Searches that cannot be queried via SuiteQL.
+   - **Saved Searches (`ns_runSavedSearch`, `ns_listSavedSearches`)**: ⚠️ **Strictly on-demand & prohibited by default**. In the vast majority of cases, query data via `ns_runCustomSuiteQL`. Never call SavedSearch tools unless explicitly requested by the user or strictly necessary for pre-existing Saved Searches that cannot be queried via SuiteQL.
    - **Record Mutations (Sandbox only)**: `netsuite_inspect_record` / `ns_getRecord` ➔ `ns_createRecord` / `ns_updateRecord`.
    - **Deployment & Links**: `netsuite_get_record_link` / `netsuite_suitecloud_upload`.
    - **🚫 Pruned & Prohibited Tools**: `ns_prompt_library_app`, `ns_selector_app`, `ns_report_filters_app` (interactive browser modals that cause headless agent deadlocks; strictly blocked).
@@ -114,7 +114,7 @@ To ensure high-density reasoning without context bloat, deep domain knowledge is
 2. **Concurrency & Batching (`netsuite_batch_execute`)**:
    - When executing multiple independent reads or checks (≥ 2 independent items), issue parallel tool calls or use `netsuite_batch_execute` in a single turn to eliminate serial latency.
 3. **File Deployment Confirmation Protocol (`netsuite_suitecloud_upload`)**:
-   - Before uploading code, display an interactive confirmation card via `ask_question` with ONLY the file's absolute path and choices: `接受` and `拒绝`.
+   - Before uploading code, display an interactive confirmation card via `ask_question` with ONLY the file's absolute path and choices: `Accept` and `Reject`.
    - Execute immediately upon acceptance; abort immediately upon rejection.
 4. **Observability & Telemetry**:
    - Every MCP tool call automatically records structured metrics (`tool`, `durationMs`, `isError`, `payloadChars`) in the server telemetry log.

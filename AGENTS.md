@@ -4,7 +4,7 @@
 > 
 > ⚠️ **Workspace Boundary**: This repository is a **Node.js TypeScript MCP Server**, NOT a NetSuite SuiteScript client project. Client SuiteScript/SDF workspace directives are defined in `workspace-agents/AGENTS.template.md` and provisioned via `npm run sync-agents`.
 
-**Tech Stack**: TypeScript (strict mode) · Node.js ≥ 18 (ESM) · Stdio Transport · OAuth 2.0 PKCE · Redis 分布式缓存与 Redlock 分布式锁 · Biome · Vitest
+**Tech Stack**: TypeScript (strict mode) · Node.js ≥ 18 (ESM) · Stdio Transport · OAuth 2.0 PKCE · Redis Distributed Cache & Redlock Distributed Locking · Biome · Vitest
 
 ---
 
@@ -97,19 +97,19 @@ NetsuiteMcp/
 
 ---
 
-## 🧼 3. Code Craftsmanship & Anti-Compatibility Bloat (代码重构与反伪兼容铁律)
+## 🧼 3. Code Craftsmanship & Anti-Compatibility Bloat
 
 When writing, refactoring, or reviewing code (TypeScript, JavaScript, SQL), AI agents must strictly adhere to the **Single Authoritative Implementation** principle:
 
-1. **Clean Replacement, Never Dual-Track (单一正解彻底替换，严禁双轨兼容)**:
+1. **Clean Replacement, Never Dual-Track**:
    - ❌ **PROHIBITED**: Wrapping defective or outdated implementations in `try { newWay(); } catch (e) { oldWay(); }` to "support both ways".
    - ❌ **PROHIBITED**: Adding dual-branch sniffing `if (supportsNewWay) { ... } else { ... }` when the previous way was defective or obsolete.
    - ❌ **PROHIBITED**: Chaining speculative fallbacks due to unverified schemas (e.g. `val = newProp ?? oldProp`).
    - ✅ **MANDATE**: Identify the single officially sanctioned correct approach, and execute a **100% clean, total replacement**.
-2. **Immediate Physical Dead-Code Elimination (彻底清除死代码)**:
+2. **Immediate Physical Dead-Code Elimination**:
    - When superseding an outdated implementation, immediately and physically delete obsolete functions, dead variables, deprecated arguments, and legacy logic.
    - NEVER leave dead code behind as comments or "just in case" fallbacks. Zero tolerance for defensive code bloat. Adhere strictly to the KISS principle.
-3. **Root Cause Resolution Over Defensive Masking (直面根因，拒绝防御掩盖)**:
+3. **Root Cause Resolution Over Defensive Masking**:
    - Errors signify invalid assumptions, type defects, or schema mismatches. Confront errors directly, identify the exact defect, and fix it definitively at the source. Never mask unverified failures with defensive try-catch traps or silent fallback branching.
 4. **Current-State-Only Explanations (Zero Version Iteration Narrative)**:
    - ❌ **PROHIBITED**: Narrating code evolution history, migration trajectories, or past vs present comparisons (strictly prohibit narratives like "in the previous version it was X, now we upgraded to Y", "previously we used A, now refactored to B", "compared to earlier versions...").
@@ -118,7 +118,7 @@ When writing, refactoring, or reviewing code (TypeScript, JavaScript, SQL), AI a
 
 ---
 
-## 👑 4. MCP Server Core Engineering Invariants (核心工程铁律)
+## 👑 4. MCP Server Core Engineering Invariants
 
 When developing tools, handlers, and utilities in this codebase, enforce the following core invariants:
 

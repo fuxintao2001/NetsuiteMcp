@@ -12,7 +12,7 @@
 ## 2. Code Deployment Card Protocol
 
 - When calling `netsuite_suitecloud_upload`:
-  - Must present an interactive card via `ask_question` with only the file's absolute path and choices `接受` / `拒绝`.
+  - Must present an interactive card via `ask_question` with only the file's absolute path and choices `Accept` / `Reject`.
   - In Production, requires `allowProduction: true` to bypass server-side write guard.
   - Pre-flight security hooks (`.agents/hooks.json` -> `scripts/pre-upload-check.js`) will verify syntax and block sensitive credentials.
 

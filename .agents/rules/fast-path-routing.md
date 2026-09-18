@@ -15,7 +15,7 @@
    - **Preferred**: Call `netsuite_schema` (unified 1-turn auto-routing) for schema discovery.
    - **Alternatively**: Call `ns_getSuiteQLMetadata` (for SuiteQL tables) or `netsuite_get_record_definition` (for SuiteScript 2.1 standard record scripts).
 
-3. **🚫 Saved Search Non-Invocation Policy (严禁默认调用 SavedSearch)**:
+3. **🚫 Saved Search Non-Invocation Policy**:
    - In the vast majority of scenarios, **DO NOT call SavedSearch tools (`ns_listSavedSearches`, `ns_runSavedSearch`)**.
    - Data querying should always be performed via SuiteQL (`ns_runCustomSuiteQL`).
    - Only call Saved Search tools if explicitly instructed by the user or if a complex metric is exclusively available in an existing Saved Search that cannot be replicated in SuiteQL.
