@@ -72,10 +72,13 @@ async function main() {
 			console.error(
 				"\n🔄 [Antigravity Hook] 检测到 workspace-agents 变动，自动同步并推送到各环境远端...",
 			);
-			execSync("node scripts/sync-agents.js --push", {
+			const syncOutput = execSync("node scripts/sync-agents.js --push", {
 				cwd: projectRoot,
-				stdio: "inherit",
+				encoding: "utf-8",
 			});
+			if (syncOutput) {
+				process.stderr.write(syncOutput);
+			}
 		}
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
