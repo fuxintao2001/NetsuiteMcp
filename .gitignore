@@ -56,3 +56,7 @@ coverage/
 
 # Temporary SDK clone
 temp-sdk/
+
+# Local agent hook symlinks
+.agents/scripts
+

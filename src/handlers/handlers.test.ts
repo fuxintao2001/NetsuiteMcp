@@ -951,7 +951,7 @@ describe("MCP Handler Wires", () => {
 				expect(res.content[0].text).toContain("transaction_lines");
 			});
 
-			it("should handle netsuite_inspect_record successfully", async () => {
+			it("should handle netsuite_inspect_record successfully with full line details by default", async () => {
 				const callFn = registeredHandlers.get("tools/call");
 				mockMCPTools.executeTool.mockResolvedValueOnce({
 					id: "12345",
@@ -974,7 +974,8 @@ describe("MCP Handler Wires", () => {
 				});
 				expect(res.content[0].text).toContain("NetSuite Record Inspection");
 				expect(res.content[0].text).toContain("custbody_test_flag");
-				expect(res.content[0].text).toContain("Sublists & Lines Summary");
+				expect(res.content[0].text).toContain("Sublists & Line Details");
+				expect(res.content[0].text).toContain("custcol_test_col");
 			});
 
 			it("should compact unchecked false flags into compact inline lists", async () => {
@@ -1056,7 +1057,7 @@ describe("MCP Handler Wires", () => {
 				expect(res.content[0].text).toContain("NetSuite Record Inspection");
 			});
 
-			it("should support format: compact_json and return clean structured JSON", async () => {
+			it("should support format: compact_json and return full line items without omission by default", async () => {
 				const callFn = registeredHandlers.get("tools/call");
 				mockMCPTools.executeTool.mockResolvedValueOnce({
 					id: "12345",
@@ -1088,10 +1089,40 @@ describe("MCP Handler Wires", () => {
 				expect(parsed.systemFields.tranid).toBe("SO1002");
 				expect(parsed.systemFields.emptyField).toBeUndefined();
 				expect(parsed.customFields.custbody_order_type).toBe("online");
+				expect(parsed.sublists.item).toHaveLength(2);
+				expect(parsed.sublists.item[0].item).toBe("100");
+				expect(parsed.sublists.item[1].item).toBe("101");
+			});
+
+			it("should support linesMode: summary when explicitly requested", async () => {
+				const callFn = registeredHandlers.get("tools/call");
+				mockMCPTools.executeTool.mockResolvedValueOnce({
+					id: "12345",
+					tranid: "SO1002",
+					item: [
+						{ item: "100", quantity: 2 },
+						{ item: "101", quantity: 1 },
+					],
+				});
+
+				const res = await callFn?.({
+					params: {
+						name: "netsuite_inspect_record",
+						arguments: {
+							recordType: "salesorder",
+							recordId: "12345",
+							format: "compact_json",
+							linesMode: "summary",
+						},
+					},
+				});
+
+				const parsed = JSON.parse(res.content[0].text);
+				expect(parsed.sublists).toBeUndefined();
 				expect(parsed.sublistsSummary.item.count).toBe(2);
 			});
 
-			it("should support linesMode: all and maxLines to inspect detailed line item rows", async () => {
+			it("should support maxLines and lineFields when specified", async () => {
 				const callFn = registeredHandlers.get("tools/call");
 				mockMCPTools.executeTool.mockResolvedValueOnce({
 					id: "12345",
@@ -1110,7 +1141,6 @@ describe("MCP Handler Wires", () => {
 							recordType: "salesorder",
 							recordId: "12345",
 							format: "compact_json",
-							linesMode: "all",
 							maxLines: 2,
 							lineFields: ["item", "quantity", "amount"],
 						},

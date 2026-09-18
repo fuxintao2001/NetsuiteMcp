@@ -165,7 +165,7 @@ function enhanceToolDescriptions(
 
 		if (t.name === "ns_getRecord") {
 			enhanced.description =
-				"Retrieve NetSuite record JSON by internal numeric ID. Returns cleaned payload with empty fields pruned. For inspecting transactions by document number or viewing line item summaries, prefer netsuite_inspect_record.";
+				"Retrieve NetSuite record JSON by internal numeric ID. Returns cleaned payload with empty fields pruned. For inspecting transactions by document number or viewing populated fields and line item details, prefer netsuite_inspect_record.";
 			return enhanced;
 		}
 

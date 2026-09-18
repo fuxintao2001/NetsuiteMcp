@@ -273,7 +273,11 @@ export async function handleInspectRecord(
 
 					if (linesMode === "all") {
 						const projectedRows: Array<Record<string, unknown>> = [];
-						for (const item of items.slice(0, maxLines)) {
+						const targetItems =
+							typeof maxLines === "number" && maxLines > 0
+								? items.slice(0, maxLines)
+								: items;
+						for (const item of targetItems) {
 							if (typeof item !== "object" || item === null) continue;
 							const itemObj = item as Record<string, unknown>;
 							const cleanedRow: Record<string, unknown> = {};
@@ -369,10 +373,20 @@ export async function handleInspectRecord(
 		// Format sublists overview or detailed rows
 		if (shouldIncludeLines && Object.keys(rawSublists).length > 0) {
 			if (linesMode === "all") {
-				md += `\n### 📦 Sublists & Line Details (up to ${maxLines} rows/list)\n`;
+				const headerSuffix =
+					typeof maxLines === "number" && maxLines > 0
+						? ` (up to ${maxLines} rows/list)`
+						: "";
+				md += `\n### 📦 Sublists & Line Details${headerSuffix}\n`;
 				for (const [sublistName, rows] of Object.entries(sublistsDetail)) {
 					const totalCount = sublistsSummary[sublistName]?.count ?? rows.length;
-					md += `\n#### Sublist: \`${sublistName}\` (Showing ${rows.length} of ${totalCount} rows)\n`;
+					const countSuffix =
+						typeof maxLines === "number" &&
+						maxLines > 0 &&
+						rows.length < totalCount
+							? `Showing ${rows.length} of ${totalCount} rows`
+							: `${rows.length} rows`;
+					md += `\n#### Sublist: \`${sublistName}\` (${countSuffix})\n`;
 					if (rows.length === 0) {
 						md += `*(Empty sublist)*\n`;
 					} else {

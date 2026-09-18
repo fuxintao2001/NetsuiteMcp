@@ -162,21 +162,19 @@ export const InspectRecordArgsSchema = z.object({
 			"Output format: 'markdown' for human-readable structured tables (default), or 'compact_json' for clean, noise-free, machine-readable JSON.",
 		),
 	linesMode: z
-		.enum(["summary", "all", "none"])
+		.enum(["all", "summary", "none"])
 		.optional()
-		.default("summary")
+		.default("all")
 		.describe(
-			"Line items / sublists detail mode: 'summary' (row counts & 1st-row sample keys, default), 'all' (inspect detailed line item rows up to maxLines), or 'none' (omit sublists entirely).",
+			"Line items / sublists detail mode: 'all' (inspect detailed line item rows without omission, default), 'summary' (row counts & 1st-row sample keys), or 'none' (omit sublists entirely).",
 		),
 	maxLines: z
 		.number()
 		.int()
 		.positive()
-		.max(50)
 		.optional()
-		.default(5)
 		.describe(
-			"Maximum number of line item rows to include per sublist when linesMode is 'all' (default: 5, max: 50). Prevents context token explosion.",
+			"Optional maximum number of line item rows to include per sublist when linesMode is 'all'. If omitted, all line items are returned without truncation.",
 		),
 	lineFields: z
 		.array(z.string().trim())
@@ -568,14 +566,14 @@ export const INSPECT_RECORD_TOOL = {
 			},
 			linesMode: {
 				type: "string",
-				enum: ["summary", "all", "none"],
+				enum: ["all", "summary", "none"],
 				description:
-					"Line items / sublists detail mode: 'summary' (row counts & 1st-row sample keys, default), 'all' (inspect detailed line item rows up to maxLines), or 'none' (omit sublists).",
+					"Line items / sublists detail mode: 'all' (inspect detailed line item rows without omission, default), 'summary' (row counts & 1st-row sample keys), or 'none' (omit sublists entirely).",
 			},
 			maxLines: {
 				type: "integer",
 				description:
-					"Maximum number of line item rows to include per sublist when linesMode is 'all' (default: 5, max: 50).",
+					"Optional maximum number of line item rows to include per sublist when linesMode is 'all'. If omitted, all line items are returned without truncation.",
 			},
 			lineFields: {
 				type: "array",
