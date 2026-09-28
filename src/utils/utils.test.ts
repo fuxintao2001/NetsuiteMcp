@@ -1,8 +1,10 @@
+import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getKnownClientId, SERVER_NAME } from "./constants.js";
 import {
 	buildEnvSuffix,
 	formatNetSuiteAccountHost,
+	getSkillsDir,
 	isSandboxAccount,
 } from "./environment.js";
 import { parseEnv } from "./envLoader.js";
@@ -129,6 +131,38 @@ SPACED = trimmed
 				expect(buildEnvSuffix("123456")).toBe(
 					" [Account: 123456, Env: Production]",
 				);
+			});
+		});
+
+		describe("getSkillsDir", () => {
+			const origEnv = process.env.NETSUITE_SKILLS_PATH;
+
+			afterEach(() => {
+				if (origEnv !== undefined) {
+					process.env.NETSUITE_SKILLS_PATH = origEnv;
+				} else {
+					delete process.env.NETSUITE_SKILLS_PATH;
+				}
+			});
+
+			it("should prioritize NETSUITE_SKILLS_PATH if set", () => {
+				process.env.NETSUITE_SKILLS_PATH = "/custom/test/skills";
+				expect(getSkillsDir()).toBe("/custom/test/skills");
+				expect(getSkillsDir("/some/project")).toBe("/custom/test/skills");
+			});
+
+			it("should return projectRoot/skills in test environment when projectRoot is provided", () => {
+				delete process.env.NETSUITE_SKILLS_PATH;
+				expect(getSkillsDir("/my/project")).toBe(
+					path.join("/my/project", "skills"),
+				);
+			});
+
+			it("should return global path or projectRoot when NETSUITE_SKILLS_PATH is not set", () => {
+				delete process.env.NETSUITE_SKILLS_PATH;
+				const skillsDir = getSkillsDir();
+				expect(skillsDir).toBeDefined();
+				expect(typeof skillsDir).toBe("string");
 			});
 		});
 	});

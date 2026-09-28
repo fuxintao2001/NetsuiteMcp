@@ -94,9 +94,11 @@ async function discoverAccounts(): Promise<AccountConfig[]> {
 				let isAuthenticated = false;
 				let tokenExpiresIn = 0;
 
+				let hasSessionFile = false;
 				try {
 					const content = await fs.readFile(sessionFile, "utf-8");
 					const session = JSON.parse(content);
+					hasSessionFile = true;
 					if (session?.config?.accountId) {
 						storedAccId = session.config.accountId;
 					}
@@ -126,6 +128,11 @@ async function discoverAccounts(): Promise<AccountConfig[]> {
 				}
 
 				const existing = accounts.get(normKey);
+				// If no session file exists and this account wasn't in workspaces.json, skip
+				if (!hasSessionFile && !existing) {
+					continue;
+				}
+
 				const clientId =
 					storedClientId ||
 					getKnownClientId(storedAccId) ||
@@ -137,10 +144,23 @@ async function discoverAccounts(): Promise<AccountConfig[]> {
 					DEFAULT_CALLBACK_PORTS[storedAccId] ||
 					8080;
 
+				// If this dir has no session.json but existing already has a valid session file path, don't overwrite sessionPath
+				let targetSessionPath = hasSessionFile
+					? sessionDir
+					: existing?.sessionPath || sessionDir;
+
+				// If existing already has a session in .gemini/antigravity/sessions, do not overwrite with .config
+				if (
+					existing?.sessionPath?.includes(".gemini") &&
+					!sessionDir.includes(".gemini")
+				) {
+					targetSessionPath = existing.sessionPath;
+				}
+
 				accounts.set(normKey, {
 					accountId: existing?.accountId || storedAccId,
 					clientId,
-					sessionPath: sessionDir,
+					sessionPath: targetSessionPath,
 					callbackPort,
 					authenticated: isAuthenticated,
 					tokenExpiresIn,
@@ -173,10 +193,18 @@ async function main() {
 	}
 
 	if (targetFilter.length > 0) {
-		allAccounts = allAccounts.filter((a) => {
+		const exactMatches = allAccounts.filter((a) => {
 			const norm = a.accountId.toLowerCase().replace(/_/g, "-");
-			return targetFilter.some((tf) => norm.includes(tf));
+			return targetFilter.some((tf) => norm === tf);
 		});
+		if (exactMatches.length > 0) {
+			allAccounts = exactMatches;
+		} else {
+			allAccounts = allAccounts.filter((a) => {
+				const norm = a.accountId.toLowerCase().replace(/_/g, "-");
+				return targetFilter.some((tf) => norm.includes(tf));
+			});
+		}
 		if (allAccounts.length === 0) {
 			console.error(
 				`❌ 未找到匹配指定筛选条件的账号: ${targetFilter.join(", ")}`,
@@ -190,13 +218,27 @@ async function main() {
 		const statusText = acc.authenticated
 			? `🟢 已授权 (Token 剩余 ${acc.tokenExpiresIn}s)`
 			: `🔴 未授权 / 已掉线`;
-		console.log(`   • [${acc.accountId.toUpperCase()}] ${statusText}`);
+		console.log(
+			`   • [${acc.accountId.toUpperCase()}] ${statusText} | 端口: ${acc.callbackPort} | 路径: ${acc.sessionPath}`,
+		);
 	}
 	console.log("");
+
+	const isDryRun =
+		args.includes("--dry-run") ||
+		args.includes("-d") ||
+		args.includes("--status");
 
 	const accountsToAuth = forceAll
 		? allAccounts
 		: allAccounts.filter((a) => !a.authenticated);
+
+	if (isDryRun) {
+		console.log(
+			`🔍 检查完毕：共 ${allAccounts.length} 个账号，${accountsToAuth.length} 个待授权。\n`,
+		);
+		return;
+	}
 
 	if (accountsToAuth.length === 0) {
 		console.log("✨ 所有账号均已处于有效授权状态！无需重复登录。");

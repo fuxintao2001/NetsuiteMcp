@@ -5,7 +5,7 @@ describe("RecordsReferenceService", () => {
 	it("should list standard record types", () => {
 		const types = recordsReferenceService.listRecordTypes();
 		expect(Array.isArray(types)).toBe(true);
-		// If records.json exists in ~/.gemini/config/skills/..., it has 272 types
+		// If records.json exists via getSkillsDir(), it has 272 types
 		if (types.length > 0) {
 			expect(types.length).toBeGreaterThanOrEqual(200);
 			expect(types).toContain("salesorder");

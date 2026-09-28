@@ -58,19 +58,20 @@ export class SessionStorage {
 	 * Save session data to file
 	 */
 	async save(data: SessionData): Promise<void> {
+		const tempFile = `${this.sessionFile}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2, 8)}.tmp`;
 		try {
 			await fs.mkdir(this.storagePath, { recursive: true });
 			// 限制父目录权限为 0o700 (所有者读写执行)
 			await fs.chmod(this.storagePath, 0o700).catch(() => {});
 
-			const tempFile = `${this.sessionFile}.tmp`;
 			// 以明文 JSON 持久化 session，保证本地 MCP 服务重启后仍可复用 refresh token。
 			await fs.writeFile(tempFile, JSON.stringify(data, null, 2), {
 				mode: 0o600,
 			});
-			await fs.chmod(tempFile, 0o600);
+			await fs.chmod(tempFile, 0o600).catch(() => {});
 			await fs.rename(tempFile, this.sessionFile);
 		} catch (error: unknown) {
+			await fs.unlink(tempFile).catch(() => {});
 			const message = error instanceof Error ? error.message : String(error);
 			console.error("❌ Failed to save session:", message);
 			throw error;

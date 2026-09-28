@@ -84,6 +84,15 @@ export function getDefaultSessionsDir(): string {
 	if (process.env.NETSUITE_SESSIONS_DIR) {
 		return path.resolve(process.env.NETSUITE_SESSIONS_DIR);
 	}
+	const geminiSessions = path.join(
+		os.homedir(),
+		".gemini",
+		"antigravity",
+		"sessions",
+	);
+	if (fs.existsSync(geminiSessions)) {
+		return geminiSessions;
+	}
 	return path.join(getDefaultConfigDir(), "sessions");
 }
 

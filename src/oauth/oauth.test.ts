@@ -106,6 +106,32 @@ describe("OAuth Module", () => {
 			const backupFile = files.find((f) => f.startsWith("session.corrupted."));
 			expect(backupFile).toBeDefined();
 		});
+
+		it("should handle concurrent saves safely without race condition collisions", async () => {
+			const saves = Array.from({ length: 10 }, (_, i) =>
+				storage.save({
+					authenticated: true,
+					state: `state-${i}`,
+					tokens: {
+						access_token: `token-${i}`,
+						refresh_token: `refresh-${i}`,
+						expires_in: 3600,
+						expires_at: Date.now() + 3600000,
+						accountId: "123456",
+						clientId: "client-123",
+					},
+				}),
+			);
+			await expect(Promise.all(saves)).resolves.not.toThrow();
+			const loaded = await storage.load();
+			expect(loaded?.authenticated).toBe(true);
+			expect(loaded?.state).toBeDefined();
+
+			// Ensure all temporary files were renamed and none linger
+			const remainingFiles = await fs.readdir(tempDir);
+			const tmpFiles = remainingFiles.filter((f) => f.endsWith(".tmp"));
+			expect(tmpFiles).toHaveLength(0);
+		});
 	});
 
 	describe("TokenExchange", () => {

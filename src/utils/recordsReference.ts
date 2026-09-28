@@ -1,6 +1,6 @@
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
+import { getSkillsDir } from "./environment.js";
 
 export interface RecordFieldMeta {
 	internalId: string;
@@ -26,10 +26,7 @@ class RecordsReferenceService {
 
 	private getRecordsJsonPath(): string {
 		return path.join(
-			os.homedir(),
-			".gemini",
-			"config",
-			"skills",
+			getSkillsDir(),
 			"netsuite-suitescript-records-reference",
 			"references",
 			"records.json",

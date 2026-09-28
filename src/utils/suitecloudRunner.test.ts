@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { suitecloudRunnerService } from "./suitecloudRunner.js";
@@ -234,5 +235,65 @@ describe("SuiteCloudRunnerService", () => {
 			{ targetAccountId: "9260916_SB1", paths: ["/SuiteScripts/test.js"] },
 		);
 		expect(tipsContention[0]).toContain("系统临时资源争用");
+	});
+
+	it("should find project from workspaces config or fallback without ReferenceError when projectPath is omitted", () => {
+		// Calling findSdfProjectRoot with undefined startPath triggers findProjectFromWorkspacesConfig
+		// and findProjectFromSiblingDirectories which rely on __dirname in ESM.
+		expect(() => {
+			suitecloudRunnerService.findSdfProjectRoot(
+				undefined,
+				"nonexistent-test-account-123",
+			);
+		}).not.toThrow();
+
+		const tmpBase = fs.realpathSync(
+			fs.mkdtempSync(path.join(os.tmpdir(), "sdf-ws-test-")),
+		);
+		const origCwd = process.cwd();
+
+		try {
+			// 1. Test finding project from workspaces.json
+			const wsProjectDir = path.join(tmpBase, "my-sdf-project");
+			const wsConfigDir = path.join(tmpBase, "workspace-agents");
+			fs.mkdirSync(wsProjectDir, { recursive: true });
+			fs.mkdirSync(wsConfigDir, { recursive: true });
+			fs.writeFileSync(path.join(wsProjectDir, "project.json"), "{}");
+			fs.writeFileSync(
+				path.join(wsConfigDir, "workspaces.json"),
+				JSON.stringify({
+					workspaces: [
+						{
+							accountId: "999999-sb1",
+							projectPath: wsProjectDir,
+						},
+					],
+				}),
+			);
+
+			process.chdir(tmpBase);
+			const foundFromWs = suitecloudRunnerService.findSdfProjectRoot(
+				undefined,
+				"999999_SB1",
+			);
+			expect(foundFromWs).toBe(wsProjectDir);
+
+			// 2. Test fallback to sibling directory when not in workspaces.json
+			const subDir = path.join(tmpBase, "sub-runner");
+			const siblingProjectDir = path.join(tmpBase, "888888-sb1");
+			fs.mkdirSync(subDir, { recursive: true });
+			fs.mkdirSync(siblingProjectDir, { recursive: true });
+			fs.writeFileSync(path.join(siblingProjectDir, "project.json"), "{}");
+
+			process.chdir(subDir);
+			const foundSibling = suitecloudRunnerService.findSdfProjectRoot(
+				undefined,
+				"888888_SB1",
+			);
+			expect(foundSibling).toBe(siblingProjectDir);
+		} finally {
+			process.chdir(origCwd);
+			fs.rmSync(tmpBase, { recursive: true, force: true });
+		}
 	});
 });
