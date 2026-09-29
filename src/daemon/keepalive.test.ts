@@ -89,4 +89,41 @@ describe("Token Keepalive Daemon", () => {
 
 		consoleErrorSpy.mockRestore();
 	});
+
+	it("should skip session if marked unrecoverable", async () => {
+		const accountDir = path.join(testSessionRoot, "333333");
+		await fs.mkdir(accountDir, { recursive: true });
+
+		const sessionData = {
+			config: {
+				accountId: "333333",
+				clientId: "client_333",
+				redirectUri: "http://localhost:8080/callback",
+			},
+			tokens: {
+				access_token: "acc_333",
+				refresh_token: "ref_333",
+				expires_in: 3600,
+				expires_at: Date.now() - 10000,
+				accountId: "333333",
+				clientId: "client_333",
+			},
+			authenticated: false,
+			unrecoverable: true,
+		};
+
+		const sessionFile = path.join(accountDir, "session.json");
+		await fs.writeFile(sessionFile, JSON.stringify(sessionData));
+
+		const consoleErrorSpy = vi
+			.spyOn(console, "error")
+			.mockImplementation(() => {});
+		await runKeepAlive();
+
+		expect(consoleErrorSpy).toHaveBeenCalledWith(
+			expect.stringContaining("Skipped (session is unrecoverable"),
+		);
+
+		consoleErrorSpy.mockRestore();
+	});
 });

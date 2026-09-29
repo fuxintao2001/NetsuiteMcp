@@ -300,13 +300,28 @@ export function validateSuiteQL(sqlQuery: string): SuiteQLValidationResult {
 
 	// --- Slow Query Anti-Pattern Checks & Smart Routing Guidance ---
 
-	// Anti-Pattern 1: Prohibited SystemNote JOIN (causes catastrophic timeouts on high-volume datasets)
-	if (tables.includes("systemnote") && tables.length > 1) {
-		return {
-			valid: false,
-			reason:
-				"Prohibited 'JOIN SystemNote': Joining 'SystemNote' directly with other tables causes severe query timeouts due to massive table volume. Please execute a standalone query against SystemNote with tight filters on 'recordid' and a narrow date range instead.",
-		};
+	// Anti-Pattern 1: Prohibited SystemNote JOIN or Unindexed Full-Table Scan (SAFE Guide Pitfall 11)
+	if (tables.includes("systemnote")) {
+		if (tables.length > 1) {
+			return {
+				valid: false,
+				reason:
+					"Prohibited 'JOIN SystemNote': Joining 'SystemNote' directly with other tables causes severe query timeouts due to massive table volume. Please execute a standalone query against SystemNote with tight filters on 'recordid' and a narrow date range instead.",
+			};
+		}
+		// Standalone SystemNote query must filter by recordid in WHERE clause to avoid catastrophic full-table scan (>60s timeout)
+		const whereMatch =
+			/\bWHERE\s+([\s\S]+?)(?:\s+(?:GROUP\s+BY|ORDER\s+BY|FETCH\s+FIRST)|;|$)/i.exec(
+				maskedSql,
+			);
+		const whereClause = whereMatch?.[1] || "";
+		if (!/\brecordid\b/i.test(whereClause)) {
+			return {
+				valid: false,
+				reason:
+					"Unindexed 'systemnote' scan: NetSuite 'systemnote' contains tens of millions of audit log records across the entire tenant. Querying 'systemnote' without filtering by 'recordid' causes catastrophic full-table scan timeouts (>60s). Please include a specific `recordid = ...` filter, or use the specialized tool `netsuite_get_system_notes`.",
+			};
+		}
 	}
 
 	// Anti-Pattern 2: 'createdfrom' field location on transaction header
@@ -502,6 +517,24 @@ export function validateSuiteQL(sqlQuery: string): SuiteQLValidationResult {
 		}
 	}
 
+	// Anti-Pattern 8: Function conversion in JOIN ON clause against transactionline/transaction
+	// (SAFE Guide Principle 3: Wrapping join keys in functions invalidates Oracle B-tree index lookup and forces 60s full table scans)
+	if (tables.includes("transactionline") || tables.includes("transaction")) {
+		const onClauseMatches = maskedSql.matchAll(
+			/\bJOIN\s+(?:transactionline|transaction)\b[\s\S]*?\bON\b([\s\S]*?)(?=\b(?:WHERE|JOIN|LEFT|RIGHT|INNER|FULL|CROSS|GROUP|ORDER|FETCH|UNION)\b|$)/gi,
+		);
+		for (const m of onClauseMatches) {
+			const onClause = m[1] || "";
+			if (/\b(?:TO_NUMBER|TO_CHAR)\s*\(/i.test(onClause)) {
+				return {
+					valid: false,
+					reason:
+						"Performance hazard: Function conversion (e.g. TO_NUMBER/TO_CHAR) detected in JOIN ON clause against 'transactionline' or 'transaction'. In NetSuite SuiteQL, wrapping join keys in functions invalidates Oracle B-tree index lookup and forces full-table nested loop scans, leading to 60s timeouts or socket hang up. Please remove functions from the JOIN ON clause, pre-cast/filter in an inner query or CTE, or join on native numeric keys.",
+				};
+			}
+		}
+	}
+
 	return { valid: true, tables, hasPagination };
 }
 
@@ -661,7 +694,80 @@ export function diagnoseSuiteQLError(
 		};
 	}
 
-	// 5. Missing mainline filter
+	// 5. Statement execution timeout or socket hang up
+	if (
+		/timeout of \d+ms exceeded/i.test(err) ||
+		/timed? ?out/i.test(err) ||
+		/socket hang up/i.test(err) ||
+		/ECONNABORTED/i.test(err)
+	) {
+		const hasFunctionInJoin =
+			sql &&
+			/\bON\b[\s\S]*?\b(?:TO_NUMBER|TO_CHAR|UPPER|LOWER)\s*\(/i.test(sql);
+		const hasSystemNote = sql && /\bsystemnote\b/i.test(sql);
+
+		let specificRootCause =
+			"NetSuite database statement execution exceeded the 60-second limit and was terminated.";
+		let specificGuidance =
+			"Add selective indexed filters in WHERE clause (e.g. narrow 'trandate' range, 'type', 'id', 'entity').";
+
+		if (hasFunctionInJoin) {
+			specificRootCause =
+				"Type conversion function detected in JOIN ON clause (e.g. TO_NUMBER/TO_CHAR). This invalidates B-tree indexes on large tables (like transactionline) and forces massive full table scans resulting in 60s timeout or socket hang up.";
+			specificGuidance =
+				"Eliminate type-casting functions in JOIN ON clauses. Pre-cast or filter IDs in an inner query/CTE, or ensure matching numeric foreign key columns.";
+		} else if (hasSystemNote) {
+			specificRootCause =
+				"Querying 'systemnote' without indexed filters or with broad range causes full-table scans across millions of audit records.";
+			specificGuidance =
+				"Filter 'systemnote' strictly by 'recordid' and a narrow date range, or use the dedicated 'netsuite_get_system_notes' tool.";
+		}
+
+		return {
+			isDiagnosed: true,
+			summary:
+				"Statement Execution Timeout (60s Limit Exceeded) / Connection Severed",
+			rootCause: specificRootCause,
+			officialGuidance: specificGuidance,
+			suggestedFix:
+				"Filter by indexed fields (id, tranid, type, trandate >= TO_DATE(...)), eliminate functions in JOIN ON clauses, and enforce tl.mainline = 'T' or 'F'.",
+			selfHealingAction:
+				"Optimize query: 1. Add selective indexed WHERE filters. 2. Remove functions in JOIN ON clauses. 3. Avoid scanning broad tables like systemnote without recordid.",
+		};
+	}
+
+	// 6. Function conversion in JOIN ON clause
+	if (/Function conversion .*? detected in JOIN ON clause/i.test(err)) {
+		return {
+			isDiagnosed: true,
+			summary: "Function Conversion in JOIN ON Clause (Performance Hazard)",
+			rootCause:
+				"Using functions like TO_NUMBER() or TO_CHAR() in JOIN ON conditions invalidates B-tree indexes on transactionline/transaction.",
+			officialGuidance:
+				"Join on clean numeric IDs directly or use a CTE/subquery to cast and pre-filter before joining.",
+			suggestedFix:
+				"WITH pre_filtered AS (SELECT TO_NUMBER(custcol_link) AS linked_id FROM ...) SELECT ... FROM pre_filtered p JOIN transactionline tl ON tl.createdfrom = p.linked_id",
+			selfHealingAction: "Remove TO_NUMBER/TO_CHAR from the JOIN ON condition.",
+		};
+	}
+
+	// 7. Unindexed SystemNote scan
+	if (/Unindexed 'systemnote' scan/i.test(err)) {
+		return {
+			isDiagnosed: true,
+			summary: "Unindexed Full-Table Scan on SystemNote",
+			rootCause:
+				"NetSuite 'systemnote' contains tens of millions of audit log records across the entire tenant. Querying without 'recordid' causes catastrophic 60s full-table scan timeouts.",
+			officialGuidance:
+				"Always filter systemnote by 'recordid' (e.g. `WHERE recordid = 12345`) or use the specialized 'netsuite_get_system_notes' tool.",
+			suggestedFix:
+				"SELECT recordid, field, oldvalue, newvalue, date, BUILTIN.DF(name) AS author FROM systemnote WHERE recordtypeid = -30 AND recordid = :id AND date >= TO_DATE('YYYY-MM-DD', 'YYYY-MM-DD')",
+			selfHealingAction:
+				"Add `recordid = <internal_id>` to the WHERE clause, or call `netsuite_get_system_notes` directly.",
+		};
+	}
+
+	// 8. Missing mainline filter
 	if (
 		/Missing 'mainline' filter/i.test(err) ||
 		(sql &&

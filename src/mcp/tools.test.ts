@@ -183,6 +183,24 @@ describe("NetSuiteMCPTools", () => {
 			expect(httpPostSpy).toHaveBeenCalledTimes(2);
 		});
 
+		it("should not retry on statement execution timeout (timeout of 60000ms exceeded)", async () => {
+			vi.spyOn(cacheService, "get").mockResolvedValue(null);
+
+			const timeoutErr = new Error("timeout of 60000ms exceeded");
+			Object.assign(timeoutErr, { code: "ECONNABORTED" });
+
+			httpPostSpy.mockRejectedValue(timeoutErr);
+
+			await expect(
+				client.executeTool("ns_runCustomSuiteQL", {
+					sqlQuery: "SELECT id FROM customer",
+				}),
+			).rejects.toThrow("timeout of 60000ms exceeded");
+
+			// Must not retry on query timeout — exactly 1 attempt
+			expect(httpPostSpy).toHaveBeenCalledTimes(1);
+		});
+
 		it("should normalize table_name / tableName / table aliases to recordType and use correct cache key", async () => {
 			const cached = {
 				success: true,

@@ -12,6 +12,7 @@ export interface SessionData {
 	tokens?: TokenData;
 	timestamp?: number;
 	authenticated?: boolean;
+	unrecoverable?: boolean;
 }
 
 export interface TokenData {

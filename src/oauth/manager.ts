@@ -193,6 +193,7 @@ export class OAuthManager {
 			tokens,
 			pkce: null, // Clear PKCE after successful exchange
 			authenticated: true,
+			unrecoverable: false,
 		});
 	}
 
@@ -276,6 +277,8 @@ export class OAuthManager {
 				await this.storage.save({
 					...session,
 					tokens: newTokens,
+					authenticated: true,
+					unrecoverable: false,
 				});
 				return newTokens.access_token;
 			} catch (error: unknown) {
@@ -287,8 +290,15 @@ export class OAuthManager {
 					if (!errMsg.includes("post-network-drop rotation mismatch")) {
 						// Mark session as unauthenticated while preserving config for potential re-auth
 						const current = await this.storage.load();
-						if (current && current.authenticated !== false) {
-							await this.storage.save({ ...current, authenticated: false });
+						if (
+							current &&
+							(current.authenticated !== false || !current.unrecoverable)
+						) {
+							await this.storage.save({
+								...current,
+								authenticated: false,
+								unrecoverable: true,
+							});
 						}
 					}
 				}
@@ -497,6 +507,7 @@ export class OAuthManager {
 					...(currentSession || session),
 					tokens: newTokens,
 					authenticated: true,
+					unrecoverable: false,
 				});
 				console.error("✅ Auto-recovery successful");
 				return;
@@ -509,8 +520,15 @@ export class OAuthManager {
 					const errMsg = error.message || "";
 					if (!errMsg.includes("post-network-drop rotation mismatch")) {
 						const current = await this.storage.load();
-						if (current && current.authenticated !== false) {
-							await this.storage.save({ ...current, authenticated: false });
+						if (
+							current &&
+							(current.authenticated !== false || !current.unrecoverable)
+						) {
+							await this.storage.save({
+								...current,
+								authenticated: false,
+								unrecoverable: true,
+							});
 						}
 					}
 					throw error;

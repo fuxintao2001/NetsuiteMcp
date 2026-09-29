@@ -505,7 +505,22 @@ export class NetSuiteMCPTools {
 			message?: string;
 			response?: { status?: number };
 		};
-		if (err.code === "ECONNABORTED" || err.message?.includes("Network Error")) {
+		// Never retry on statement / query execution timeouts (e.g. 60000ms exceeded).
+		// Retrying an unindexed, heavy query that already timed out will only multiply the delay 4x without succeeding.
+		if (
+			err.message?.includes("timeout of") ||
+			err.message?.includes("timed out")
+		) {
+			return false;
+		}
+
+		if (
+			err.code === "ECONNRESET" ||
+			err.code === "ETIMEDOUT" ||
+			err.code === "ENOTFOUND" ||
+			err.message?.includes("Network Error") ||
+			err.message?.includes("socket disconnected")
+		) {
 			return true;
 		}
 		const status = err.response?.status;

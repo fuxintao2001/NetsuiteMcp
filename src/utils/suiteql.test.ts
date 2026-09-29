@@ -282,6 +282,30 @@ describe("SuiteQL, Search & Query Utilities", () => {
 				expect(res.reason).toContain("Prohibited 'JOIN SystemNote'");
 			});
 
+			it("should reject unindexed standalone SystemNote queries without recordid filter", () => {
+				const res = validateSuiteQL(
+					"SELECT recordid, recordtypeid, field, date FROM systemnote WHERE date >= TO_DATE('2026-09-26', 'YYYY-MM-DD')",
+				);
+				expect(res.valid).toBe(false);
+				expect(res.reason).toContain("Unindexed 'systemnote' scan");
+				expect(res.reason).toContain("netsuite_get_system_notes");
+			});
+
+			it("should allow standalone SystemNote queries with recordid filter", () => {
+				const res = validateSuiteQL(
+					"SELECT sn.id, sn.field, sn.oldvalue, sn.newvalue FROM systemnote sn WHERE sn.recordid = 12345 AND sn.date >= TO_DATE('2026-01-01', 'YYYY-MM-DD')",
+				);
+				expect(res.valid).toBe(true);
+			});
+
+			it("should reject function conversions like TO_NUMBER in JOIN ON clause against transactionline", () => {
+				const res = validateSuiteQL(
+					"SELECT wo.id FROM transaction wo JOIN transactionline tl_wo ON tl_wo.transaction = wo.id LEFT JOIN transactionline tl_ship ON tl_ship.createdfrom = TO_NUMBER(tl_wo.custcol_link) WHERE wo.type = 'WorkOrd' AND tl_wo.mainline = 'F'",
+				);
+				expect(res.valid).toBe(false);
+				expect(res.reason).toContain("Performance hazard: Function conversion");
+			});
+
 			it("should reject createdfrom on transaction header table", () => {
 				const res1 = validateSuiteQL(
 					"SELECT t.id FROM transaction t WHERE t.createdfrom = 100",
@@ -517,6 +541,39 @@ describe("SuiteQL, Search & Query Utilities", () => {
 					"Prohibited Multi-Table JOIN with SystemNote",
 				);
 				expect(diag.suggestedFix).toContain("WHERE recordtypeid = -30");
+			});
+
+			it("should diagnose unindexed SystemNote scans", () => {
+				const diag = diagnoseSuiteQLError(
+					"Unindexed 'systemnote' scan: NetSuite 'systemnote' contains tens of millions of audit log records",
+					"SELECT date FROM systemnote WHERE date >= SYSDATE - 1",
+				);
+				expect(diag.isDiagnosed).toBe(true);
+				expect(diag.summary).toContain(
+					"Unindexed Full-Table Scan on SystemNote",
+				);
+				expect(diag.selfHealingAction).toContain("netsuite_get_system_notes");
+			});
+
+			it("should diagnose function conversions in JOIN ON clause", () => {
+				const diag = diagnoseSuiteQLError(
+					"Function conversion (e.g. TO_NUMBER/TO_CHAR) detected in JOIN ON clause",
+					"SELECT wo.id FROM transaction wo LEFT JOIN transactionline tl_ship ON tl_ship.createdfrom = TO_NUMBER(tl_wo.custcol_link)",
+				);
+				expect(diag.isDiagnosed).toBe(true);
+				expect(diag.summary).toContain("Function Conversion in JOIN ON Clause");
+			});
+
+			it("should diagnose statement execution timeouts and socket hang ups", () => {
+				const diag = diagnoseSuiteQLError(
+					"timeout of 60000ms exceeded",
+					"SELECT t.id FROM transaction t JOIN transactionline tl ON t.id = tl.transaction",
+				);
+				expect(diag.isDiagnosed).toBe(true);
+				expect(diag.summary).toContain("Statement Execution Timeout");
+				expect(diag.officialGuidance).toContain(
+					"Add selective indexed filters",
+				);
 			});
 
 			it("should handle unknown generic errors gracefully", () => {

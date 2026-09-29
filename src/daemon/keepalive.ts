@@ -28,6 +28,7 @@ export interface SessionData {
 	tokens?: TokenData;
 	timestamp?: number;
 	authenticated?: boolean;
+	unrecoverable?: boolean;
 }
 
 /**
@@ -354,6 +355,15 @@ export async function runKeepAlive(): Promise<void> {
 						continue;
 					}
 
+					// If session is marked unrecoverable (e.g. invalid_grant), skip automatic keepalive to avoid hammering NetSuite
+					if (session.unrecoverable) {
+						logInfo(
+							`[${accountId}] Skipped (session is unrecoverable, requires manual re-authentication via netsuite_authenticate)`,
+						);
+						skippedAccounts++;
+						continue;
+					}
+
 					// Check if token needs refresh (< 75% lifetime remaining), or if authenticated is false
 					const tokens = session.tokens;
 					const timeUntilExpiry = tokens.expires_at - Date.now();
@@ -486,15 +496,16 @@ export async function runKeepAlive(): Promise<void> {
 						) {
 							const fileContent = await fs.readFile(sessionFile, "utf-8");
 							const session = JSON.parse(fileContent) as SessionData;
-							if (session.authenticated !== false) {
+							if (session.authenticated !== false || !session.unrecoverable) {
 								session.authenticated = false;
+								session.unrecoverable = true;
 								await fs.writeFile(
 									sessionFile,
 									JSON.stringify(session, null, 2),
 									{ mode: 0o600 },
 								);
 								logWarn(
-									`[${accountId}] Session marked unauthenticated due to unrecoverable token expiration.`,
+									`[${accountId}] Session marked unauthenticated and unrecoverable due to unrecoverable token expiration.`,
 								);
 							}
 						} else if (
