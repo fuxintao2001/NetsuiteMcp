@@ -1,20 +1,21 @@
 # NetSuite MCP Server — AI 编程助手权威行动指南与代码生成规约 (AGENTS.md)
 
-> 🤖 **角色与核心定位**：本文档为大语言模型编程智能体（AI Coding Agents，如 Claude Code、Cursor、Windsurf、Antigravity）在开发、重构、维护 **NetSuite MCP Server** 仓库及生成 NetSuite 领域代码时的**最高优先级执行指令与工程规范**。
+> 🤖 **角色与核心定位**：本文档为大语言模型编程智能体（AI Coding Agents，如 Claude Code、Cursor、Windsurf、Antigravity）在开发、重构、维护 **NetSuite MCP Server** (`@suiteinsider/netsuite-mcp`) 仓库时的**最高优先级执行指令与工程规范**。
 >
-> ⚠️ **双重代码生成场景边界**：
-> 1. **场景 A（本仓库开发）**：针对本 MCP 服务端（Node.js / TypeScript 严格模式 / Stdio Transport / Redis / Redlock）的架构迭代与工具扩展。
-> 2. **场景 B（NetSuite 领域代码生成）**：当用户在当前会话中要求 AI 编写、审查或调试 NetSuite 客户端代码时，必须严格执行 Oracle SAFE Guide 2025.2、SuiteScript 2.1 与 SuiteQL 权威防线。
+> ⚠️ **工作区边界澄清**：
+> - 本仓库是一个纯粹的 **Node.js / TypeScript MCP 服务端项目**，**绝非** NetSuite SuiteScript / SDF 客户端脚本项目。
+> - AI Agent 在此工作区的一切代码生成与重构任务，**必须严格限制在本 MCP 服务端本身的 TypeScript 代码、架构设计、测试用例与工程脚本**。
+> - 严禁在此生成任何客户端 SuiteScript（如 `@NApiVersion 2.1` 脚本、ClientScript、UserEvent 等），客户端脚本规约仅存在于客户端独立工作区中。
 
 ---
 
 ## 🏛️ 1. 标杆项目矩阵 (Benchmark Reference Matrix)
 
-在设计、编写与重构 MCP 工具、类型系统、运行时防护及可观测性架构时，AI Agent 必须严格对标以下业界标杆项目的最佳实践：
+在设计、编写与重构本 MCP 服务端的工具集、类型系统、运行时防护及可观测性架构时，AI Agent 必须严格对标以下 8 大业界顶级 MCP 标杆项目的最佳实践：
 
 | **#** | **项目** | **GitHub URL** | **星标** | **参照价值与本仓库落地对齐** |
 | :---: | :--- | :--- | :---: | :--- |
-| ① | **MCP Official Servers** | `github.com/modelcontextprotocol/servers` | ~90k★ | **工具设计的“黄金标准”**：工具命名动名词规范（`netsuite_inspect_record`）、精准的 description 描述（明确输入与输出预期）、严格的 Zod inputSchema 范式、标准错误返回格式（`textResult({ isError: true })`）。参考实现：`filesystem`、`git`。 |
+| ① | **MCP Official Servers** | `github.com/modelcontextprotocol/servers` | ~90k★ | **工具设计的“黄金标准”**：工具命名动名词规范（如 `netsuite_inspect_record`）、精准的 description 描述（明确输入与输出预期）、严格的 Zod inputSchema 范式、标准错误返回格式（`textResult({ isError: true })`）。参考实现：`filesystem`、`git`、`memory`。 |
 | ② | **MCP TypeScript SDK** | `github.com/modelcontextprotocol/typescript-sdk` | ~13k★ | **SDK 层工程最佳实践**：Stdio Transport 抽象生命周期、Zod schema 与 TypeScript 静态类型推导（`z.infer<typeof Schema>`）、无锁且高效的 JSON-RPC 协议封装。 |
 | ③ | **GitHub MCP Server** | `github.com/github/github-mcp-server` | ~17k★ | **企业级大型工具集治理**：分域管理策略（Auth, Query, Record, Deployment, Diagnostics）、清晰的命名空间划分（本地增强 `netsuite_*` vs 远端代理 `ns_*`）、生产/沙箱权限分级契约。 |
 | ④ | **Supabase MCP** | `github.com/supabase/mcp` | — | **数据库/ERP 集成范本**：Feature Group 分组、环境写安全保护（生产环境物理阻断写操作）、统一数据透视与实体字典反查。 |
@@ -27,7 +28,7 @@
 
 ## 🧼 2. 代码工艺与反兼容膨胀禁令 (Anti-Compatibility Bloat)
 
-AI Agent 在编写、审查或重构任何代码（TypeScript、JavaScript、SQL）时，必须严格贯彻**单一权威实现（Single Authoritative Implementation）**原则：
+AI Agent 在编写、审查或重构本 MCP 服务端代码（TypeScript、JavaScript、SQL Guard）时，必须严格贯彻**单一权威实现（Single Authoritative Implementation）**原则：
 
 1. **彻底干净替换，严禁双轨并行**：
    - ❌ **严禁**：因新旧方案兼容而写 `try { newWay(); } catch (e) { oldWay(); }`。
@@ -47,10 +48,7 @@ AI Agent 在编写、审查或重构任何代码（TypeScript、JavaScript、SQL
 
 ## 🛠️ 3. 本仓库 TypeScript MCP 服务端开发规约
 
-### 3.1 技术栈与架构分层
-
-- **环境要求**：Node.js ≥ 18，TypeScript 严格模式（Strict Mode），ESM 模块（导入路径必须包含 `.js` 扩展名）。
-- **禁止 `any`**：严禁使用 `any` 类型。未知数据使用 `unknown`，并通过 Zod Schema 或类型收窄（Type Guards）进行校验。
+### 3.1 架构分层与职责边界
 
 ```
 src/
@@ -64,16 +62,24 @@ src/
 │   ├── queryHandlers.ts    # SuiteQL 执行、元数据反查、黄金模板
 │   ├── authHandlers.ts     # OAuth 鉴权状态、注销、诊断
 │   ├── batchHandler.ts     # 批量并发调度器（p-limit 并发控制）
-│   └── deployHandlers.ts   # SuiteCloud 部署上传与生产写屏障
-├── oauth/                  # OAuth 2.0 PKCE 鉴权子系统
+│   ├── deployHandlers.ts   # SuiteCloud 部署上传与生产写屏障
+│   ├── prompts.ts          # MCP Prompts 提示词模板
+│   └── resources.ts        # MCP 只读资源注册与检索
+├── oauth/                  # OAuth 2.0 PKCE 鉴权子系统（Token 轮换、会话隔离）
 ├── cache/                  # Redis 缓存与 Redlock 分布式锁
 ├── telemetry/              # 结构化调用遥测与错误自愈诊断器
 └── utils/                  # 运行时防线：suiteqlGuard、环境隔离、上下文瘦身
 ```
 
-### 3.2 新增与重构 MCP 工具标准范式 (Standard Recipe)
+### 3.2 语言标准与类型安全
 
-任何新增或重构的 MCP 工具必须严格遵循以下 4 步标准闭环：
+- **运行环境**：Node.js ≥ 18，TypeScript 严格模式（`strict: true`）。
+- **ESM 模块规范**：所有模块内部导入必须显式包含 `.js` 扩展名（如 `import { foo } from "./bar.js"`）。
+- **禁止 `any`**：严禁在源码或测试中使用 `any` 类型。未知数据使用 `unknown`，并通过 Zod Schema 或自定义 Type Guards 进行安全收窄。
+
+### 3.3 新增与重构 MCP 工具标准范式 (Standard Recipe)
+
+任何在 NetSuite MCP Server 中新增或修改工具，必须严格遵循以下 4 步标准闭环：
 
 #### 步骤 1：在 `src/handlers/toolSchemas.ts` 中定义 Zod Schema
 ```typescript
@@ -94,7 +100,7 @@ export type InspectRecordArgs = z.infer<typeof InspectRecordArgsSchema>;
 ```
 
 #### 步骤 2：在 `src/handlers/tools.ts` 中注册 Tool 元数据
-严格遵循 Playwright MCP 动名词规范与“前 5 词动词 + 资源”精准 description 规则：
+遵循 Playwright MCP 动名词规范与“前 5 词动词 + 资源”精准 description 规则：
 ```typescript
 {
   name: "netsuite_inspect_record",
@@ -105,8 +111,8 @@ export type InspectRecordArgs = z.infer<typeof InspectRecordArgsSchema>;
 
 #### 步骤 3：编写独立 Handler 业务逻辑
 - 参数归一化（去除首尾空格、小写化）
-- 结构化捕获异常，包裹遥测记录
-- 结果经由 `contextSlimmer` 自动瘦身或转换为 Markdown 表格
+- 结构化捕获异常，记录调用遥测指标
+- 结果经由 `contextSlimmer` 自动剔除 `null`/`undefined` 并格式化为 Markdown 表格
 - 统一通过 `textResult()` 返回标准 MCP 结果
 
 ```typescript
@@ -128,41 +134,36 @@ export async function handleInspectRecord(
 #### 步骤 4：编写 Vitest 单元测试
 在对应的 `*.test.ts` 中覆盖正常流程、参数边界及异常场景（如网络超时、无权限、账号类型阻断），并 Mock 外部网络与 Redis 依赖。
 
+### 3.4 纯 Redis 缓存与 Redlock 分布式锁规范
+
+- 本服务全面使用纯 Redis（`ioredis`）提供缓存能力，废弃不稳定内存缓存。
+- 账号元数据与会话状态由 Redis 按账号 key 隔离（`ns:<accountId>:*`）。
+- 多实例并发刷新 Token 时，必须通过 Redlock (`src/cache/redisLock.ts`) 获取分布式锁，严禁在未加锁状态下执行破坏性 Session 重写。
+
 ---
 
-## 🛡️ 4. NetSuite 领域代码生成规约 (SuiteScript & SuiteQL)
+## 🛡️ 4. NetSuite 网关与安全防护层开发规约
 
-当用户在当前工作区中要求 AI 编写或调试 NetSuite 业务代码时，必须无条件执行以下硬性标准：
+AI Agent 在维护或扩展本服务端与 NetSuite 的交互层（`src/utils/suiteqlGuard.ts`、`src/utils/environment.ts`、`src/mcp/tools.ts`）时，必须严格遵守以下守卫契约：
 
-### 4.1 SuiteScript 2.1 现代规范与 SAFE Guide 2025.2
+### 4.1 SuiteQL 运行时守卫防御契约 (`src/utils/suiteqlGuard.ts`)
 
-1. **严格 AMD 模块加载**：采用标准的 `@NApiVersion 2.1` 与规范的 JSDoc 声明，使用 ES6+（`const`/`let`、箭头函数、解构赋值、模板字符串），严禁使用已废弃的 `var` 或 SuiteScript 1.0 `nlapi*` API。
-2. **治理预算红线 (Governance Unit Defense)**：
-   - ❌ **绝对禁止在循环体内部执行 `record.load()` 或 `record.submitFields()`**（触发 `SAFE-GOV-001` 违规，治理点急速枯竭）。
-   - ❌ **绝对禁止在循环体内调用 `search.create()` 或 `query.run()`**（触发 `SAFE-GOV-002`，必须进行查询外提 Query Hoisting）。
-   - 大数据量批处理必须采用 **Map/Reduce 脚本**，通过 `getInputData` 产出迭代源。
-3. **敏感凭证防泄漏**：严禁在代码中硬编码任何 API Key、Token、密码或私钥（触发 `SAFE-SEC-001` 门禁）。
-4. **防御性异常处理**：仅在外部 I/O 交互（`N/https`、`record.submitFields()`）处包裹精准的 try-catch，并记录明确的业务上下文。
+所有通过本服务端执行的 SuiteQL 查询，必须通过运行时 AST 语法树与正则双重静态检验：
 
-### 4.2 SuiteQL 7 项黄金防线与核心模式不变量
+1. **通配符投影硬拦截**：严禁放行 `SELECT *`，防止宽表全字段投影撑爆大模型 Token 上下文。
+2. **强制 `mainline` 过滤检验**：涉及 `transactionline` 表关联时，必须校验并约束包含 `tl.mainline = 'F'` 或 `'T'`，杜绝行数与金额翻倍畸高。
+3. **强制自动保底分页**：单次查询若未显式包含分页约束，守卫盾必须自动安全注入保底限制（`FETCH FIRST 100 ROWS ONLY`）。
+4. **慢查询硬拦截 (SAFE Pitfall 11)**：严禁放行跨表关联 `JOIN systemnote`（亿级审计日志全表扫描必引发 45s+ 超时崩溃），引导调用专用审计工具。
+5. **MySQL/PostgreSQL 非法方言拦截**：拦截裸 `LIMIT` 与裸 `OFFSET`，自动纠偏为 Oracle NetSuite 标准语法（`FETCH FIRST N ROWS ONLY`、`ROWNUM <= N` 或 `OFFSET M ROWS FETCH NEXT N ROWS ONLY`）。
+6. **核心模式不变量校验**：
+   - 纠偏 `item.recordtype` ➔ 引导使用 `itemtype` 与 `subtype`。
+   - 纠偏 `transaction.createdfrom` ➔ 引导使用 `transactionline.createdfrom`。
 
-所有生成的 SuiteQL 查询必须通过本仓库 `src/utils/suiteqlGuard.ts` 的静态与运行时检验：
+### 4.2 双重沙箱生产写保护屏障 (`src/utils/environment.ts`)
 
-1. **严禁 `SELECT *`**：必须提供显式列投影（如 `SELECT id, tranid, entity, total FROM transaction`），严防宽表爆炸。
-2. **强制 `mainline` 过滤**：凡是涉及 `transactionline` 表关联，必须显式指定 `tl.mainline = 'F'`（明细行）或 `tl.mainline = 'T'`（表头汇总行），杜绝数据行数与金额翻倍畸高。
-3. **强制包含分页保护**：单次查询必须显式包含分页（`FETCH FIRST N ROWS ONLY`、`ROWNUM <= N` 或标准 `OFFSET M ROWS FETCH NEXT N ROWS ONLY`）。
-4. **严禁跨表关联 `SystemNote`**：严禁 `JOIN systemnote`（SAFE Pitfall 11，全表扫描必触发 45s+ 超时崩溃）。审计需求必须调用 `netsuite_get_system_notes`。
-5. **严禁 MySQL/PostgreSQL 专属方言**：禁止使用裸 `LIMIT` 或裸 `OFFSET`，必须使用 Oracle 官方标准语法。
-6. **核心模式防幻觉不变量 (Zero Hallucination)**：
-   - `item` 表使用 **`itemtype`** 与 **`subtype`**；`item` 表**绝不存在 `recordtype` 字段**。
-   - `createdfrom`（单据来源）**仅存在于 `transactionline` 行表**，绝不存在于 `transaction` 主表表头。
-   - `transaction` 与 `entity` 使用 `type` 或 `recordtype`。
-7. **驱动索引过滤**：必须通过 `trandate`、`id` 或 `type` 等有索引的字段作为主驱动过滤条件。
-
-### 4.3 生产环境写操作绝对物理锁
-
-- 严禁在生产账号执行任何破坏性写入操作（`ns_createRecord`, `ns_updateRecord`）。
-- 部署脚本前必须进行语法预检与权限确认。
+- **环境类型权威判定**：以 `isSandboxAccount(accountId)` 为唯一判定标准（含 `_sb`, `-sb`, `tstdrv` 为沙箱，其余均为生产）。
+- **破坏性写入工具硬阻断**：`ns_createRecord` 与 `ns_updateRecord` 在生产账号中必须处于**代码级物理禁用状态**。
+- **脚本部署二次确认**：`netsuite_suitecloud_upload` 针对生产环境必须强制要求传入 `allowProduction: true` 显式确认，否则坚决阻断。
 
 ---
 
@@ -191,7 +192,7 @@ npm run test:compliance
 
 ## 🔄 6. 结构化错误诊断与自愈 SOP
 
-当 MCP 工具返回错误时，AI Agent 必须识别结构化诊断标签并执行针对性修复，严禁未经调整的盲目重试：
+当 MCP 工具返回错误时，AI Agent 必须识别结构化诊断标签并执行针对性自愈修复，严禁未经调整的盲目重试：
 
 | 诊断标签 / 错误特征 | 根因分类 | 强制自愈动作 (Mandated Self-Healing Action) |
 | :--- | :--- | :--- |
