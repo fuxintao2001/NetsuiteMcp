@@ -356,16 +356,25 @@ describe("SuiteQL, Search & Query Utilities", () => {
 				);
 			});
 
-			it("should reject queries with comments (--)", () => {
-				const res = validateSuiteQL("SELECT * FROM customer -- comment");
-				expect(res.valid).toBe(false);
-				expect(res.reason).toContain("prohibited SQL comments");
+			it("should safely allow queries with line comments (--)", () => {
+				const res = validateSuiteQL(
+					"SELECT id FROM customer -- helpful business note",
+				);
+				expect(res.valid).toBe(true);
 			});
 
-			it("should reject queries with block comments (/* */)", () => {
-				const res = validateSuiteQL("SELECT /* secret */ id FROM customer");
-				expect(res.valid).toBe(false);
-				expect(res.reason).toContain("prohibited SQL comments");
+			it("should safely allow queries with block comments (/* */)", () => {
+				const res = validateSuiteQL(
+					"SELECT /* query index hint */ id FROM customer",
+				);
+				expect(res.valid).toBe(true);
+			});
+
+			it("should not trigger DDL keyword violation from comments mentioning keywords", () => {
+				const res = validateSuiteQL(
+					"SELECT id FROM customer -- note: do not UPDATE this record",
+				);
+				expect(res.valid).toBe(true);
 			});
 
 			it("should reject multi-statement injection with semicolons", () => {

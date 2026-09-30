@@ -383,7 +383,7 @@ SPACED = trimmed
 				};
 
 				const result = parseNetSuiteError(mockError);
-				expect(result.message).toContain("netsuite_get_record_definition");
+				expect(result.message).toContain("netsuite_schema");
 				expect(result.message).toContain("ns_getRecordTypeMetadata");
 			});
 

@@ -421,7 +421,7 @@ export const STATUS_TOOL = {
 const BATCH_EXECUTE_TOOL = {
 	name: "netsuite_batch_execute",
 	description:
-		"Execute multiple NetSuite tools in parallel (max 10 tasks, concurrency 5). Dramatically reduces latency for batch operations. Supports any tool including 'ns_runCustomSuiteQL', 'ns_getRecord', 'ns_getRecordTypeMetadata', 'ns_getSuiteQLMetadata', 'netsuite_get_script_logs', and 'netsuite_get_record_link'.",
+		"Execute multiple NetSuite tools in parallel (max 10 tasks, concurrency 5). Returns aggregated results in 1 turn.",
 	inputSchema: {
 		type: "object" as const,
 		properties: {
@@ -453,7 +453,7 @@ const BATCH_EXECUTE_TOOL = {
 const SCRIPT_LOGS_TOOL = {
 	name: "netsuite_get_script_logs",
 	description:
-		"Query NetSuite Script Execution Logs (ScriptNote table). Returns structured log entries with optional filtering by script, log level, date range, title/detail keywords, and deployment. Logs are retained for ~30 days by NetSuite.",
+		"Query NetSuite Script Execution Logs (ScriptNote table) with optional filters by script, level, date, and keyword.",
 	inputSchema: {
 		type: "object" as const,
 		properties: {
@@ -501,7 +501,7 @@ const SCRIPT_LOGS_TOOL = {
 const INSPECT_RECORD_TOOL = {
 	name: "netsuite_inspect_record",
 	description:
-		"Primary tool for inspecting single record details, populated fields, and line items without empty noise. Use when examining a specific record by ID or document number. Do NOT use for querying multiple records or lists (use ns_runCustomSuiteQL instead).",
+		"Inspect NetSuite record details, populated fields, and sublists by internal ID or tranid.",
 	inputSchema: {
 		type: "object" as const,
 		properties: {
@@ -553,32 +553,10 @@ const INSPECT_RECORD_TOOL = {
 	},
 };
 
-const GET_RECORD_DEFINITION_TOOL = {
-	name: "netsuite_get_record_definition",
-	description:
-		"Fast offline lookup of standard field definitions, types, and mandatory flags across 272 NetSuite record types for SuiteScript development. Do NOT use for custom fields (custbody_*) or live tenant schema (use ns_getRecordTypeMetadata), or for SuiteQL column names (use ns_getSuiteQLMetadata).",
-	inputSchema: {
-		type: "object" as const,
-		properties: {
-			recordType: {
-				type: "string",
-				description:
-					"Record type name (e.g. salesorder, customer, item, invoice, vendor).",
-			},
-			keyword: {
-				type: "string",
-				description:
-					"Optional keyword to filter field names, labels, or help text.",
-			},
-		},
-		required: ["recordType"],
-	},
-};
-
 const GET_QUERY_TEMPLATE_TOOL = {
 	name: "netsuite_get_query_template",
 	description:
-		"Get verified, production-ready SuiteQL query templates sourced from Oracle SAFE Guide 2025.2 and Tim Dietrich Query Library. Avoids common pitfalls like missing mainline='F', joining SystemNote, or table hallucination.",
+		"Retrieve curated SuiteQL query templates by category or search keyword.",
 	inputSchema: {
 		type: "object" as const,
 		properties: {
@@ -729,7 +707,7 @@ const GET_ERROR_SUMMARY_TOOL = {
 const NETSUITE_SCHEMA_TOOL = {
 	name: "netsuite_schema",
 	description:
-		"Inspect NetSuite record and table schema across standard fields, tenant custom fields, and SuiteQL database columns. Unified 1-turn schema exploration tool with automatic intelligent routing.",
+		"Inspect NetSuite record and table schema across standard fields, custom fields, and SuiteQL database columns.",
 	inputSchema: {
 		type: "object" as const,
 		properties: {
@@ -742,12 +720,33 @@ const NETSUITE_SCHEMA_TOOL = {
 				type: "string",
 				enum: ["auto", "offline", "live_rest", "live_sql"],
 				description:
-					"Schema source: 'auto' (default: standard types use offline, custom records use live_rest, missing recordType searches live_sql catalog), 'offline' (fast 0ms standard field definitions), 'live_rest' (custom fields and tenant-specific schema), or 'live_sql' (SuiteQL table columns & data types).",
+					"Schema source: 'auto' (default: standard types use offline, custom records use live_rest, missing recordType searches live_sql catalog), 'offline' (standard field definitions), 'live_rest' (custom fields and tenant-specific schema), or 'live_sql' (SuiteQL table columns & data types).",
 			},
 			keyword: {
 				type: "string",
 				description:
 					"Optional search keyword to filter field names, labels, or table names.",
+			},
+		},
+	},
+};
+
+const GET_SKILL_TOOL = {
+	name: "netsuite_get_skill",
+	description:
+		"Read official Oracle NetSuite SuiteCloud Agent Skills and engineering standards on-demand (e.g. SAFE Guide, SuiteQL patterns, SuiteScript upgrade, records reference).",
+	inputSchema: {
+		type: "object" as const,
+		properties: {
+			skillName: {
+				type: "string",
+				description:
+					"Name of the skill to read (e.g. 'netsuite-sdf-safe-guide', 'netsuite-ai-connector-instructions', 'netsuite-suitescript-records-reference', 'netsuite-suitescript-upgrade'). If omitted, lists all available skills.",
+			},
+			section: {
+				type: "string",
+				description:
+					"Optional section heading keyword to retrieve specific section guidance.",
 			},
 		},
 	},
@@ -762,10 +761,10 @@ export const LOCAL_TOOLS = [
 	BATCH_EXECUTE_TOOL,
 	SCRIPT_LOGS_TOOL,
 	INSPECT_RECORD_TOOL,
-	GET_RECORD_DEFINITION_TOOL,
 	GET_QUERY_TEMPLATE_TOOL,
 	GET_SYSTEM_NOTES_TOOL,
 	SUITECLOUD_UPLOAD_TOOL,
 	GET_ERROR_SUMMARY_TOOL,
 	NETSUITE_SCHEMA_TOOL,
+	GET_SKILL_TOOL,
 ];

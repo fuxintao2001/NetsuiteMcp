@@ -113,6 +113,19 @@ export function unmaskStringLiterals(
 }
 
 /**
+ * Safely strips line comments (-- ...) and block comments (/* ... * /) outside string literals,
+ * replacing them with whitespace to preserve token boundaries.
+ */
+export function stripSqlComments(maskedSql: string): string {
+	if (!maskedSql) return "";
+	// Replace block comments /* ... */ with a single space
+	let stripped = maskedSql.replace(/\/\*[\s\S]*?\*\//g, " ");
+	// Replace single line comments -- ... or # ... with a single space
+	stripped = stripped.replace(/(?:--|#)[^\r\n]*/g, " ");
+	return stripped;
+}
+
+/**
  * Splits a composite SQL string into individual statements by semicolon (;),
  * while safely ignoring semicolons inside string literals ('...').
  * Returns an array of trimmed, non-empty SQL statements.
@@ -326,25 +339,13 @@ export function validateSuiteQL(sqlQuery: string): SuiteQLValidationResult {
 
 	const trimmed = sqlQuery.trim();
 	const { maskedSql } = maskStringLiterals(trimmed);
-
-	// Check for SQL comment obfuscation outside string literals
-	if (
-		maskedSql.includes("--") ||
-		maskedSql.includes("/*") ||
-		maskedSql.includes("*/") ||
-		maskedSql.includes("#")
-	) {
-		return {
-			valid: false,
-			reason:
-				"SuiteQL query contains prohibited SQL comments (-- or /* */ or #). Remove all comment blocks and re-submit a clean query.",
-		};
-	}
+	// Safely strip SQL comments outside string literals (preserving legitimate comments without false-positive blocks)
+	const cleanMaskedSql = stripSqlComments(maskedSql).trim();
 
 	// Check for multi-statement execution (semicolons that are not just a single trailing semicolon)
-	const withoutTrailingSemicolon = maskedSql.endsWith(";")
-		? maskedSql.slice(0, -1).trim()
-		: maskedSql;
+	const withoutTrailingSemicolon = cleanMaskedSql.endsWith(";")
+		? cleanMaskedSql.slice(0, -1).trim()
+		: cleanMaskedSql;
 
 	if (withoutTrailingSemicolon.includes(";")) {
 		return {
@@ -364,7 +365,7 @@ export function validateSuiteQL(sqlQuery: string): SuiteQLValidationResult {
 	}
 
 	// Check for 'SELECT *' or 'SELECT alias.*' (Gate 2 Syntax Mandate) across all projection positions
-	if (hasWildcardSelection(maskedSql)) {
+	if (hasWildcardSelection(cleanMaskedSql)) {
 		return {
 			valid: false,
 			reason:
@@ -404,8 +405,8 @@ export function validateSuiteQL(sqlQuery: string): SuiteQLValidationResult {
 		};
 	}
 
-	const tables = extractReferencedTables(trimmed);
-	const hasPagination = hasPaginationClause(trimmed);
+	const tables = extractReferencedTables(cleanMaskedSql);
+	const hasPagination = hasPaginationClause(cleanMaskedSql);
 
 	// --- Slow Query Anti-Pattern Checks & Smart Routing Guidance ---
 
@@ -421,7 +422,7 @@ export function validateSuiteQL(sqlQuery: string): SuiteQLValidationResult {
 		// Standalone SystemNote query must filter by recordid in WHERE clause to avoid catastrophic full-table scan (>60s timeout)
 		const whereMatch =
 			/\bWHERE\s+([\s\S]+?)(?:\s+(?:GROUP\s+BY|ORDER\s+BY|FETCH\s+FIRST)|;|$)/i.exec(
-				maskedSql,
+				cleanMaskedSql,
 			);
 		const whereClause = whereMatch?.[1] || "";
 		if (!/\brecordid\b/i.test(whereClause)) {
@@ -913,7 +914,7 @@ export function diagnoseSuiteQLError(
 			officialGuidance:
 				"Use Oracle-standard pagination: 'FETCH FIRST N ROWS ONLY', 'WHERE ROWNUM <= N', or 'OFFSET M ROWS FETCH NEXT N ROWS ONLY'.",
 			suggestedFix:
-				"SELECT id, tranid FROM transaction WHERE type = 'SalesOrd' FETCH FIRST 100 ROWS ONLY",
+				"FETCH FIRST 100 ROWS ONLY (or OFFSET M ROWS FETCH NEXT N ROWS ONLY)",
 			selfHealingAction:
 				"Replace MySQL LIMIT with 'FETCH FIRST N ROWS ONLY' or Oracle 'OFFSET M ROWS FETCH NEXT N ROWS ONLY'.",
 		};
@@ -950,7 +951,7 @@ export function diagnoseSuiteQLError(
 			officialGuidance:
 				"Include at least one indexed filter: 'trandate', 'type', 'id', 'tranid', 'entity', or 'subsidiary'.",
 			suggestedFix:
-				"WHERE t.type = 'SalesOrd' AND t.trandate >= TO_DATE('2025-01-01', 'YYYY-MM-DD') AND tl.mainline = 'F'",
+				"WHERE t.trandate >= TO_DATE('YYYY-MM-DD', 'YYYY-MM-DD') AND tl.mainline = 'F'",
 			selfHealingAction:
 				"Add indexed driving filters to the WHERE clause before executing.",
 		};
@@ -964,9 +965,9 @@ export function diagnoseSuiteQLError(
 			rootCause:
 				"Using HAVING to filter grouped transactions without indexed filters in the WHERE clause forces a full-table scan before aggregation.",
 			officialGuidance:
-				"Add driving WHERE filters (e.g. `WHERE t.trandate >= TO_DATE(...) AND t.type = 'SalesOrd'`) before the GROUP BY clause to narrow candidate rows.",
+				"Add driving WHERE filters (e.g. `WHERE t.trandate >= TO_DATE(...)`) before the GROUP BY clause to narrow candidate rows.",
 			suggestedFix:
-				"WHERE t.type = 'SalesOrd' AND t.trandate >= TO_DATE('2025-01-01', 'YYYY-MM-DD') GROUP BY t.id HAVING SUM(tl.amount) > 1000",
+				"WHERE t.trandate >= TO_DATE('YYYY-MM-DD', 'YYYY-MM-DD') GROUP BY t.id HAVING SUM(tl.amount) > 1000",
 			selfHealingAction:
 				"Add indexed driving filters to the WHERE clause before the GROUP BY/HAVING clause.",
 		};
@@ -1000,7 +1001,8 @@ export function formatSuiteQLErrorResponse(
 	if (diag.suggestedFix) {
 		out += `💡 **Suggested Pattern:**\n\`\`\`sql\n${diag.suggestedFix}\n\`\`\`\n`;
 	}
-	out += `🔄 **Self-Healing Action:** ${diag.selfHealingAction}`;
+	out += `🔄 **Self-Healing Action:** ${diag.selfHealingAction}\n\n`;
+	out += `💡 **Official Skill Guidance:** Call \`netsuite_get_skill({ skillName: 'netsuite-ai-connector-instructions' })\` for deep Oracle patterns.`;
 
 	return out;
 }

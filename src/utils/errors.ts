@@ -99,7 +99,7 @@ function getActionableAdvice(code: string, message: string): string {
 
 		let advice = "\n💡 [Troubleshooting Advice - Record Type / ID]:";
 		advice += "\n  👉 Code-level immediate self-healing steps:";
-		advice += `\n  - 0ms Offline Standard Schema: Check standard field definitions and types:\n    netsuite_get_record_definition({ recordType: '${recName}' })`;
+		advice += `\n  - 0ms Offline Standard Schema: Check standard field definitions and types:\n    netsuite_schema({ recordType: '${recName}' })`;
 		advice += `\n  - Live Tenant Schema: For custom records or custom fields (custbody_*):\n    ns_getRecordTypeMetadata({ recordType: '${recName}' })`;
 		advice += `\n  - Verify record type is lowercase standard (e.g. 'salesorder', 'customer', 'item', 'invoice', 'customrecord_xxx').`;
 		return advice;
@@ -114,7 +114,7 @@ function getActionableAdvice(code: string, message: string): string {
 		let advice = "\n💡 [Troubleshooting Advice - Missing Required Argument]:";
 		advice += "\n  👉 Code-level immediate self-healing steps:";
 		advice +=
-			"\n  - 0ms Offline Mandatory Check: Inspect mandatory/required fields for the record:\n    netsuite_get_record_definition({ recordType: '<record_type>' })";
+			"\n  - 0ms Offline Mandatory Check: Inspect mandatory/required fields for the record:\n    netsuite_schema({ recordType: '<record_type>' })";
 		advice +=
 			"\n  - Ensure all non-nullable / mandatory fields (e.g. entity, subsidiary, trandate) are provided in the mutation payload.";
 		return advice;
@@ -130,7 +130,7 @@ function getActionableAdvice(code: string, message: string): string {
 		advice +=
 			"\n  - Select/List Fields: Pass internal numeric ID strings (e.g. { entity: '123' }) rather than display names (e.g. { entity: 'Acme Corp' }).";
 		advice +=
-			"\n  - Data Types: Check boolean/date/number formats against schema definitions using netsuite_get_record_definition.";
+			"\n  - Data Types: Check boolean/date/number formats against schema definitions using netsuite_schema.";
 		return advice;
 	}
 

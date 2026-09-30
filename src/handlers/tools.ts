@@ -40,13 +40,13 @@ import {
 } from "./queryHandlers.js";
 import {
 	appendRecordLink,
-	handleGetRecordDefinition,
 	handleGetRecordLink,
 	handleGetSystemNotes,
 	handleInspectRecord,
 	handleNetsuiteSchema,
 	resolveNaturalKeyToInternalId,
 } from "./recordHandlers.js";
+import { handleGetSkill } from "./skillHandler.js";
 import {
 	AUTH_TOOL,
 	LOCAL_TOOLS,
@@ -87,10 +87,10 @@ function getToolAnnotations(name: string): Record<string, boolean> {
 		"netsuite_get_script_logs",
 		"netsuite_inspect_record",
 		"netsuite_schema",
-		"netsuite_get_record_definition",
 		"netsuite_get_query_template",
 		"netsuite_get_system_notes",
 		"netsuite_get_error_summary",
+		"netsuite_get_skill",
 	]);
 
 	const DESTRUCTIVE_TOOLS = new Set([
@@ -145,7 +145,7 @@ function enhanceToolDescriptions(
 
 		if (t.name === "ns_runCustomSuiteQL") {
 			enhanced.description =
-				"Primary 1-turn tool for querying NetSuite records, filtered lists, aggregations, and financial analytics via SuiteQL. Standard core tables (transaction, customer, item, vendor, subsidiary, etc.) can be queried directly without prior metadata reconnaissance. Supports parallel multi-query execution: pass multiple queries separated by ';' in 'sqlQuery' or as an array in 'sqlQueries' to execute concurrently in 1 turn. For single record inspection by ID or document number, prefer netsuite_inspect_record.";
+				"Execute NetSuite SuiteQL queries and return tabular results. Supports single queries or multiple parallel queries separated by ';' or in 'sqlQueries'.";
 			if (enhanced.inputSchema && typeof enhanced.inputSchema === "object") {
 				const schema = { ...(enhanced.inputSchema as Record<string, unknown>) };
 				if (schema.properties && typeof schema.properties === "object") {
@@ -154,14 +154,14 @@ function enhanceToolDescriptions(
 						props.sqlQuery = {
 							...(props.sqlQuery as Record<string, unknown>),
 							description:
-								"The SuiteQL query string to execute. Single statement or multiple statements separated by ';' to execute in parallel. Explicit columns only, Oracle pagination (ROWNUM <= N or FETCH FIRST N ROWS ONLY), and mainline='F' for line items.",
+								"The SuiteQL query string to execute. Single statement or multiple statements separated by ';' to execute in parallel.",
 						};
 					}
 					props.sqlQueries = {
 						type: "array",
 						items: { type: "string" },
 						description:
-							"Optional array of SuiteQL query strings to execute concurrently in parallel (max 10). Dramatically reduces latency by eliminating multi-turn roundtrips.",
+							"Optional array of SuiteQL query strings to execute concurrently in parallel (max 10).",
 					};
 					schema.properties = props;
 				}
@@ -172,13 +172,13 @@ function enhanceToolDescriptions(
 
 		if (t.name === "ns_getRecord") {
 			enhanced.description =
-				"Retrieve NetSuite record JSON by internal numeric ID or document number (tranid like 'SO10023'). Returns cleaned payload with empty fields pruned.";
+				"Retrieve NetSuite record JSON by internal numeric ID or document number (tranid). Returns cleaned payload with empty fields pruned.";
 			return enhanced;
 		}
 
 		if (t.name === "ns_getSuiteQLMetadata") {
 			enhanced.description =
-				"Inspect live NetSuite database table schema, column names, and data types for SuiteQL. Supports keyword search across table catalog when recordType is omitted.";
+				"Inspect NetSuite database table schema, column names, and data types for SuiteQL.";
 			if (enhanced.inputSchema && typeof enhanced.inputSchema === "object") {
 				const schema = { ...(enhanced.inputSchema as Record<string, unknown>) };
 				const props = {
@@ -187,7 +187,7 @@ function enhanceToolDescriptions(
 				props.keyword = {
 					type: "string",
 					description:
-						"Optional search keyword to discover available NetSuite SuiteQL tables across all business domains (e.g. 'inventory', 'transaction', 'invoice', 'order', 'account', 'customer', 'bom').",
+						"Optional search keyword to discover available NetSuite SuiteQL tables across business domains.",
 				};
 				schema.properties = props;
 				enhanced.inputSchema = schema;
@@ -197,7 +197,7 @@ function enhanceToolDescriptions(
 
 		if (t.name === "ns_getRecordTypeMetadata") {
 			enhanced.description =
-				"Fetch record type field metadata, tenant custom fields (custbody_*, custcol_*, custrecord_*), and standard field definitions. Automatically provides standard catalog definitions if record type is not available in REST API.";
+				"Fetch record type field metadata, tenant custom fields (custbody_*, custcol_*), and standard field definitions.";
 			return enhanced;
 		}
 
@@ -454,9 +454,6 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
 				if (name === "netsuite_schema") {
 					return await handleNetsuiteSchema(safeArgs, mcpTools);
 				}
-				if (name === "netsuite_get_record_definition") {
-					return await handleGetRecordDefinition(safeArgs);
-				}
 				if (name === "netsuite_get_query_template") {
 					return await handleGetQueryTemplate(safeArgs);
 				}
@@ -469,6 +466,9 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
 						oauthManager,
 						deps.projectRoot,
 					);
+				}
+				if (name === "netsuite_get_skill") {
+					return await handleGetSkill(safeArgs, deps.projectRoot);
 				}
 
 				// --- Fast metadata discovery for ns_getSuiteQLMetadata without recordType ---

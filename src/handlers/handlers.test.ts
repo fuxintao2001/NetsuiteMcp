@@ -412,13 +412,15 @@ describe("MCP Handler Wires", () => {
 				(t: any) => t.name === "ns_getSuiteQLMetadata",
 			);
 
-			expect(suiteqlTool.description).toContain("Primary 1-turn tool");
+			expect(suiteqlTool.description).toContain(
+				"Execute NetSuite SuiteQL queries",
+			);
 			expect(suiteqlTool.inputSchema.properties.sqlQuery.description).toContain(
-				"Explicit columns only",
+				"Single statement or multiple statements",
 			);
 
 			expect(metaTool.description).toContain(
-				"Inspect live NetSuite database table schema",
+				"Inspect NetSuite database table schema",
 			);
 			expect(metaTool.inputSchema.properties.keyword).toBeDefined();
 			expect(metaTool.inputSchema.properties.keyword.description).toContain(
@@ -872,12 +874,12 @@ describe("MCP Handler Wires", () => {
 		});
 
 		describe("Developer Tools Wiring", () => {
-			it("should handle netsuite_get_record_definition successfully", async () => {
+			it("should handle netsuite_schema with source: 'offline' for standard record definitions", async () => {
 				const callFn = registeredHandlers.get("tools/call");
 				const res = await callFn?.({
 					params: {
-						name: "netsuite_get_record_definition",
-						arguments: { recordType: "salesorder" },
+						name: "netsuite_schema",
+						arguments: { recordType: "salesorder", source: "offline" },
 					},
 				});
 
@@ -908,6 +910,35 @@ describe("MCP Handler Wires", () => {
 
 				expect(res.content[0].text).toContain("NetSuite SuiteQL Table Catalog");
 				expect(res.content[0].text).toContain("transaction");
+			});
+
+			it("should list available skills when skillName is omitted in netsuite_get_skill", async () => {
+				const callFn = registeredHandlers.get("tools/call");
+				const res = await callFn?.({
+					params: {
+						name: "netsuite_get_skill",
+						arguments: {},
+					},
+				});
+
+				expect(res.content[0].text).toContain(
+					"Oracle NetSuite Available Agent Skills Library",
+				);
+			});
+
+			it("should retrieve specific skill documentation and filter section in netsuite_get_skill", async () => {
+				const callFn = registeredHandlers.get("tools/call");
+				const res = await callFn?.({
+					params: {
+						name: "netsuite_get_skill",
+						arguments: {
+							skillName: "netsuite-ai-connector-instructions",
+							section: "OUTPUT FORMATTING",
+						},
+					},
+				});
+
+				expect(res.content[0].text).toContain("OUTPUT FORMATTING");
 			});
 
 			it("should handle netsuite_schema with explicit offline source", async () => {
