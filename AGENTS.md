@@ -21,6 +21,19 @@
 | ⑦ | **Context7 MCP** | `github.com/upstash/context7-mcp` | — | **Context 经济性极致优化**：极简响应载荷、噪点裁剪（`contextSlimmer` 自动剥离 `null`/`undefined`）、自动格式化为高密度 Markdown 表格，降低 60%+ LLM Token 消耗。 |
 | ⑧ | **ERPNext MCP Server** | `github.com/rakeshgangwar/erpnext-mcp-server` | — | **同类 ERP 业务抽象范式**：针对 ERP 复杂实体模型的元数据反查（`ns_getSuiteQLMetadata` / `ns_getRecordTypeMetadata`）、记录 CRUD 统一接口规范、自然键（tranid）与内部键（id）自动解析。 |
 
+### 1.1 动态标杆检索与前沿对标机制 (Dynamic Benchmark Research)
+
+虽然上述 8 大标杆矩阵覆盖了 MCP 核心架构范式，但在面临复杂垂直领域、新型协议扩展或特定技术深水区时，静态清单可能无法涵盖全部具体需求：
+
+- **主动前沿对标原则 (Proactive Benchmark Research)**：
+  - 当既有标杆矩阵无法直接指导当前具体任务（如：复杂 SQL AST 语法重写、多阶段并发队列、海量文件分块传输、Node.js 优雅退出与信号治理等）时，AI Agent **严禁闭门造车或凭空臆想**。
+  - **必须主动利用联网搜索（Web Search）与 GitHub 检索**，查阅业内同类最著名的顶级开源项目（高星 MCP Server、知名 ERP/数据库中间件、主流 TypeScript 架构）的成熟方案。
+  - 深入研究业界事实标准（Industry De Facto Standard）的设计思路、数据模型与容错机制，将其精髓吸收并转化为本服务端的单一权威实现。
+- **推荐动态对标维度**：
+  1. **顶级 MCP 生态演进**：检索 `modelcontextprotocol` 官方组织及知名厂商（如 Cloudflare, Docker, PostgreSQL, Redis 等）官方 MCP 实现，跟踪 Transport 生命周期管理、动态能力协商与长连接容灾。
+  2. **高可用数据网关与 AST 防线**：对标成熟数据库中间件与 ORM（如 Prisma Engine, Hasura, Apache Calcite, Cube.js）的 SQL 语法守卫、防注入与慢查询熔断实践。
+  3. **TypeScript 严格工程与运行时安全**：对标一流 Node.js/TypeScript 基础库（如 Fastify, tRPC, Zod, BullMQ），参考其类型安全收窄、分布式任务治理与零开销可观测性模式。
+
 ---
 
 ## 🧼 2. 代码工艺与反兼容膨胀禁令 (Anti-Compatibility Bloat)
