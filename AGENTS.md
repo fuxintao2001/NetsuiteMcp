@@ -1,11 +1,8 @@
 # NetSuite MCP Server — AI 编程助手权威行动指南与代码生成规约 (AGENTS.md)
 
-> 🤖 **角色与核心定位**：本文档为大语言模型编程智能体（AI Coding Agents，如 Claude Code、Cursor、Windsurf、Antigravity）在开发、重构、维护 **NetSuite MCP Server** (`@suiteinsider/netsuite-mcp`) 仓库时的**最高优先级执行指令与工程规范**。
+> 🤖 **角色与定位**：本文档为大语言模型编程智能体（AI Coding Agents，如 Claude Code、Cursor、Windsurf、Antigravity）开发、维护与重构 **NetSuite MCP Server** (`@suiteinsider/netsuite-mcp`) 的权威工程指南与代码生成规约。
 >
-> ⚠️ **工作区边界澄清**：
-> - 本仓库是一个纯粹的 **Node.js / TypeScript MCP 服务端项目**，**绝非** NetSuite SuiteScript / SDF 客户端脚本项目。
-> - AI Agent 在此工作区的一切代码生成与重构任务，**必须严格限制在本 MCP 服务端本身的 TypeScript 代码、架构设计、测试用例与工程脚本**。
-> - 严禁在此生成任何客户端 SuiteScript（如 `@NApiVersion 2.1` 脚本、ClientScript、UserEvent 等），客户端脚本规约仅存在于客户端独立工作区中。
+> 🎯 **核心目标**：指导 AI Agent 在本仓库中编写高质量、高韧性的 Node.js / TypeScript 服务端代码，高效扩展与维护 MCP 工具集、运行时安全守卫（`suiteqlGuard`）、Redis 缓存与 Redlock 分布式锁，并持续保障 100/100 分的系统架构质量。
 
 ---
 
