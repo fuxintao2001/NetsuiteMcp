@@ -5,7 +5,6 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const KEEPALIVE_LABEL = "com.suiteinsider.netsuite-mcp-keepalive";
-const LEGACY_SERVER_LABEL = "com.suiteinsider.netsuite-mcp-server";
 
 function getPaths() {
 	const homedir = os.homedir();
@@ -14,12 +13,6 @@ function getPaths() {
 		"Library",
 		"LaunchAgents",
 		`${KEEPALIVE_LABEL}.plist`,
-	);
-	const legacyServerPlistPath = path.join(
-		homedir,
-		"Library",
-		"LaunchAgents",
-		`${LEGACY_SERVER_LABEL}.plist`,
 	);
 	const keepaliveLogPath = path.join(
 		homedir,
@@ -40,11 +33,9 @@ function getPaths() {
 
 	return {
 		keepalivePlistPath,
-		legacyServerPlistPath,
 		keepaliveLogPath,
 		keepaliveScriptPath,
 		nodePath: process.execPath,
-		projectRoot,
 	};
 }
 
@@ -139,15 +130,7 @@ export async function install(): Promise<void> {
 		const launchAgentsDir = path.dirname(paths.keepalivePlistPath);
 		await fs.mkdir(launchAgentsDir, { recursive: true });
 
-		// 3. Clean up any legacy HTTP server daemon if it was installed
-		try {
-			execSync(`launchctl unload "${paths.legacyServerPlistPath}" 2>/dev/null`);
-			await fs.unlink(paths.legacyServerPlistPath);
-		} catch {
-			// Ignored
-		}
-
-		// 4. Generate and write Keepalive Plist
+		// 3. Generate and write Keepalive Plist
 		const keepalivePlist = generateKeepalivePlist(
 			paths.nodePath,
 			paths.keepaliveScriptPath,
@@ -156,7 +139,7 @@ export async function install(): Promise<void> {
 		await fs.writeFile(paths.keepalivePlistPath, keepalivePlist, "utf-8");
 		await fs.chmod(paths.keepalivePlistPath, 0o644);
 
-		// 5. Load keepalive launch agent
+		// 4. Load keepalive launch agent
 		try {
 			execSync(`launchctl unload "${paths.keepalivePlistPath}" 2>/dev/null`);
 		} catch {
@@ -185,20 +168,18 @@ export async function uninstall(): Promise<void> {
 	const paths = getPaths();
 	console.error(`⚙️  Uninstalling macOS LaunchAgent keepalive daemon...`);
 
-	for (const p of [paths.keepalivePlistPath, paths.legacyServerPlistPath]) {
-		try {
-			execSync(`launchctl unload "${p}" 2>/dev/null`);
-		} catch {
-			// Ignored
-		}
+	try {
+		execSync(`launchctl unload "${paths.keepalivePlistPath}" 2>/dev/null`);
+	} catch {
+		// Ignored
+	}
 
-		try {
-			await fs.unlink(p);
-		} catch (err: unknown) {
-			const nodeErr = err as { code?: string };
-			if (nodeErr.code !== "ENOENT") {
-				throw err;
-			}
+	try {
+		await fs.unlink(paths.keepalivePlistPath);
+	} catch (err: unknown) {
+		const nodeErr = err as { code?: string };
+		if (nodeErr.code !== "ENOENT") {
+			throw err;
 		}
 	}
 

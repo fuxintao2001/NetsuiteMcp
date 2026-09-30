@@ -24,7 +24,7 @@ export function resolveRecordTypeParam(
 /**
  * Resolves an ID parameter (recordId, id, internalId, etc.) from various common aliases.
  */
-export function resolveRecordIdParam(
+function resolveRecordIdParam(
 	args: Record<string, unknown>,
 ): string | undefined {
 	const raw =

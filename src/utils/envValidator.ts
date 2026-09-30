@@ -1,17 +1,6 @@
 import { z } from "zod";
 
 const envSchema = z.object({
-	PORT: z
-		.string()
-		.optional()
-		.transform((val) => (val ? parseInt(val, 10) : undefined))
-		.refine(
-			(val) =>
-				val === undefined || (!Number.isNaN(val) && val >= 1 && val <= 65535),
-			{
-				message: "PORT must be a number between 1 and 65535",
-			},
-		),
 	OAUTH_CALLBACK_PORT: z
 		.string()
 		.optional()

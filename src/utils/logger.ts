@@ -58,5 +58,3 @@ const rootLogger = pino(
 export function createLogger(moduleName: string) {
 	return rootLogger.child({ module: moduleName });
 }
-
-export const logger = rootLogger;

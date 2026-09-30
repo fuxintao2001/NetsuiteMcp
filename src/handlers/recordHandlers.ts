@@ -16,15 +16,9 @@ import {
 	InspectRecordArgsSchema,
 	NetsuiteSchemaArgsSchema,
 } from "./toolSchemas.js";
+import { textResult } from "./types.js";
 
 type ToolResponse = CallToolResult;
-
-function textResult(text: string, isError?: boolean): CallToolResult {
-	return {
-		content: [{ type: "text" as const, text }],
-		...(isError ? { isError } : {}),
-	};
-}
 
 export async function handleGetRecordLink(
 	args: Record<string, unknown>,

@@ -44,7 +44,7 @@ export function parseEnv(content: string): Record<string, string> {
  * Load environment variables from .env and .env.local files into process.env.
  * Existing process.env variables take precedence and will not be overwritten.
  */
-export function loadEnv(customDir?: string): void {
+function loadEnv(customDir?: string): void {
 	const searchDirs = [customDir, process.cwd(), projectRoot].filter(
 		Boolean,
 	) as string[];

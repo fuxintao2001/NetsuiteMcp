@@ -17,16 +17,9 @@ import { hydrateMetadataIfNeeded } from "./metadataHydrator.js";
 import { handleGetScriptLogs } from "./queryHandlers.js";
 import { handleGetRecordLink } from "./recordHandlers.js";
 import { BatchExecuteArgsSchema } from "./toolSchemas.js";
-import type { ToolHandlerDeps } from "./types.js";
+import { type ToolHandlerDeps, textResult } from "./types.js";
 
 type ToolResponse = CallToolResult;
-
-function textResult(text: string, isError?: boolean): CallToolResult {
-	return {
-		content: [{ type: "text" as const, text }],
-		...(isError ? { isError } : {}),
-	};
-}
 
 export async function handleBatchExecute(
 	args: Record<string, unknown>,

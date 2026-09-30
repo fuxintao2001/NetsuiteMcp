@@ -10,6 +10,7 @@ import {
 } from "../telemetry/toolErrorSummarizer.js";
 import { isSandboxAccount } from "../utils/environment.js";
 import { GetErrorSummaryArgsSchema } from "./toolSchemas.js";
+import { textResult } from "./types.js";
 
 type ToolResponse = CallToolResult;
 
@@ -25,13 +26,6 @@ const PKG_VERSION: string = (() => {
 		return "unknown";
 	}
 })();
-
-function textResult(text: string, isError?: boolean): CallToolResult {
-	return {
-		content: [{ type: "text" as const, text }],
-		...(isError ? { isError } : {}),
-	};
-}
 
 /**
  * netsuite_status — Diagnostic tool

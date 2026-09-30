@@ -4,15 +4,9 @@ import type { OAuthManager } from "../oauth/manager.js";
 import { isSandboxAccount } from "../utils/environment.js";
 import { suitecloudRunnerService } from "../utils/suitecloudRunner.js";
 import { SuitecloudUploadArgsSchema } from "./toolSchemas.js";
+import { textResult } from "./types.js";
 
 type ToolResponse = CallToolResult;
-
-function textResult(text: string, isError?: boolean): CallToolResult {
-	return {
-		content: [{ type: "text" as const, text }],
-		...(isError ? { isError } : {}),
-	};
-}
 
 export async function handleSuitecloudUpload(
 	args: Record<string, unknown>,

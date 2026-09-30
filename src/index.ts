@@ -18,7 +18,7 @@ import { McpSupervisor } from "./supervisor/supervisor.js";
 import { installGlobalErrorHandlers } from "./telemetry/globalErrorHandlers.js";
 import { flushToolErrorLogger } from "./telemetry/toolErrorLogger.js";
 import { resolveSessionPath } from "./utils/config.js";
-import { getKnownClientId } from "./utils/constants.js";
+import { getKnownClientId, SERVER_NAME } from "./utils/constants.js";
 import { validateEnv } from "./utils/envValidator.js";
 import { resolveCustomRecordRectype as resolveRectypeHelper } from "./utils/metadata.js";
 
@@ -92,7 +92,7 @@ class NetSuiteMCPServer {
 			process.env.ENABLE_MCP_PROMPTS === "1";
 
 		this.server = new Server(
-			{ name: "netsuite-mcp", version: SERVER_VERSION },
+			{ name: SERVER_NAME, version: SERVER_VERSION },
 			{
 				capabilities: {
 					tools: {},

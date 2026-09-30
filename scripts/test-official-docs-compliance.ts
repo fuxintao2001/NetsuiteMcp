@@ -19,18 +19,10 @@
  * ├── S5. 官方 272 类标准记录字典与字段存在性反查 (Official Records Catalog Reflection)
  * └── S6. 规范合法代码通过率与零误报验证 (Clean Code Verification & Zero False Positive)
  */
-
-import fs from "fs";
-import path from "path";
-import { fileURLToPath } from "url";
 import { recordsReferenceService } from "../src/utils/recordsReference.js";
 import { validateSuiteQL } from "../src/utils/suiteqlGuard.js";
 import { SUITEQL_TEMPLATES } from "../src/utils/suiteqlTemplates.js";
 import { analyzeSuiteScriptContent } from "./suitescript-safe-check.js";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const projectRoot = path.dirname(__dirname);
 
 interface ComplianceTestCase {
 	id: string;

@@ -10,7 +10,7 @@ export interface RecordFieldMeta {
 	help?: string;
 }
 
-export interface RecordTypeMeta {
+interface RecordTypeMeta {
 	internalId: string;
 	label?: string;
 	fields: RecordFieldMeta[];

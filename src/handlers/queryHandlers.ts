@@ -6,15 +6,9 @@ import {
 	GetQueryTemplateArgsSchema,
 	GetScriptLogsArgsSchema,
 } from "./toolSchemas.js";
+import { textResult } from "./types.js";
 
 type ToolResponse = CallToolResult;
-
-function textResult(text: string, isError?: boolean): CallToolResult {
-	return {
-		content: [{ type: "text" as const, text }],
-		...(isError ? { isError } : {}),
-	};
-}
 
 export async function handleGetScriptLogs(
 	args: Record<string, unknown>,

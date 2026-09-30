@@ -18,3 +18,13 @@ export interface ToolHandlerDeps {
 		type: string,
 	) => number | null | Promise<number | null>;
 }
+
+/**
+ * Create a text content response matching the MCP SDK CallToolResult shape.
+ */
+export function textResult(text: string, isError?: boolean): CallToolResult {
+	return {
+		content: [{ type: "text" as const, text }],
+		...(isError ? { isError } : {}),
+	};
+}

@@ -53,21 +53,10 @@ import {
 	LOGOUT_TOOL,
 	STATUS_TOOL,
 } from "./toolSchemas.js";
-import type { ToolHandlerDeps } from "./types.js";
+import { type ToolHandlerDeps, textResult } from "./types.js";
 
 export type { ToolHandlerDeps };
-
-// ---------------------------------------------------------------------------
-// Shared helper
-// ---------------------------------------------------------------------------
-
-/** Create a text content response matching the MCP SDK CallToolResult shape. */
-export function textResult(text: string, isError?: boolean): CallToolResult {
-	return {
-		content: [{ type: "text" as const, text }],
-		...(isError ? { isError } : {}),
-	};
-}
+export { textResult };
 
 // ---------------------------------------------------------------------------
 // Tool description & annotation enhancement helpers

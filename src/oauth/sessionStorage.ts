@@ -145,19 +145,4 @@ export class SessionStorage {
 			// Ignored
 		}
 	}
-
-	/**
-	 * Check if the session heartbeat is fresh (e.g. updated within maxAgeMs).
-	 */
-	async isHeartbeatFresh(maxAgeMs = 120000): Promise<boolean> {
-		try {
-			const heartbeatFile = path.join(this.storagePath, "session.heartbeat");
-			const content = await fs.readFile(heartbeatFile, "utf-8");
-			const lastBeat = parseInt(content.trim(), 10);
-			if (Number.isNaN(lastBeat)) return false;
-			return Date.now() - lastBeat < maxAgeMs;
-		} catch {
-			return false;
-		}
-	}
 }
