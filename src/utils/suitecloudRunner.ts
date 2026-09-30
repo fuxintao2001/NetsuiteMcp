@@ -9,7 +9,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const execAsync = promisify(exec);
 
-export interface FileInspectionResult {
+interface FileInspectionResult {
 	exists: boolean;
 	localFullPath?: string | undefined;
 	fileCabinetPath?: string | undefined;
@@ -23,7 +23,7 @@ export interface FileInspectionResult {
 	warnings?: string[] | undefined;
 }
 
-export interface MultiFileResolutionResult {
+interface MultiFileResolutionResult {
 	projectRoot: string;
 	files: FileInspectionResult[];
 	totalBytes: number;
@@ -32,14 +32,14 @@ export interface MultiFileResolutionResult {
 	warnings: string[];
 }
 
-export interface AuthInfo {
+interface AuthInfo {
 	authId: string;
 	account: string;
 	role: string;
 	domain?: string | undefined;
 }
 
-export interface AuthSyncResult {
+interface AuthSyncResult {
 	configuredAuthId?: string | undefined;
 	matchedAuthId?: string | undefined;
 	autoUpdated: boolean;
@@ -47,7 +47,7 @@ export interface AuthSyncResult {
 	warning?: string | undefined;
 }
 
-export interface UploadExecutionResult {
+interface UploadExecutionResult {
 	success: boolean;
 	stdout: string;
 	stderr: string;

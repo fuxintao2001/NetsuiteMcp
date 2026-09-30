@@ -1,13 +1,10 @@
 #!/usr/bin/env node
 import "./utils/envLoader.js";
 import { readFileSync } from "node:fs";
-import http from "node:http";
-import https from "node:https";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Server } from "@modelcontextprotocol/server";
 import { StdioServerTransport } from "@modelcontextprotocol/server/stdio";
-import axios from "axios";
 import { registerPromptHandlers } from "./handlers/prompts.js";
 import { registerResourceHandlers } from "./handlers/resources.js";
 import type { ToolHandlerDeps } from "./handlers/tools.js";
@@ -29,12 +26,6 @@ import { flushToolErrorLogger } from "./utils/toolErrorLogger.js";
 // Global error handlers
 // ---------------------------------------------------------------------------
 installGlobalErrorHandlers();
-
-// ---------------------------------------------------------------------------
-// Configure Axios connection pooling
-// ---------------------------------------------------------------------------
-axios.defaults.httpAgent = new http.Agent({ keepAlive: true });
-axios.defaults.httpsAgent = new https.Agent({ keepAlive: true });
 
 // ---------------------------------------------------------------------------
 // Project root

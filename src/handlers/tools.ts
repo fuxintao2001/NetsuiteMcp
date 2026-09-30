@@ -23,6 +23,7 @@ import {
 } from "../utils/recordsReference.js";
 import {
 	formatSuiteQLErrorResponse,
+	splitSuiteQLStatements,
 	transpileSuiteQLDialect,
 } from "../utils/suiteqlGuard.js";
 import { classifyError, recordToolError } from "../utils/toolErrorLogger.js";
@@ -75,7 +76,7 @@ export function textResult(text: string, isError?: boolean): CallToolResult {
  * - destructiveHint: Indicates tool mutates or deletes data.
  * - idempotentHint: Indicates calling repeatedly with identical arguments produces identical results.
  */
-export function getToolAnnotations(name: string): Record<string, boolean> {
+function getToolAnnotations(name: string): Record<string, boolean> {
 	const READ_ONLY_TOOLS = new Set([
 		"ns_runCustomSuiteQL",
 		"ns_getRecord",
@@ -152,7 +153,7 @@ function enhanceToolDescriptions(
 
 		if (t.name === "ns_runCustomSuiteQL") {
 			enhanced.description =
-				"Primary 1-turn tool for querying NetSuite records, filtered lists, aggregations, and financial analytics via SuiteQL. Standard core tables (transaction, customer, item, vendor, subsidiary, etc.) can be queried directly without prior metadata reconnaissance. For single record inspection by ID or document number, prefer netsuite_inspect_record.";
+				"Primary 1-turn tool for querying NetSuite records, filtered lists, aggregations, and financial analytics via SuiteQL. Standard core tables (transaction, customer, item, vendor, subsidiary, etc.) can be queried directly without prior metadata reconnaissance. Supports parallel multi-query execution: pass multiple queries separated by ';' in 'sqlQuery' or as an array in 'sqlQueries' to execute concurrently in 1 turn. For single record inspection by ID or document number, prefer netsuite_inspect_record.";
 			if (enhanced.inputSchema && typeof enhanced.inputSchema === "object") {
 				const schema = { ...(enhanced.inputSchema as Record<string, unknown>) };
 				if (schema.properties && typeof schema.properties === "object") {
@@ -161,9 +162,15 @@ function enhanceToolDescriptions(
 						props.sqlQuery = {
 							...(props.sqlQuery as Record<string, unknown>),
 							description:
-								"The SuiteQL query string to execute. Explicit columns only, Oracle pagination (ROWNUM <= N or FETCH FIRST N ROWS ONLY), and mainline='F' for line items.",
+								"The SuiteQL query string to execute. Single statement or multiple statements separated by ';' to execute in parallel. Explicit columns only, Oracle pagination (ROWNUM <= N or FETCH FIRST N ROWS ONLY), and mainline='F' for line items.",
 						};
 					}
+					props.sqlQueries = {
+						type: "array",
+						items: { type: "string" },
+						description:
+							"Optional array of SuiteQL query strings to execute concurrently in parallel (max 10). Dramatically reduces latency by eliminating multi-turn roundtrips.",
+					};
 					schema.properties = props;
 				}
 				enhanced.inputSchema = schema;
@@ -547,15 +554,135 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
 					}
 				}
 
-				// --- Auto-transpile MySQL/Postgres dialects in ns_runCustomSuiteQL ---
+				// --- Auto-transpile MySQL/Postgres dialects and parallel execution in ns_runCustomSuiteQL ---
 				if (name === "ns_runCustomSuiteQL") {
+					let queriesToRun: string[] = [];
+
+					if (
+						Array.isArray(safeArgs.sqlQueries) &&
+						safeArgs.sqlQueries.length > 0
+					) {
+						queriesToRun = (safeArgs.sqlQueries as unknown[])
+							.filter(
+								(q): q is string =>
+									typeof q === "string" && q.trim().length > 0,
+							)
+							.map((q) => q.trim());
+					} else if (
+						Array.isArray(safeArgs.queries) &&
+						safeArgs.queries.length > 0
+					) {
+						queriesToRun = (safeArgs.queries as unknown[])
+							.filter(
+								(q): q is string =>
+									typeof q === "string" && q.trim().length > 0,
+							)
+							.map((q) => q.trim());
+					} else {
+						const rawQuery = (safeArgs.sqlQuery ||
+							safeArgs.query ||
+							safeArgs.sql ||
+							"") as string;
+						queriesToRun = splitSuiteQLStatements(rawQuery);
+					}
+
+					if (queriesToRun.length > 10) {
+						return textResult(
+							`❌ [Batch Limit Exceeded] A maximum of 10 queries can be executed in parallel (received ${queriesToRun.length}). Please split into smaller batches.`,
+							true,
+						);
+					}
+
+					// Parallel execution branch when 2 or more queries are present
+					if (queriesToRun.length > 1) {
+						const parallelStartTime = Date.now();
+						await reportProgress(
+							1,
+							queriesToRun.length + 1,
+							`Executing ${queriesToRun.length} SuiteQL queries in parallel...`,
+						);
+
+						const parallelResults = await Promise.all(
+							queriesToRun.map(async (queryStr, index) => {
+								const queryStart = Date.now();
+								try {
+									const { transpiledSql } = transpileSuiteQLDialect(queryStr);
+									const queryRes = await mcpTools.executeTool(
+										"ns_runCustomSuiteQL",
+										{ sqlQuery: transpiledSql },
+									);
+									const formatted = formatSuiteQLToCompactMarkdown(queryRes);
+									return {
+										index: index + 1,
+										query: queryStr,
+										success: true,
+										formatted,
+										durationMs: Date.now() - queryStart,
+									};
+								} catch (err: unknown) {
+									const errorMsg =
+										err instanceof Error ? err.message : String(err);
+									return {
+										index: index + 1,
+										query: queryStr,
+										success: false,
+										error: formatSuiteQLErrorResponse(errorMsg, queryStr),
+										durationMs: Date.now() - queryStart,
+									};
+								}
+							}),
+						);
+
+						const totalDurationMs = Date.now() - parallelStartTime;
+						const successCount = parallelResults.filter(
+							(r) => r.success,
+						).length;
+						const failCount = parallelResults.length - successCount;
+
+						let combinedMarkdown = `## 📊 SuiteQL Parallel Execution Results (${parallelResults.length} queries, ${successCount} succeeded${failCount > 0 ? `, ${failCount} failed` : ""}, total ${totalDurationMs}ms)\n\n`;
+
+						for (const res of parallelResults) {
+							combinedMarkdown += `### 🔹 Query ${res.index}: \`${res.query}\` (${res.durationMs}ms)\n\n`;
+							if (res.success) {
+								combinedMarkdown += `${res.formatted}\n\n`;
+							} else {
+								combinedMarkdown += `${res.error}\n\n`;
+							}
+						}
+
+						return textResult(
+							combinedMarkdown.trim(),
+							failCount === parallelResults.length,
+						);
+					}
+
+					// Single query fallback: assign single statement and transpile
+					if (queriesToRun.length === 1 && queriesToRun[0]) {
+						if (safeArgs.sqlQuery !== undefined) {
+							safeArgs.sqlQuery = queriesToRun[0];
+						} else if (safeArgs.sql !== undefined) {
+							safeArgs.sql = queriesToRun[0];
+						} else if (safeArgs.query !== undefined) {
+							safeArgs.query = queriesToRun[0];
+						} else {
+							safeArgs.sqlQuery = queriesToRun[0];
+						}
+					}
 					const rawQuery = (safeArgs.sqlQuery ||
 						safeArgs.query ||
 						safeArgs.sql ||
 						"") as string;
 					const { transpiledSql, changed } = transpileSuiteQLDialect(rawQuery);
 					if (changed) {
-						safeArgs.sqlQuery = transpiledSql;
+						if (safeArgs.sqlQuery !== undefined) {
+							safeArgs.sqlQuery = transpiledSql;
+						} else if (safeArgs.sql !== undefined) {
+							safeArgs.sql = transpiledSql;
+						} else if (safeArgs.query !== undefined) {
+							safeArgs.query = transpiledSql;
+						} else {
+							safeArgs.sqlQuery = transpiledSql;
+						}
 					}
 				}
 

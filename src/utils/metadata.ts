@@ -56,7 +56,7 @@ export function mapFieldType(
  * Sanitizes a script ID for use in SuiteQL queries to prevent SQL injection.
  * Enforces that scriptId contains only alphanumeric characters and underscores.
  */
-export function sanitizeScriptId(scriptId: string): string {
+function sanitizeScriptId(scriptId: string): string {
 	const sanitized = scriptId.trim().toUpperCase();
 	if (!/^[A-Z0-9_]+$/.test(sanitized)) {
 		throw new Error(`Invalid script ID format: "${scriptId}"`);
@@ -195,7 +195,7 @@ export interface SuiteQLTableCatalogEntry {
 	bestPractice?: string;
 }
 
-export const SUITEQL_TABLE_CATALOG: SuiteQLTableCatalogEntry[] = [
+const SUITEQL_TABLE_CATALOG: SuiteQLTableCatalogEntry[] = [
 	// 1. Inventory & Stock Management
 	{
 		tableName: "aggregateitemlocation",

@@ -65,11 +65,6 @@ let cachedSkillsResources: SkillResourceItem[] | null = null;
 let lastCacheTime = 0;
 const SKILLS_CACHE_TTL_MS = 60_000; // 1 minute TTL
 
-export function invalidateSkillsResourcesCache(): void {
-	cachedSkillsResources = null;
-	lastCacheTime = 0;
-}
-
 // ---------------------------------------------------------------------------
 // MCP Resource Handlers
 // ---------------------------------------------------------------------------

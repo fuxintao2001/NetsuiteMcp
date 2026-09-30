@@ -276,6 +276,7 @@ export class OAuthManager {
 
 				await this.storage.save({
 					...session,
+					previous_tokens: session.tokens,
 					tokens: newTokens,
 					authenticated: true,
 					unrecoverable: false,
@@ -286,20 +287,17 @@ export class OAuthManager {
 					console.error(
 						"🔒 Refresh token expired — session requires re-authentication",
 					);
-					const errMsg = error.message || "";
-					if (!errMsg.includes("post-network-drop rotation mismatch")) {
-						// Mark session as unauthenticated while preserving config for potential re-auth
-						const current = await this.storage.load();
-						if (
-							current &&
-							(current.authenticated !== false || !current.unrecoverable)
-						) {
-							await this.storage.save({
-								...current,
-								authenticated: false,
-								unrecoverable: true,
-							});
-						}
+					// Mark session as unauthenticated while preserving config for potential re-auth
+					const current = await this.storage.load();
+					if (
+						current &&
+						(current.authenticated !== false || !current.unrecoverable)
+					) {
+						await this.storage.save({
+							...current,
+							authenticated: false,
+							unrecoverable: true,
+						});
 					}
 				}
 				throw error;
@@ -505,6 +503,7 @@ export class OAuthManager {
 
 				await this.storage.save({
 					...(currentSession || session),
+					previous_tokens: (currentSession || session).tokens,
 					tokens: newTokens,
 					authenticated: true,
 					unrecoverable: false,
@@ -517,19 +516,16 @@ export class OAuthManager {
 					console.error(
 						"🔒 Refresh token expired — re-authentication required",
 					);
-					const errMsg = error.message || "";
-					if (!errMsg.includes("post-network-drop rotation mismatch")) {
-						const current = await this.storage.load();
-						if (
-							current &&
-							(current.authenticated !== false || !current.unrecoverable)
-						) {
-							await this.storage.save({
-								...current,
-								authenticated: false,
-								unrecoverable: true,
-							});
-						}
+					const current = await this.storage.load();
+					if (
+						current &&
+						(current.authenticated !== false || !current.unrecoverable)
+					) {
+						await this.storage.save({
+							...current,
+							authenticated: false,
+							unrecoverable: true,
+						});
 					}
 					throw error;
 				}

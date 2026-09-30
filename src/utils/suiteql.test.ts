@@ -18,6 +18,7 @@ import {
 	hasPaginationClause,
 	maskStringLiterals,
 	SuiteQLValidationError,
+	splitSuiteQLStatements,
 	transpileSuiteQLDialect,
 	unmaskStringLiterals,
 	validateSuiteQL,
@@ -41,6 +42,48 @@ describe("SuiteQL, Search & Query Utilities", () => {
 				const { maskedSql, literals } = maskStringLiterals(sql);
 				const restored = unmaskStringLiterals(maskedSql, literals);
 				expect(restored).toBe(sql);
+			});
+		});
+
+		describe("splitSuiteQLStatements", () => {
+			it("should split multiple statements separated by semicolons", () => {
+				const sql =
+					"SELECT id, tranid FROM transaction; SELECT id, entityid FROM customer;";
+				const statements = splitSuiteQLStatements(sql);
+				expect(statements).toEqual([
+					"SELECT id, tranid FROM transaction",
+					"SELECT id, entityid FROM customer",
+				]);
+			});
+
+			it("should safely ignore semicolons inside single-quoted string literals", () => {
+				const sql =
+					"SELECT id FROM transaction WHERE memo = 'step 1; step 2'; SELECT id FROM customer WHERE companyname = 'ABC; LLC'";
+				const statements = splitSuiteQLStatements(sql);
+				expect(statements).toHaveLength(2);
+				expect(statements[0]).toBe(
+					"SELECT id FROM transaction WHERE memo = 'step 1; step 2'",
+				);
+				expect(statements[1]).toBe(
+					"SELECT id FROM customer WHERE companyname = 'ABC; LLC'",
+				);
+			});
+
+			it("should return single statement for query without semicolon or with only trailing semicolon", () => {
+				expect(splitSuiteQLStatements("SELECT id FROM customer")).toEqual([
+					"SELECT id FROM customer",
+				]);
+				expect(splitSuiteQLStatements("SELECT id FROM customer;")).toEqual([
+					"SELECT id FROM customer",
+				]);
+				expect(splitSuiteQLStatements("SELECT id FROM customer;;;")).toEqual([
+					"SELECT id FROM customer",
+				]);
+			});
+
+			it("should handle empty or whitespace input gracefully", () => {
+				expect(splitSuiteQLStatements("")).toEqual([]);
+				expect(splitSuiteQLStatements("   ;   ;;   ")).toEqual([]);
 			});
 		});
 

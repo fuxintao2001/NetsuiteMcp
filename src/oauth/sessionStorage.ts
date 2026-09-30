@@ -10,6 +10,7 @@ export interface SessionData {
 		redirectUri: string;
 	};
 	tokens?: TokenData;
+	previous_tokens?: TokenData | undefined;
 	timestamp?: number;
 	authenticated?: boolean;
 	unrecoverable?: boolean;

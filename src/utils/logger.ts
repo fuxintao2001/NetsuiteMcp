@@ -9,7 +9,7 @@ const defaultLevel =
  * Custom hooks/formatters to ensure all logged strings and objects
  * have sensitive tokens and absolute paths sanitized.
  */
-export const rootLogger = pino(
+const rootLogger = pino(
 	{
 		level: defaultLevel,
 		formatters: {

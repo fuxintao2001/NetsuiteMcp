@@ -245,7 +245,7 @@ export function createToolErrorLogger(
 /**
  * Returns the active default logger, initializing it on demand if necessary.
  */
-export function getToolErrorLogger(): Logger {
+function getToolErrorLogger(): Logger {
 	if (!defaultLogger) {
 		defaultLogger = createToolErrorLogger();
 	}

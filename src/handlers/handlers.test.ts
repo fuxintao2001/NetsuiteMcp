@@ -1258,6 +1258,97 @@ describe("MCP Handler Wires", () => {
 				);
 			});
 
+			it("should execute multiple semicolon-separated queries in parallel in ns_runCustomSuiteQL", async () => {
+				const callFn = registeredHandlers.get("tools/call");
+
+				mockMCPTools.executeTool.mockImplementation(
+					async (_name: string, args: any) => {
+						if (args.sqlQuery.includes("transaction")) {
+							return { data: [{ id: "101", tranid: "SO1001" }] };
+						}
+						if (args.sqlQuery.includes("customer")) {
+							return { data: [{ id: "201", entityid: "CUST2001" }] };
+						}
+						return { data: [] };
+					},
+				);
+
+				const res = (await callFn?.({
+					params: {
+						name: "ns_runCustomSuiteQL",
+						arguments: {
+							sqlQuery:
+								"SELECT id, tranid FROM transaction; SELECT id, entityid FROM customer;",
+						},
+					},
+				})) as any;
+
+				expect(res.isError).toBeFalsy();
+				expect(res.content[0].text).toContain(
+					"SuiteQL Parallel Execution Results",
+				);
+				expect(res.content[0].text).toContain("2 queries");
+				expect(res.content[0].text).toContain("SO1001");
+				expect(res.content[0].text).toContain("CUST2001");
+				expect(mockMCPTools.executeTool).toHaveBeenCalledTimes(2);
+			});
+
+			it("should execute sqlQueries array in parallel in ns_runCustomSuiteQL", async () => {
+				const callFn = registeredHandlers.get("tools/call");
+
+				mockMCPTools.executeTool.mockImplementation(
+					async (_name: string, args: any) => {
+						if (args.sqlQuery.includes("item")) {
+							return { data: [{ id: "301", itemid: "ITEM_A" }] };
+						}
+						if (args.sqlQuery.includes("vendor")) {
+							return { data: [{ id: "401", entityid: "VEND_B" }] };
+						}
+						return { data: [] };
+					},
+				);
+
+				const res = (await callFn?.({
+					params: {
+						name: "ns_runCustomSuiteQL",
+						arguments: {
+							sqlQueries: [
+								"SELECT id, itemid FROM item",
+								"SELECT id, entityid FROM vendor",
+							],
+						},
+					},
+				})) as any;
+
+				expect(res.isError).toBeFalsy();
+				expect(res.content[0].text).toContain(
+					"SuiteQL Parallel Execution Results",
+				);
+				expect(res.content[0].text).toContain("ITEM_A");
+				expect(res.content[0].text).toContain("VEND_B");
+				expect(mockMCPTools.executeTool).toHaveBeenCalledTimes(2);
+			});
+
+			it("should reject more than 10 queries in ns_runCustomSuiteQL", async () => {
+				const callFn = registeredHandlers.get("tools/call");
+				const queries = Array.from(
+					{ length: 11 },
+					(_, i) => `SELECT ${i} FROM customer`,
+				);
+
+				const res = (await callFn?.({
+					params: {
+						name: "ns_runCustomSuiteQL",
+						arguments: {
+							sqlQueries: queries,
+						},
+					},
+				})) as any;
+
+				expect(res.isError).toBe(true);
+				expect(res.content[0].text).toContain("Batch Limit Exceeded");
+			});
+
 			it("should reject empty or missing recordId for ns_getRecord without network call", async () => {
 				const callFn = registeredHandlers.get("tools/call");
 

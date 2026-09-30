@@ -196,10 +196,11 @@ export async function refreshAccessToken(
 }
 
 /**
- * Check if token needs refresh (expires in less than 75% of lifetime, e.g. < 45 minutes remaining for a 60m token)
+ * Check if token needs refresh (expires in less than 5 minutes / 300s or < 10% of lifetime)
  */
 export function shouldRefreshToken(tokens: TokenData): boolean {
 	const timeUntilExpiry = tokens.expires_at - Date.now();
-	const threshold = tokens.expires_in * 1000 * 0.75;
+	// Safety threshold: 5 minutes (300s), capped at 10% of lifetime for short-lived tokens
+	const threshold = Math.min(300 * 1000, tokens.expires_in * 1000 * 0.1);
 	return timeUntilExpiry < threshold;
 }

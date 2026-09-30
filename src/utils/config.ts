@@ -8,15 +8,15 @@ import { getDefaultConfigDir, getDefaultSessionsDir } from "./environment.js";
 // Zod Schemas & TypeScript Types
 // ---------------------------------------------------------------------------
 
-export const AppAccountConfigSchema = z.object({
+const AppAccountConfigSchema = z.object({
 	accountId: z.string().trim().min(1, "accountId cannot be empty"),
 	clientId: z.string().trim().min(1, "clientId cannot be empty"),
 	sessionPath: z.string().trim().optional(),
 	callbackPort: z.number().int().min(1024).max(65535).optional(),
 });
-export type AppAccountConfig = z.infer<typeof AppAccountConfigSchema>;
+type AppAccountConfig = z.infer<typeof AppAccountConfigSchema>;
 
-export const AppConfigSchema = z.object({
+const AppConfigSchema = z.object({
 	defaultCallbackPort: z.number().int().min(1024).max(65535).default(8080),
 	sessionsDir: z.string().trim().optional(),
 	redisUrl: z.string().trim().optional(),

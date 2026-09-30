@@ -40,8 +40,6 @@ export const schemaReconnaissanceTracker = {
 	},
 };
 
-export const SchemaReconnaissanceTracker = schemaReconnaissanceTracker;
-
 const DISALLOWED_KEYWORDS_REGEX =
 	/\b(INSERT|UPDATE|DELETE|DROP|CREATE|ALTER|TRUNCATE|GRANT|REVOKE|EXEC|EXECUTE|MERGE|INTO|DATABASE|SCHEMA)\b/i;
 
@@ -112,6 +110,33 @@ export function unmaskStringLiterals(
 		unmasked = unmasked.replace(`__STR_LITERAL_${i}__`, () => literal);
 	}
 	return unmasked;
+}
+
+/**
+ * Splits a composite SQL string into individual statements by semicolon (;),
+ * while safely ignoring semicolons inside string literals ('...').
+ * Returns an array of trimmed, non-empty SQL statements.
+ */
+export function splitSuiteQLStatements(rawSql: string): string[] {
+	if (!rawSql || typeof rawSql !== "string") {
+		return [];
+	}
+
+	const trimmed = rawSql.trim();
+	if (!trimmed) return [];
+
+	const { maskedSql, literals } = maskStringLiterals(trimmed);
+	const rawParts = maskedSql.split(";");
+	const statements: string[] = [];
+
+	for (const part of rawParts) {
+		const unmasked = unmaskStringLiterals(part, literals).trim();
+		if (unmasked.length > 0) {
+			statements.push(unmasked);
+		}
+	}
+
+	return statements;
 }
 
 /**
@@ -263,7 +288,7 @@ export function ensureSuiteQLPagination(
  * Detects whether a SuiteQL query contains any wildcard column projection (* or alias.*),
  * while correctly ignoring COUNT(*) aggregate functions and arithmetic multiplication (a * b).
  */
-export function hasWildcardSelection(maskedSql: string): boolean {
+function hasWildcardSelection(maskedSql: string): boolean {
 	const selectBlocks = maskedSql.match(
 		/(?:^|\s|\()SELECT\s+(?:DISTINCT\s+)?([\s\S]+?)\s+FROM\b/gi,
 	);

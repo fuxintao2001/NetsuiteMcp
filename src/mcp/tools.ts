@@ -18,7 +18,7 @@ import {
 	assertValidSuiteQL,
 	ensureSuiteQLPagination,
 	extractReferencedTables,
-	SchemaReconnaissanceTracker,
+	schemaReconnaissanceTracker,
 	transpileSuiteQLDialect,
 } from "../utils/suiteqlGuard.js";
 
@@ -112,7 +112,7 @@ export class NetSuiteMCPTools {
 			const targetTable = resolveRecordTypeParam(parameters);
 			if (targetTable) {
 				parameters.recordType = targetTable;
-				SchemaReconnaissanceTracker.record(targetTable);
+				schemaReconnaissanceTracker.record(targetTable);
 			}
 			if (accountId) {
 				const cacheKey = this.metadataCacheKey(toolName, parameters);

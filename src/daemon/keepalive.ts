@@ -4,32 +4,10 @@ import https from "node:https";
 import os from "node:os";
 import path from "node:path";
 import { Redis } from "ioredis";
+import type { SessionData, TokenData } from "../oauth/sessionStorage.js";
 import { shouldRefreshToken } from "../oauth/tokenExchange.js";
 import { RedisLockProvider } from "../utils/redisLock.js";
 import { checkNetworkReadiness } from "../utils/resilience.js";
-
-export interface TokenData {
-	access_token: string;
-	refresh_token: string;
-	expires_in: number;
-	expires_at: number;
-	accountId: string;
-	clientId: string;
-}
-
-export interface SessionData {
-	pkce?: string | null;
-	state?: string;
-	config?: {
-		accountId: string;
-		clientId: string;
-		redirectUri: string;
-	};
-	tokens?: TokenData;
-	timestamp?: number;
-	authenticated?: boolean;
-	unrecoverable?: boolean;
-}
 
 /**
  * Helper to get ISO timestamp for logs
@@ -212,12 +190,18 @@ async function refreshTokens(
 		} catch (err: unknown) {
 			const message = err instanceof Error ? err.message : String(err);
 
-			// ONLY retry on safe, pre-flight errors where we know the request didn't reach NetSuite
+			// ONLY retry on safe, pre-flight errors where we know the request didn't reach NetSuite or socket dropped before completion
 			const isSafeNetworkError =
 				message.includes("ENOTFOUND") ||
 				message.includes("ECONNREFUSED") ||
 				message.includes("ENETUNREACH") ||
-				message.includes("EAI_AGAIN");
+				message.includes("EAI_AGAIN") ||
+				message.includes("Client network socket disconnected") ||
+				message.includes("ECONNRESET") ||
+				message.includes("ETIMEDOUT") ||
+				message.includes("socket hang up") ||
+				message.includes("ERR_SOCKET_CONNECTION_TIMEOUT") ||
+				message.includes("EPIPE");
 
 			if (
 				attempt < maxAttempts &&
@@ -459,8 +443,10 @@ export async function runKeepAlive(): Promise<void> {
 
 					const updatedSession: SessionData = {
 						...lockedSession,
+						previous_tokens: lockedSession.tokens,
 						tokens: updatedTokens,
 						authenticated: true,
+						unrecoverable: false,
 					};
 
 					// Save atomic
@@ -488,12 +474,9 @@ export async function runKeepAlive(): Promise<void> {
 						`[${accountId}] Failed during refresh operation: ${message}`,
 					);
 					failedAccounts++;
-					// If refresh token is truly expired and not caused by a post-network-drop rotation mismatch, mark session unauthenticated
+					// If refresh token is unrecoverable, mark session unauthenticated
 					try {
-						if (
-							message.includes("Unrecoverable") &&
-							!message.includes("post-network-drop rotation mismatch")
-						) {
+						if (message.includes("Unrecoverable")) {
 							const fileContent = await fs.readFile(sessionFile, "utf-8");
 							const session = JSON.parse(fileContent) as SessionData;
 							if (session.authenticated !== false || !session.unrecoverable) {
@@ -508,12 +491,6 @@ export async function runKeepAlive(): Promise<void> {
 									`[${accountId}] Session marked unauthenticated and unrecoverable due to unrecoverable token expiration.`,
 								);
 							}
-						} else if (
-							message.includes("post-network-drop rotation mismatch")
-						) {
-							logWarn(
-								`[${accountId}] Preserving session configuration despite network drop rotation mismatch. Will attempt auto-recovery next round.`,
-							);
 						}
 					} catch {
 						// Ignore sub-errors

@@ -4,24 +4,6 @@ import { z } from "zod";
 // Zod Schemas & Inferred Types
 // ---------------------------------------------------------------------------
 
-export const AuthenticateArgsSchema = z.object({
-	accountId: z
-		.string()
-		.trim()
-		.optional()
-		.describe(
-			"NetSuite Account ID (e.g. 1234567 or 1234567_SB1). Falls back to NETSUITE_ACCOUNT_ID env var.",
-		),
-	clientId: z
-		.string()
-		.trim()
-		.optional()
-		.describe(
-			"OAuth 2.0 Client ID from NetSuite integration record. Falls back to NETSUITE_CLIENT_ID env var.",
-		),
-});
-export type AuthenticateArgs = z.infer<typeof AuthenticateArgsSchema>;
-
 export const GetRecordLinkArgsSchema = z.object({
 	recordId: z
 		.string()
@@ -47,21 +29,8 @@ export const GetRecordLinkArgsSchema = z.object({
 		.optional()
 		.describe("Numeric custom record type ID. Auto-resolved if omitted."),
 });
-export type GetRecordLinkArgs = z.infer<typeof GetRecordLinkArgsSchema>;
 
-export const RefreshCacheArgsSchema = z.object({
-	tableName: z
-		.string()
-		.trim()
-		.toLowerCase()
-		.optional()
-		.describe(
-			"Optional: Specific NetSuite table or record type to clear from cache (e.g. customer, salesorder, customrecord_xxx).",
-		),
-});
-export type RefreshCacheArgs = z.infer<typeof RefreshCacheArgsSchema>;
-
-export const BatchTaskSchema = z.object({
+const BatchTaskSchema = z.object({
 	toolName: z
 		.string()
 		.trim()
@@ -72,7 +41,6 @@ export const BatchTaskSchema = z.object({
 		.optional()
 		.describe("Arguments dictionary for the specified tool."),
 });
-export type BatchTask = z.infer<typeof BatchTaskSchema>;
 
 export const BatchExecuteArgsSchema = z.object({
 	tasks: z
@@ -81,7 +49,6 @@ export const BatchExecuteArgsSchema = z.object({
 		.max(10, "tasks array exceeds maximum limit of 10")
 		.describe("Array of tasks to execute in parallel (maximum 10 tasks)."),
 });
-export type BatchExecuteArgs = z.infer<typeof BatchExecuteArgsSchema>;
 
 export const GetScriptLogsArgsSchema = z.object({
 	scriptId: z
@@ -136,7 +103,6 @@ export const GetScriptLogsArgsSchema = z.object({
 			"Maximum number of log entries to return. Default: 50, Max: 200.",
 		),
 });
-export type GetScriptLogsArgs = z.infer<typeof GetScriptLogsArgsSchema>;
 
 export const InspectRecordArgsSchema = z.object({
 	recordType: z
@@ -197,7 +163,6 @@ export const InspectRecordArgsSchema = z.object({
 			"Whether to filter out null/empty fields to keep output compact and clean (default: true).",
 		),
 });
-export type InspectRecordArgs = z.infer<typeof InspectRecordArgsSchema>;
 
 export const GetRecordDefinitionArgsSchema = z.object({
 	recordType: z
@@ -214,9 +179,6 @@ export const GetRecordDefinitionArgsSchema = z.object({
 		.optional()
 		.describe("Optional keyword to filter field names, labels, or help text."),
 });
-export type GetRecordDefinitionArgs = z.infer<
-	typeof GetRecordDefinitionArgsSchema
->;
 
 export const GetQueryTemplateArgsSchema = z.object({
 	templateId: z
@@ -244,7 +206,6 @@ export const GetQueryTemplateArgsSchema = z.object({
 			"Search keyword across template names, descriptions, and SQL patterns.",
 		),
 });
-export type GetQueryTemplateArgs = z.infer<typeof GetQueryTemplateArgsSchema>;
 
 export const GetSystemNotesArgsSchema = z.object({
 	recordId: z
@@ -269,7 +230,6 @@ export const GetSystemNotesArgsSchema = z.object({
 			"Maximum number of system notes to return. Default: 30, Max: 100.",
 		),
 });
-export type GetSystemNotesArgs = z.infer<typeof GetSystemNotesArgsSchema>;
 
 export const SuitecloudUploadArgsSchema = z.object({
 	paths: z
@@ -316,7 +276,6 @@ export const SuitecloudUploadArgsSchema = z.object({
 			"Explicit user authorization flag required when uploading to a Production account. Set to true once user authorizes.",
 		),
 });
-export type SuitecloudUploadArgs = z.infer<typeof SuitecloudUploadArgsSchema>;
 
 export const GetErrorSummaryArgsSchema = z.object({
 	days: z
@@ -348,7 +307,6 @@ export const GetErrorSummaryArgsSchema = z.object({
 		.optional()
 		.describe("Optional: Filter errors by category."),
 });
-export type GetErrorSummaryArgs = z.infer<typeof GetErrorSummaryArgsSchema>;
 
 export const NetsuiteSchemaArgsSchema = z.object({
 	recordType: z
@@ -374,7 +332,6 @@ export const NetsuiteSchemaArgsSchema = z.object({
 			"Optional search keyword to filter field names, labels, or table names.",
 		),
 });
-export type NetsuiteSchemaArgs = z.infer<typeof NetsuiteSchemaArgsSchema>;
 
 // ---------------------------------------------------------------------------
 // Static Tool Schema Definitions (local tools)
@@ -408,7 +365,7 @@ export const LOGOUT_TOOL = {
 	inputSchema: { type: "object" as const, properties: {} },
 };
 
-export const RECORD_LINK_TOOL = {
+const RECORD_LINK_TOOL = {
 	name: "netsuite_get_record_link",
 	description:
 		"Generate a direct NetSuite UI browser link to view a specific record. Supports both numeric internal ID (e.g. 12345) and document number tranid (e.g. 'SO1002').",
@@ -438,7 +395,7 @@ export const RECORD_LINK_TOOL = {
 	},
 };
 
-export const REFRESH_CACHE_TOOL = {
+const REFRESH_CACHE_TOOL = {
 	name: "netsuite_refresh_cache",
 	description:
 		"Force clear local cache and refresh NetSuite internal REST session cache. Can optionally clear cache for a single table/recordType.",
@@ -461,7 +418,7 @@ export const STATUS_TOOL = {
 	inputSchema: { type: "object" as const, properties: {} },
 };
 
-export const BATCH_EXECUTE_TOOL = {
+const BATCH_EXECUTE_TOOL = {
 	name: "netsuite_batch_execute",
 	description:
 		"Execute multiple NetSuite tools in parallel (max 10 tasks, concurrency 5). Dramatically reduces latency for batch operations. Supports any tool including 'ns_runCustomSuiteQL', 'ns_getRecord', 'ns_getRecordTypeMetadata', 'ns_getSuiteQLMetadata', 'netsuite_get_script_logs', and 'netsuite_get_record_link'.",
@@ -493,7 +450,7 @@ export const BATCH_EXECUTE_TOOL = {
 	},
 };
 
-export const SCRIPT_LOGS_TOOL = {
+const SCRIPT_LOGS_TOOL = {
 	name: "netsuite_get_script_logs",
 	description:
 		"Query NetSuite Script Execution Logs (ScriptNote table). Returns structured log entries with optional filtering by script, log level, date range, title/detail keywords, and deployment. Logs are retained for ~30 days by NetSuite.",
@@ -541,7 +498,7 @@ export const SCRIPT_LOGS_TOOL = {
 	},
 };
 
-export const INSPECT_RECORD_TOOL = {
+const INSPECT_RECORD_TOOL = {
 	name: "netsuite_inspect_record",
 	description:
 		"Primary tool for inspecting single record details, populated fields, and line items without empty noise. Use when examining a specific record by ID or document number. Do NOT use for querying multiple records or lists (use ns_runCustomSuiteQL instead).",
@@ -596,7 +553,7 @@ export const INSPECT_RECORD_TOOL = {
 	},
 };
 
-export const GET_RECORD_DEFINITION_TOOL = {
+const GET_RECORD_DEFINITION_TOOL = {
 	name: "netsuite_get_record_definition",
 	description:
 		"Fast offline lookup of standard field definitions, types, and mandatory flags across 272 NetSuite record types for SuiteScript development. Do NOT use for custom fields (custbody_*) or live tenant schema (use ns_getRecordTypeMetadata), or for SuiteQL column names (use ns_getSuiteQLMetadata).",
@@ -618,7 +575,7 @@ export const GET_RECORD_DEFINITION_TOOL = {
 	},
 };
 
-export const GET_QUERY_TEMPLATE_TOOL = {
+const GET_QUERY_TEMPLATE_TOOL = {
 	name: "netsuite_get_query_template",
 	description:
 		"Get verified, production-ready SuiteQL query templates sourced from Oracle SAFE Guide 2025.2 and Tim Dietrich Query Library. Avoids common pitfalls like missing mainline='F', joining SystemNote, or table hallucination.",
@@ -650,7 +607,7 @@ export const GET_QUERY_TEMPLATE_TOOL = {
 	},
 };
 
-export const GET_SYSTEM_NOTES_TOOL = {
+const GET_SYSTEM_NOTES_TOOL = {
 	name: "netsuite_get_system_notes",
 	description:
 		"Investigate audit trail and field modification history for a specific record. Returns timestamped change events, modifier user, and old vs new values. Supports numeric internal ID (e.g. 12345) and document number tranid (e.g. 'SO1002').",
@@ -676,7 +633,7 @@ export const GET_SYSTEM_NOTES_TOOL = {
 	},
 };
 
-export const SUITECLOUD_UPLOAD_TOOL = {
+const SUITECLOUD_UPLOAD_TOOL = {
 	name: "netsuite_suitecloud_upload",
 	description:
 		"Upload script or asset files to NetSuite File Cabinet using SuiteCloud CLI ('suitecloud file:upload'). " +
@@ -732,7 +689,7 @@ export const SUITECLOUD_UPLOAD_TOOL = {
 	},
 };
 
-export const GET_ERROR_SUMMARY_TOOL = {
+const GET_ERROR_SUMMARY_TOOL = {
 	name: "netsuite_get_error_summary",
 	description:
 		"Analyze and summarize historical NetSuite MCP tool execution errors from structured logs. " +
@@ -769,7 +726,7 @@ export const GET_ERROR_SUMMARY_TOOL = {
 	},
 };
 
-export const NETSUITE_SCHEMA_TOOL = {
+const NETSUITE_SCHEMA_TOOL = {
 	name: "netsuite_schema",
 	description:
 		"Inspect NetSuite record and table schema across standard fields, tenant custom fields, and SuiteQL database columns. Unified 1-turn schema exploration tool with automatic intelligent routing.",
@@ -805,8 +762,10 @@ export const LOCAL_TOOLS = [
 	BATCH_EXECUTE_TOOL,
 	SCRIPT_LOGS_TOOL,
 	INSPECT_RECORD_TOOL,
+	GET_RECORD_DEFINITION_TOOL,
 	GET_QUERY_TEMPLATE_TOOL,
 	GET_SYSTEM_NOTES_TOOL,
 	SUITECLOUD_UPLOAD_TOOL,
 	GET_ERROR_SUMMARY_TOOL,
+	NETSUITE_SCHEMA_TOOL,
 ];

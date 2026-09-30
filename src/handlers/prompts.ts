@@ -1,6 +1,6 @@
 import type { Server } from "@modelcontextprotocol/server";
 
-export interface PromptArgument {
+interface PromptArgument {
 	name: string;
 	description?: string;
 	required?: boolean;

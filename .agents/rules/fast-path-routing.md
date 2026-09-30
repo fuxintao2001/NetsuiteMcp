@@ -20,6 +20,15 @@
    - Data querying should always be performed via SuiteQL (`ns_runCustomSuiteQL`).
    - Only call Saved Search tools if explicitly instructed by the user or if a complex metric is exclusively available in an existing Saved Search that cannot be replicated in SuiteQL.
 
+4. **🚀 Parallel Multi-Query Mandate (Zero Sequential Turn Delay)**:
+   - When a task requires retrieving multiple independent or correlated datasets (e.g. Transaction details + Customer info + Stock balance, or period comparisons):
+   - **STRICTLY PROHIBITED**: Executing queries sequentially across multiple conversation turns.
+   - **MANDATORY**: Execute concurrently within **1 single turn** using:
+     - **Option A (Semicolon syntax)**: `ns_runCustomSuiteQL({ sqlQuery: "SELECT ... FROM transaction ...; SELECT ... FROM customer ...;" })`
+     - **Option B (Query array)**: `ns_runCustomSuiteQL({ sqlQueries: ["SELECT ... FROM transaction ...", "SELECT ... FROM customer ..."] })`
+     - **Option C (Batch tool)**: `netsuite_batch_execute({ tasks: [{ toolName: "ns_runCustomSuiteQL", arguments: { sqlQuery: "..." } }, ...] })`
+   - All queries execute concurrently via the MCP server's 5-thread pool and return unified results in 1 turn.
+
 ---
 
 ## 2. Fast-Path Core Whitelist & In-Context Schema (Zero Reconnaissance Required)
