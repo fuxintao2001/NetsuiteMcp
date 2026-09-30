@@ -4,6 +4,8 @@
  * Usage:
  *   npm run sync-agents              # Execute sync to all workspaces
  *   npm run sync-agents -- --dry-run # Preview changes without writing
+ *   npm run sync-agents -- --push    # Execute sync and git push to remote branches
+ *   npm run sync-agents -- --watch   # Watch workspace-agents/ and auto-sync on change (debounced 2s)
  *
  * Reads workspace-agents/ templates and workspace-agents/workspaces.json,
  * substitutes environment-specific variables, and provisions:
@@ -21,9 +23,6 @@ import { fileURLToPath } from "node:url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const projectRoot = path.dirname(__dirname);
-
-const dryRun = process.argv.includes("--dry-run");
-const shouldPush = process.argv.includes("--push");
 
 // ---------------------------------------------------------------------------
 // Paths
@@ -78,10 +77,10 @@ function interpolateTemplate(rawTemplate, vars) {
 }
 
 // ---------------------------------------------------------------------------
-// Main
+// Main Sync Runner
 // ---------------------------------------------------------------------------
 
-try {
+export function runSync({ dryRun = false, shouldPush = false } = {}) {
 	if (!fs.existsSync(templatePath)) {
 		throw new Error(`Template not found: ${templatePath}`);
 	}
@@ -277,10 +276,86 @@ try {
 		`${dryRun ? "🔍 Dry run" : "✨ Sync"} complete: ${successCount} succeeded, ${errorCount} failed`,
 	);
 
-	if (errorCount > 0) {
+	if (
+		errorCount > 0 &&
+		!process.argv.includes("--watch") &&
+		!process.argv.includes("-w")
+	) {
 		process.exit(1);
 	}
-} catch (error) {
-	console.error(`\n❌ Fatal error: ${error.message}`);
-	process.exit(1);
+
+	return { successCount, errorCount };
+}
+
+// ---------------------------------------------------------------------------
+// Watch Mode
+// ---------------------------------------------------------------------------
+
+function startWatchMode() {
+	const watchDir = path.join(projectRoot, "workspace-agents");
+	console.log(`👀 [Watch Agents] 正在监听目录: ${watchDir}`);
+	console.log(
+		"💡 每次保存文件后，将自动执行同步并推送到各环境远程仓库 (防抖 2 秒)...\n",
+	);
+
+	let timeoutId = null;
+	let isSyncing = false;
+
+	function triggerSync(filename) {
+		if (timeoutId) {
+			clearTimeout(timeoutId);
+		}
+		timeoutId = setTimeout(() => {
+			if (isSyncing) return;
+			isSyncing = true;
+			console.log(`\n🔔 检测到变更 [${filename}]，开始执行自动同步与推送...`);
+			try {
+				runSync({ dryRun: false, shouldPush: true });
+				console.log("✅ 自动同步与推送完成！\n");
+			} catch (err) {
+				const message = err instanceof Error ? err.message : String(err);
+				console.error(`❌ 同步失败: ${message}\n`);
+			} finally {
+				isSyncing = false;
+			}
+		}, 2000);
+	}
+
+	try {
+		fs.watch(watchDir, { recursive: true }, (_eventType, filename) => {
+			if (!filename) return;
+			// Ignore temporary swap files or hidden files
+			if (
+				filename.startsWith(".") ||
+				filename.endsWith("~") ||
+				filename.includes(".tmp")
+			) {
+				return;
+			}
+			triggerSync(filename);
+		});
+	} catch (err) {
+		const message = err instanceof Error ? err.message : String(err);
+		console.error(`❌ 无法监听目录 ${watchDir}: ${message}`);
+		process.exit(1);
+	}
+}
+
+// ---------------------------------------------------------------------------
+// CLI Execution
+// ---------------------------------------------------------------------------
+
+const isWatch = process.argv.includes("--watch") || process.argv.includes("-w");
+const dryRun = process.argv.includes("--dry-run");
+const shouldPush = process.argv.includes("--push");
+
+if (isWatch) {
+	startWatchMode();
+} else {
+	try {
+		runSync({ dryRun, shouldPush });
+	} catch (error) {
+		console.error(`\n❌ Fatal error: ${error.message}`);
+		process.exit(1);
+	}
 }

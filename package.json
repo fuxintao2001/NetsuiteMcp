@@ -19,7 +19,7 @@
     "fetch-skills": "node scripts/fetch-skills.js",
     "sync-agents": "node scripts/sync-agents.js",
     "sync:push": "node scripts/sync-agents.js --push",
-    "watch:agents": "node scripts/watch-agents.js",
+    "watch:agents": "node scripts/sync-agents.js --watch",
     "prepare": "git config core.hooksPath .githooks || true",
     "auth:all": "tsx scripts/bulk-auth.ts",
     "daemon:install": "node scripts/daemon.js install",
