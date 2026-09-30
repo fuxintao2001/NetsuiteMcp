@@ -127,7 +127,7 @@ describe("MCP Handler Wires", () => {
 			expect(names).toContain("ns_updateRecord");
 			expect(names).toContain("ns_getRecord");
 			expect(names).toContain("netsuite_get_record_link");
-			expect(names).toContain("netsuite_schema");
+			expect(names).toContain("netsuite_inspect_record");
 
 			// Ensure netsuite_logout is not duplicated in tools list
 			const logoutCount = names.filter(
@@ -1157,8 +1157,18 @@ describe("MCP Handler Wires", () => {
 				expect(parsed.sublists.item[0].rate).toBeUndefined(); // filtered by lineFields
 			});
 
-			it("should reject non-numeric document number tranid for ns_getRecord with actionable guidance", async () => {
+			it("should auto-resolve non-numeric document number tranid for ns_getRecord", async () => {
 				const callFn = registeredHandlers.get("tools/call");
+
+				mockMCPTools.executeTool.mockResolvedValueOnce({
+					data: [{ id: "55555", recordtype: "salesorder" }],
+				});
+
+				mockMCPTools.executeTool.mockResolvedValueOnce({
+					id: "55555",
+					tranid: "SO9876",
+					total: 100,
+				});
 
 				const res = (await callFn?.({
 					params: {
@@ -1169,10 +1179,83 @@ describe("MCP Handler Wires", () => {
 					},
 				})) as any;
 
-				expect(mockMCPTools.executeTool).not.toHaveBeenCalled();
+				expect(mockMCPTools.executeTool).toHaveBeenCalledWith(
+					"ns_runCustomSuiteQL",
+					expect.objectContaining({
+						sqlQuery: expect.stringContaining("WHERE tranid = 'SO9876'"),
+					}),
+				);
+				expect(mockMCPTools.executeTool).toHaveBeenCalledWith(
+					"ns_getRecord",
+					expect.objectContaining({
+						recordId: "55555",
+					}),
+				);
+				expect(res.isError).toBeFalsy();
+			});
+
+			it("should return not found error when tranid resolution yields no records", async () => {
+				const callFn = registeredHandlers.get("tools/call");
+
+				mockMCPTools.executeTool.mockResolvedValueOnce({ data: [] });
+
+				const res = (await callFn?.({
+					params: {
+						name: "ns_getRecord",
+						arguments: {
+							recordId: "NON_EXISTENT_DOC",
+						},
+					},
+				})) as any;
+
 				expect(res.isError).toBe(true);
-				expect(res.content[0].text).toContain("Invalid Record ID");
-				expect(res.content[0].text).toContain("netsuite_inspect_record");
+				expect(res.content[0].text).toContain("Record Not Found");
+				expect(res.content[0].text).toContain("NON_EXISTENT_DOC");
+			});
+
+			it("should transparently fall back to offline catalog when ns_getRecordTypeMetadata fails", async () => {
+				const callFn = registeredHandlers.get("tools/call");
+
+				mockMCPTools.executeTool.mockRejectedValueOnce(
+					new Error(
+						"NetSuite API error: Record type 'salesorder' not supported in REST",
+					),
+				);
+
+				const res = (await callFn?.({
+					params: {
+						name: "ns_getRecordTypeMetadata",
+						arguments: { recordType: "salesorder" },
+					},
+				})) as any;
+
+				expect(res.isError).toBeFalsy();
+				expect(res.content[0].text).toContain("Offline Catalog");
+				expect(res.content[0].text).toContain("salesorder");
+			});
+
+			it("should auto-transpile LIMIT in ns_runCustomSuiteQL before execution", async () => {
+				const callFn = registeredHandlers.get("tools/call");
+
+				mockMCPTools.executeTool.mockResolvedValueOnce({
+					data: [{ id: "1" }],
+				});
+
+				await callFn?.({
+					params: {
+						name: "ns_runCustomSuiteQL",
+						arguments: {
+							sqlQuery: "SELECT id FROM customer LIMIT 10",
+						},
+					},
+				});
+
+				expect(mockMCPTools.executeTool).toHaveBeenCalledWith(
+					"ns_runCustomSuiteQL",
+					expect.objectContaining({
+						sqlQuery: "SELECT id FROM customer FETCH FIRST 10 ROWS ONLY",
+					}),
+				);
 			});
 
 			it("should reject empty or missing recordId for ns_getRecord without network call", async () => {

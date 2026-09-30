@@ -93,6 +93,104 @@ export async function handleGetRecordLink(
 	return textResult(responseText);
 }
 
+/**
+ * Resolves natural keys (document tranid, entity entityid, item itemid) to numeric internal ID via 1-turn SuiteQL.
+ */
+export async function resolveNaturalKeyToInternalId(
+	recordType: string | undefined,
+	naturalKey: string,
+	mcpTools: NetSuiteMCPTools,
+): Promise<{ id: string; recordType?: string } | null> {
+	const safeKey = naturalKey.replace(/'/g, "''").trim();
+	if (!safeKey) return null;
+
+	const recType = recordType ? recordType.toLowerCase().trim() : "";
+
+	// 1. Transaction types (or unspecified): search transaction by tranid
+	const isTransaction =
+		!recType ||
+		[
+			"salesorder",
+			"invoice",
+			"purchaseorder",
+			"estimate",
+			"opportunity",
+			"customerpayment",
+			"vendorbill",
+			"vendorpayment",
+			"creditmemo",
+			"itemfulfillment",
+			"itemreceipt",
+			"returnauthorization",
+			"journalentry",
+			"transferorder",
+			"inventoryadjustment",
+			"transaction",
+		].includes(recType);
+
+	if (isTransaction) {
+		try {
+			const res = await mcpTools.executeTool("ns_runCustomSuiteQL", {
+				sqlQuery: `SELECT id, recordtype FROM transaction WHERE tranid = '${safeKey}' FETCH FIRST 1 ROWS ONLY`,
+			});
+			const rows = mcpTools.extractDataArray(res);
+			if (rows.length > 0 && rows[0]?.id) {
+				return {
+					id: String(rows[0].id),
+					...(rows[0].recordtype
+						? { recordType: String(rows[0].recordtype).toLowerCase() }
+						: {}),
+				};
+			}
+		} catch {
+			// Non-fatal, continue
+		}
+	}
+
+	// 2. Entity types (customer, vendor, employee, partner, contact, entity)
+	const isEntity =
+		!recType ||
+		["customer", "vendor", "partner", "employee", "contact", "entity"].includes(
+			recType,
+		);
+
+	if (isEntity) {
+		try {
+			const entityTable =
+				recType && recType !== "entity" && recType !== "contact"
+					? recType
+					: "entity";
+			const res = await mcpTools.executeTool("ns_runCustomSuiteQL", {
+				sqlQuery: `SELECT id FROM ${entityTable} WHERE entityid = '${safeKey}' FETCH FIRST 1 ROWS ONLY`,
+			});
+			const rows = mcpTools.extractDataArray(res);
+			if (rows.length > 0 && rows[0]?.id) {
+				return { id: String(rows[0].id) };
+			}
+		} catch {
+			// Non-fatal, continue
+		}
+	}
+
+	// 3. Item types
+	const isItem = !recType || recType.includes("item");
+	if (isItem) {
+		try {
+			const res = await mcpTools.executeTool("ns_runCustomSuiteQL", {
+				sqlQuery: `SELECT id, itemtype FROM item WHERE itemid = '${safeKey}' FETCH FIRST 1 ROWS ONLY`,
+			});
+			const rows = mcpTools.extractDataArray(res);
+			if (rows.length > 0 && rows[0]?.id) {
+				return { id: String(rows[0].id) };
+			}
+		} catch {
+			// Non-fatal
+		}
+	}
+
+	return null;
+}
+
 export async function handleInspectRecord(
 	args: Record<string, unknown>,
 	mcpTools: NetSuiteMCPTools,
@@ -120,22 +218,16 @@ export async function handleInspectRecord(
 	// If recordId is not numeric (e.g. document tranid 'SO1002'), try resolving internal numeric ID
 	const isNumeric = /^-?\d+$/.test(recordId.trim());
 	if (!isNumeric) {
-		try {
-			// OWASP injection prevention: sanitize and bound tranid
-			const safeTranid = recordId.trim().replace(/'/g, "''");
-			const lookupSql = `SELECT id, recordtype FROM transaction WHERE tranid = '${safeTranid}' FETCH FIRST 1 ROWS ONLY`;
-			const lookupRes = await mcpTools.executeTool("ns_runCustomSuiteQL", {
-				sqlQuery: lookupSql,
-			});
-			const rows = mcpTools.extractDataArray(lookupRes);
-			if (rows.length > 0 && rows[0]?.id) {
-				recordId = String(rows[0].id);
-				if (rows[0].recordtype) {
-					recordType = String(rows[0].recordtype).toLowerCase();
-				}
+		const resolved = await resolveNaturalKeyToInternalId(
+			recordType,
+			recordId,
+			mcpTools,
+		);
+		if (resolved?.id) {
+			recordId = resolved.id;
+			if (resolved.recordType) {
+				recordType = resolved.recordType;
 			}
-		} catch {
-			// Continue with original recordId if lookup fails
 		}
 	}
 

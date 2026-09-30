@@ -11,7 +11,7 @@ AI agents must unconditionally enforce a **Strict Zero Hallucination** policy:
 
 1. **Hierarchy of Authoritative Truth**:
    - **Tier 1 (Authoritative Standard)**: Oracle NetSuite Official Documentation (Help Center, SuiteAnswers, Records Catalog, SuiteScript 2.1 API Reference, SAFE Guide 2025.2). This unconditionally supersedes third-party forum posts, outdated tutorials, and LLM intuition.
-   - **Tier 2 (Account Live Schema)**: Real-time metadata retrieved directly from the active NetSuite account via `netsuite_schema` (unified live/offline introspection), `ns_getSuiteQLMetadata`, `netsuite_get_record_definition`, or `netsuite_inspect_record`.
+   - **Tier 2 (Account Live Schema)**: Real-time metadata retrieved directly from the active NetSuite account via official tools `ns_getSuiteQLMetadata` (for database tables) and `ns_getRecordTypeMetadata` (for record fields and custom fields, with automatic offline fallback).
    - **Tier 3 (Curated Agent Skills)**: Antigravity Skills located at `~/.gemini/config/skills/`.
    - **Tier 4 (LLM Parametric Knowledge)**: General training knowledge — MUST always be verified against Tier 1/2 before proposing code changes.
 2. **Strict Zero Hallucination & Schema Accuracy**:
@@ -70,7 +70,7 @@ To ensure high-density reasoning without context bloat, deep domain knowledge is
 | **UIF SPA Component Development** | `~/.gemini/config/skills/netsuite-uif-spa-reference/SKILL.md` | Modern NetSuite UIF SPA development, `@uif-js/core` and `@uif-js/component` APIs and hooks. |
 
 > [!TIP]
-> **Schema Quick Discovery**: Use `netsuite_schema` as a single-entry-point tool for schema reconnaissance. It automatically routes to the correct backend source (offline reference for 272 standard records, live REST for custom records, SuiteQL catalog for table discovery).
+> **Schema Discovery**: Use official tools `ns_getSuiteQLMetadata` for inspecting database table columns and table catalog, and `ns_getRecordTypeMetadata` for record custom fields (with automatic offline standard catalog fallback).
 
 ---
 
@@ -79,12 +79,12 @@ To ensure high-density reasoning without context bloat, deep domain knowledge is
 1. **👑 Dual-Path Routing (Zero Unnecessary Reconnaissance)**:
    - ⚡ **Fast-Path (Standard Core Business — Direct 1-Turn Execution)**:
      - For queries involving standard core tables (`transaction`, `transactionline`, `customer`, `vendor`, `item`, `account`, `subsidiary`, `aggregateitemlocation`, `accountingperiod`, `transactionaccountingline`, `employee`) or common document lineage:
-     - **DO NOT call reconnaissance tools** (e.g. `netsuite_get_record_definition`, `ns_getSuiteQLMetadata`, `netsuite_get_query_template`).
+     - **DO NOT call reconnaissance tools** (e.g. `ns_getSuiteQLMetadata`, `ns_getRecordTypeMetadata`, `netsuite_get_query_template`).
      - **MUST generate precise SuiteQL and call `ns_runCustomSuiteQL` directly in Turn 1.** Detailed rules: [Fast-Path Routing](file://{{PROJECT_PATH}}/.agents/rules/fast-path-routing.md).
    - 🔍 **Slow-Path (Unknown Custom Records — Reconnaissance First)**:
-     - Only when operating on unverified custom records (`customrecord_*`), custom fields (`custbody_*`, `custcol_*`, `custrecord_*`), or unlisted niche tables:
-     - **Preferred**: Call `netsuite_schema` (unified 1-turn schema tool with automatic routing: standard → offline fields, custom records → live REST, omitted recordType → SuiteQL table catalog search).
-     - **Alternatively**: Call `ns_getSuiteQLMetadata` (for SuiteQL tables) or `netsuite_get_record_definition` (for SuiteScript record scripts) individually.
+     - When operating on unverified custom records (`customrecord_*`), custom fields (`custbody_*`, `custcol_*`), or unlisted tables:
+     - **For SuiteQL database tables**: Call `ns_getSuiteQLMetadata` (inspect columns or search catalog).
+     - **For record fields & custom fields**: Call `ns_getRecordTypeMetadata` (live tenant schema with automatic offline fallback).
 2. **SuiteQL Guardrails & On-Demand Patterns**:
    - Ensure all queries conform strictly to [SuiteQL Guardrails](file://{{PROJECT_PATH}}/.agents/rules/suiteql-guardrails.md) (No `SELECT *`, explicit `mainline = 'F'`, pagination via `FETCH FIRST N ROWS ONLY`, `ROWNUM <= N`, or Oracle-standard `OFFSET M ROWS FETCH NEXT N ROWS ONLY`, index driving filter).
    - Complex SuiteQL domain patterns (AR aging, GL journal impact, multi-location inventory, period close) must be retrieved on demand via `netsuite_get_query_template` or `netsuite://queries/golden-templates`.
@@ -99,9 +99,9 @@ To ensure high-density reasoning without context bloat, deep domain knowledge is
 ## 🧰 5. Tool Execution & Concurrency SOP
 
 1. **Tool Execution Hierarchy**:
-   - **Routine Queries (Fast-Path)**: `ns_runCustomSuiteQL` (Direct 1-turn execution).
-   - **Schema Reconnaissance (Slow-Path)**: `netsuite_schema` (unified auto-routing: standard offline ➔ custom REST ➔ SuiteQL catalog). Alternatively, `ns_getSuiteQLMetadata` ➔ `netsuite_get_record_definition` individually (Only for custom/unverified entities).
-   - **Record Inspection (High Signal, Low Token)**: `netsuite_inspect_record` (Preferred: strips null noise, supports doc numbers/tranid, compact JSON & controllable line items via `maxLines`, saving 85%+ tokens). Use `ns_getRecord` only when an unpruned raw JSON tree is strictly required.
+   - **Routine Queries (Fast-Path)**: `ns_runCustomSuiteQL` (Direct 1-turn execution; automatically transpiles MySQL/Postgres dialect habits).
+   - **Schema Reconnaissance (Slow-Path)**: `ns_getSuiteQLMetadata` (table columns & catalog search) ➔ `ns_getRecordTypeMetadata` (record fields & custom fields with offline fallback).
+   - **Record Fetch & Inspection**: `ns_getRecord` (accepts numeric internal ID or document number `tranid`, automatically resolves natural keys and prunes null noise). For formatted Markdown table view, use `netsuite_inspect_record`.
    - **Logs, Diagnostics & Audit**: `netsuite_get_script_logs` (script execution logs) ➔ `netsuite_get_system_notes` (record-level audit trail by ID or document number) ➔ `netsuite_get_error_summary` (structured error frequency & self-healing diagnostics).
    - **Cache Maintenance**: `netsuite_refresh_cache` (Force clear local & NetSuite session metadata cache when schema changes).
    - **Financial Reports**: `ns_runReport` (Only for standard NetSuite financial statement reports).

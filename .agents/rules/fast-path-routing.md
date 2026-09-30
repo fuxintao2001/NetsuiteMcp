@@ -11,9 +11,9 @@
    - **MANDATORY**: Construct precise SuiteQL and call **`ns_runCustomSuiteQL` directly on Turn 1**. Zero pre-flight roundtrips.
 
 2. **🔍 Slow-Path (Unknown Custom Records — Reconnaissance First)**:
-   - Only when operating on unverified custom records (`customrecord_*`), custom fields (`custbody_*`, `custcol_*`, `custrecord_*`), or unlisted niche tables:
-   - **Preferred**: Call `netsuite_schema` (unified 1-turn auto-routing) for schema discovery.
-   - **Alternatively**: Call `ns_getSuiteQLMetadata` (for SuiteQL tables) or `netsuite_get_record_definition` (for SuiteScript 2.1 standard record scripts).
+   - When operating on unverified custom records (`customrecord_*`), custom fields (`custbody_*`, `custcol_*`), or unlisted tables:
+   - **For SuiteQL database tables**: Call `ns_getSuiteQLMetadata` (inspect columns or search catalog).
+   - **For record fields & custom fields**: Call `ns_getRecordTypeMetadata` (live tenant schema with automatic offline fallback).
 
 3. **🚫 Saved Search Non-Invocation Policy**:
    - In the vast majority of scenarios, **DO NOT call SavedSearch tools (`ns_listSavedSearches`, `ns_runSavedSearch`)**.

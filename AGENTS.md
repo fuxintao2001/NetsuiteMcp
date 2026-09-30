@@ -46,7 +46,7 @@ NetsuiteMcp/
 │   ├── handlers/               # MCP Protocol Handlers (JSON-RPC dispatchers & schemas)
 │   │   ├── tools.ts            # Central MCP tool registry & request dispatcher
 │   │   ├── toolSchemas.ts      # Zod validation schemas for all MCP tool parameters
-│   │   ├── recordHandlers.ts   # netsuite_schema, netsuite_inspect_record, ns_getRecord, mutations
+│   │   ├── recordHandlers.ts   # netsuite_inspect_record, ns_getRecord natural key resolution, mutations
 │   │   ├── queryHandlers.ts    # ns_runCustomSuiteQL, ns_getSuiteQLMetadata, query templates, reports
 │   │   ├── authHandlers.ts     # netsuite_authenticate, netsuite_get_auth_status
 │   │   ├── batchHandler.ts     # netsuite_batch_execute parallel tool dispatcher
@@ -167,7 +167,7 @@ When maintaining or extending NetSuite domain features in this server (e.g. meta
 | Development Domain | On-Demand Target Path / Resource | Key Server Architecture Alignment |
 |:---|:---|:---|
 | **SuiteScript 2.1 & SAFE Guide Review** | `~/.gemini/config/skills/netsuite-sdf-safe-guide/SKILL.md` | SAFE Guide rules for `suitescript-safe-check.js`, `review_suitescript` prompt, and governance budgeting. |
-| **SuiteScript Records & Fields Schema** | `~/.gemini/config/skills/netsuite-suitescript-records-reference/SKILL.md`<br>Resource: `netsuite://records/reference` | Standard 272 record definitions in `src/utils/metadata.ts` and `netsuite_schema` routing. |
+| **SuiteScript Records & Fields Schema** | `~/.gemini/config/skills/netsuite-suitescript-records-reference/SKILL.md`<br>Resource: `netsuite://records/reference` | Standard 272 record definitions in `src/utils/recordsReference.ts` and `ns_getRecordTypeMetadata` offline fallback. |
 | **SuiteQL Modeling & Anti-Slow-Query** | `~/.gemini/config/skills/netsuite-ai-connector-instructions/SKILL.md`<br>Resource: `netsuite://queries/golden-templates`<br>Tool: `netsuite_get_query_template` | SuiteQL validation rules in `src/utils/suiteqlGuard.ts` and golden templates in `src/utils/suiteqlTemplates.ts`. |
 | **SuiteScript 1.0 → 2.1 Modernization** | `~/.gemini/config/skills/netsuite-suitescript-upgrade/SKILL.md` | Migration mappings in `upgrade_suitescript` prompt and AST deprecation checks in `suitescript-safe-check.js`. |
 | **OWASP & Secure Coding Standards** | `~/.gemini/config/skills/netsuite-owasp-secure-coding/SKILL.md` | SQL injection detection, credential scanning in `scripts/pre-upload-check.js`, and parameter sanitization. |

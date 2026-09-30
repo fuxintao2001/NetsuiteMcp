@@ -100,6 +100,90 @@ export function maskStringLiterals(sql: string): {
 }
 
 /**
+ * Restores string literals previously replaced by maskStringLiterals.
+ */
+export function unmaskStringLiterals(
+	maskedSql: string,
+	literals: string[],
+): string {
+	let unmasked = maskedSql;
+	for (let i = 0; i < literals.length; i++) {
+		const literal = literals[i] ?? "";
+		unmasked = unmasked.replace(`__STR_LITERAL_${i}__`, () => literal);
+	}
+	return unmasked;
+}
+
+/**
+ * Transpiles common SQL dialect habits (MySQL/PostgreSQL) into Oracle-compliant SuiteQL.
+ * - `LIMIT N OFFSET M` -> `OFFSET M ROWS FETCH NEXT N ROWS ONLY`
+ * - `LIMIT M, N` (MySQL offset, count) -> `OFFSET M ROWS FETCH NEXT N ROWS ONLY`
+ * - `LIMIT N` -> `FETCH FIRST N ROWS ONLY`
+ */
+export function transpileSuiteQLDialect(sqlQuery: string): {
+	transpiledSql: string;
+	changed: boolean;
+} {
+	if (!sqlQuery || typeof sqlQuery !== "string") {
+		return { transpiledSql: sqlQuery, changed: false };
+	}
+
+	const trimmed = sqlQuery.trim();
+	const hasTrailingSemicolon = trimmed.endsWith(";");
+	const withoutSemicolon = hasTrailingSemicolon
+		? trimmed.slice(0, -1).trim()
+		: trimmed;
+
+	const { maskedSql, literals } = maskStringLiterals(withoutSemicolon);
+	let modifiedMasked = maskedSql;
+	let changed = false;
+
+	// 1. LIMIT count OFFSET offset (e.g. LIMIT 10 OFFSET 20)
+	const limitOffsetRegex =
+		/\bLIMIT\s+(\d+|\?|:\w+)\s+OFFSET\s+(\d+|\?|:\w+)\b/i;
+	if (limitOffsetRegex.test(modifiedMasked)) {
+		modifiedMasked = modifiedMasked.replace(
+			limitOffsetRegex,
+			(_match, count, offset) =>
+				`OFFSET ${offset} ROWS FETCH NEXT ${count} ROWS ONLY`,
+		);
+		changed = true;
+	}
+
+	// 2. MySQL LIMIT offset, count (e.g. LIMIT 20, 10)
+	const mysqlLimitRegex = /\bLIMIT\s+(\d+|\?|:\w+)\s*,\s*(\d+|\?|:\w+)\b/i;
+	if (mysqlLimitRegex.test(modifiedMasked)) {
+		modifiedMasked = modifiedMasked.replace(
+			mysqlLimitRegex,
+			(_match, offset, count) =>
+				`OFFSET ${offset} ROWS FETCH NEXT ${count} ROWS ONLY`,
+		);
+		changed = true;
+	}
+
+	// 3. LIMIT count (standalone, e.g. LIMIT 10)
+	const standaloneLimitRegex = /\bLIMIT\s+(\d+|\?|:\w+)\b/i;
+	if (standaloneLimitRegex.test(modifiedMasked)) {
+		modifiedMasked = modifiedMasked.replace(
+			standaloneLimitRegex,
+			(_match, count) => `FETCH FIRST ${count} ROWS ONLY`,
+		);
+		changed = true;
+	}
+
+	if (!changed) {
+		return { transpiledSql: sqlQuery, changed: false };
+	}
+
+	let unmasked = unmaskStringLiterals(modifiedMasked, literals);
+	if (hasTrailingSemicolon) {
+		unmasked += ";";
+	}
+
+	return { transpiledSql: unmasked, changed: true };
+}
+
+/**
  * Extracts referenced table names from a SuiteQL query.
  */
 export function extractReferencedTables(sqlQuery: string): string[] {

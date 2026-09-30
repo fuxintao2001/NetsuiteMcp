@@ -17,7 +17,14 @@ import {
 	searchSuiteQLCatalog,
 	unwrapMcpContent,
 } from "../utils/metadata.js";
-import { formatSuiteQLErrorResponse } from "../utils/suiteqlGuard.js";
+import {
+	type RecordFieldMeta,
+	recordsReferenceService,
+} from "../utils/recordsReference.js";
+import {
+	formatSuiteQLErrorResponse,
+	transpileSuiteQLDialect,
+} from "../utils/suiteqlGuard.js";
 import { classifyError, recordToolError } from "../utils/toolErrorLogger.js";
 import { handleGetErrorSummary, handleStatus } from "./authHandlers.js";
 import { handleBatchExecute } from "./batchHandler.js";
@@ -34,6 +41,7 @@ import {
 	handleGetSystemNotes,
 	handleInspectRecord,
 	handleNetsuiteSchema,
+	resolveNaturalKeyToInternalId,
 } from "./recordHandlers.js";
 import {
 	AUTH_TOOL,
@@ -165,13 +173,13 @@ function enhanceToolDescriptions(
 
 		if (t.name === "ns_getRecord") {
 			enhanced.description =
-				"Retrieve NetSuite record JSON by internal numeric ID. Returns cleaned payload with empty fields pruned. For inspecting transactions by document number or viewing populated fields and line item details, prefer netsuite_inspect_record.";
+				"Retrieve NetSuite record JSON by internal numeric ID or document number (tranid like 'SO10023'). Returns cleaned payload with empty fields pruned.";
 			return enhanced;
 		}
 
 		if (t.name === "ns_getSuiteQLMetadata") {
 			enhanced.description =
-				"Inspect live NetSuite database table schema, column names, and data types before executing SuiteQL. For unified 1-turn schema exploration, you can also use netsuite_schema.";
+				"Inspect live NetSuite database table schema, column names, and data types for SuiteQL. Supports keyword search across table catalog when recordType is omitted.";
 			if (enhanced.inputSchema && typeof enhanced.inputSchema === "object") {
 				const schema = { ...(enhanced.inputSchema as Record<string, unknown>) };
 				const props = {
@@ -180,7 +188,7 @@ function enhanceToolDescriptions(
 				props.keyword = {
 					type: "string",
 					description:
-						"Optional search keyword to discover available NetSuite SuiteQL tables across all business domains (e.g. 'inventory', 'transaction', 'invoice', 'order', 'account', 'customer', 'bom') without network timeout.",
+						"Optional search keyword to discover available NetSuite SuiteQL tables across all business domains (e.g. 'inventory', 'transaction', 'invoice', 'order', 'account', 'customer', 'bom').",
 				};
 				schema.properties = props;
 				enhanced.inputSchema = schema;
@@ -190,7 +198,7 @@ function enhanceToolDescriptions(
 
 		if (t.name === "ns_getRecordTypeMetadata") {
 			enhanced.description =
-				"Fetch live tenant-specific record type metadata and custom fields (custbody_*, custcol_*, custrecord_*) from active NetSuite account. For unified 1-turn schema exploration, you can also use netsuite_schema.";
+				"Fetch record type field metadata, tenant custom fields (custbody_*, custcol_*, custrecord_*), and standard field definitions. Automatically provides standard catalog definitions if record type is not available in REST API.";
 			return enhanced;
 		}
 
@@ -502,32 +510,52 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
 					}
 				}
 
-				// --- Explicit validation for ns_getRecord: numeric internal ID required ---
+				// --- Explicit validation for ns_getRecord: numeric internal ID or auto-resolve natural key ---
 				if (name === "ns_getRecord") {
 					const rawRecordId = String(
 						safeArgs.recordId ?? safeArgs.id ?? "",
 					).trim();
 					if (!rawRecordId) {
 						return textResult(
-							`❌ [Missing Record ID] 'ns_getRecord' requires a numeric internal ID (e.g., '12345').\n` +
-								`👉 Immediate Action: Provide a valid numeric internal ID, or use 'ns_runCustomSuiteQL' to query records.`,
+							`❌ [Missing Record ID] 'ns_getRecord' requires a numeric internal ID (e.g., '12345') or document number (tranid).\n` +
+								`👉 Immediate Action: Provide a valid ID, or use 'ns_runCustomSuiteQL' to query records.`,
 							true,
 						);
 					}
 					if (!/^-?\d+$/.test(rawRecordId)) {
-						const safeTranid = rawRecordId.replace(/'/g, "''");
 						const recType = safeArgs.recordType
 							? String(safeArgs.recordType).toLowerCase()
-							: "salesorder";
-						return textResult(
-							`❌ [Invalid Record ID] 'ns_getRecord' requires a numeric internal ID (e.g., '12345'), but received document number/tranid '${rawRecordId}'.\n` +
-								`👉 Immediate Action:\n` +
-								`1. Preferred: Use 'netsuite_inspect_record' instead, which resolves document numbers automatically:\n` +
-								`   netsuite_inspect_record({ recordType: '${recType}', recordId: '${rawRecordId}' })\n` +
-								`2. Or resolve the internal ID via SuiteQL first:\n` +
-								`   SELECT id FROM transaction WHERE tranid = '${safeTranid}'`,
-							true,
+							: undefined;
+						const resolved = await resolveNaturalKeyToInternalId(
+							recType,
+							rawRecordId,
+							mcpTools,
 						);
+						if (resolved?.id) {
+							safeArgs.recordId = resolved.id;
+							safeArgs.id = resolved.id;
+							if (resolved.recordType && !safeArgs.recordType) {
+								safeArgs.recordType = resolved.recordType;
+							}
+						} else {
+							return textResult(
+								`❌ [Record Not Found] Could not find any record with document number/name '${rawRecordId}'.\n` +
+									`👉 Please check the document number or use 'ns_runCustomSuiteQL' to search across records.`,
+								true,
+							);
+						}
+					}
+				}
+
+				// --- Auto-transpile MySQL/Postgres dialects in ns_runCustomSuiteQL ---
+				if (name === "ns_runCustomSuiteQL") {
+					const rawQuery = (safeArgs.sqlQuery ||
+						safeArgs.query ||
+						safeArgs.sql ||
+						"") as string;
+					const { transpiledSql, changed } = transpileSuiteQLDialect(rawQuery);
+					if (changed) {
+						safeArgs.sqlQuery = transpiledSql;
 					}
 				}
 
@@ -608,6 +636,29 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
 									true,
 								);
 							}
+							if (name === "ns_getRecordTypeMetadata") {
+								const recType = String(
+									safeArgs.recordType || safeArgs.tableName || "",
+								)
+									.toLowerCase()
+									.trim();
+								const offlineDef =
+									recordsReferenceService.getRecordDefinition(recType);
+								if (offlineDef?.found && offlineDef.fields.length > 0) {
+									const rows = offlineDef.fields
+										.map(
+											(f: RecordFieldMeta) =>
+												`| \`${f.internalId}\` | ${f.type} | ${f.label} | ${f.required ? "Yes" : "No"} |`,
+										)
+										.join("\n");
+									const md =
+										`### NetSuite Record Metadata: \`${recType}\` (Offline Catalog)\n\n` +
+										`*Note: Retrieved from authoritative offline standard record definitions because remote REST endpoint returned error.*\n\n` +
+										`| Field ID | Type | Label | Required |\n| :--- | :--- | :--- | :--- |\n` +
+										rows;
+									return textResult(md);
+								}
+							}
 							return textResult(`❌ NetSuite Error: ${errorMsg}`, true);
 						}
 
@@ -623,6 +674,29 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
 								: String(executeError);
 						if (name === "ns_getSuiteQLMetadata") {
 							return textResult(formatSuiteQLErrorResponse(errMsg), true);
+						}
+						if (name === "ns_getRecordTypeMetadata") {
+							const recType = String(
+								safeArgs.recordType || safeArgs.tableName || "",
+							)
+								.toLowerCase()
+								.trim();
+							const offlineDef =
+								recordsReferenceService.getRecordDefinition(recType);
+							if (offlineDef?.found && offlineDef.fields.length > 0) {
+								const rows = offlineDef.fields
+									.map(
+										(f: RecordFieldMeta) =>
+											`| \`${f.internalId}\` | ${f.type} | ${f.label} | ${f.required ? "Yes" : "No"} |`,
+									)
+									.join("\n");
+								const md =
+									`### NetSuite Record Metadata: \`${recType}\` (Offline Catalog)\n\n` +
+									`*Note: Retrieved from authoritative offline standard record definitions because remote REST endpoint returned error.*\n\n` +
+									`| Field ID | Type | Label | Required |\n| :--- | :--- | :--- | :--- |\n` +
+									rows;
+								return textResult(md);
+							}
 						}
 						throw executeError;
 					}

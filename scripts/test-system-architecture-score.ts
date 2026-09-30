@@ -330,7 +330,6 @@ const expectedCoreTools = [
 	"netsuite_batch_execute",
 	"netsuite_get_script_logs",
 	"netsuite_inspect_record",
-	"netsuite_get_record_definition",
 	"netsuite_get_query_template",
 	"netsuite_get_system_notes",
 	"netsuite_suitecloud_upload",

@@ -235,7 +235,7 @@ try {
 
 						if (hasChanges) {
 							execSync(
-								'git commit -m "docs(agents): 同步 netsuite_schema 统一路由、OFFSET 分页修正与遥测指标规约"',
+								'git commit -m "docs(agents): 同步官方工具优先标准、SuiteQL方言自愈转译与自然键自愈规约"',
 								{ cwd: projectPath, stdio: "pipe" },
 							);
 							const currentBranch = execSync("git rev-parse --abbrev-ref HEAD", {

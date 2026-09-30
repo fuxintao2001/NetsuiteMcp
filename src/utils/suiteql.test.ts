@@ -18,12 +18,14 @@ import {
 	hasPaginationClause,
 	maskStringLiterals,
 	SuiteQLValidationError,
+	transpileSuiteQLDialect,
+	unmaskStringLiterals,
 	validateSuiteQL,
 } from "./suiteqlGuard.js";
 
 describe("SuiteQL, Search & Query Utilities", () => {
 	describe("suiteqlGuard", () => {
-		describe("maskStringLiterals", () => {
+		describe("maskStringLiterals & unmaskStringLiterals", () => {
 			it("should mask single quote strings and preserve escaped quotes", () => {
 				const sql =
 					"SELECT * FROM customer WHERE memo = 'DROP SHIPPING ''LLC''' AND name = 'O''Reilly'";
@@ -32,6 +34,65 @@ describe("SuiteQL, Search & Query Utilities", () => {
 				expect(maskedSql).toContain("__STR_LITERAL_1__");
 				expect(literals[0]).toBe("'DROP SHIPPING ''LLC'''");
 				expect(literals[1]).toBe("'O''Reilly'");
+			});
+
+			it("should restore string literals accurately with unmaskStringLiterals", () => {
+				const sql = "SELECT * FROM customer WHERE memo = 'special $100 price'";
+				const { maskedSql, literals } = maskStringLiterals(sql);
+				const restored = unmaskStringLiterals(maskedSql, literals);
+				expect(restored).toBe(sql);
+			});
+		});
+
+		describe("transpileSuiteQLDialect", () => {
+			it("should transpile standalone LIMIT to FETCH FIRST ROWS ONLY", () => {
+				const { transpiledSql, changed } = transpileSuiteQLDialect(
+					"SELECT id, tranid FROM transaction WHERE type = 'SalesOrd' LIMIT 10",
+				);
+				expect(changed).toBe(true);
+				expect(transpiledSql).toBe(
+					"SELECT id, tranid FROM transaction WHERE type = 'SalesOrd' FETCH FIRST 10 ROWS ONLY",
+				);
+			});
+
+			it("should transpile LIMIT offset, count (MySQL format) to OFFSET ROWS FETCH NEXT ROWS ONLY", () => {
+				const { transpiledSql, changed } = transpileSuiteQLDialect(
+					"SELECT id FROM customer LIMIT 20, 10;",
+				);
+				expect(changed).toBe(true);
+				expect(transpiledSql).toBe(
+					"SELECT id FROM customer OFFSET 20 ROWS FETCH NEXT 10 ROWS ONLY;",
+				);
+			});
+
+			it("should transpile LIMIT count OFFSET offset to OFFSET ROWS FETCH NEXT ROWS ONLY", () => {
+				const { transpiledSql, changed } = transpileSuiteQLDialect(
+					"SELECT id FROM item LIMIT 50 OFFSET 100",
+				);
+				expect(changed).toBe(true);
+				expect(transpiledSql).toBe(
+					"SELECT id FROM item OFFSET 100 ROWS FETCH NEXT 50 ROWS ONLY",
+				);
+			});
+
+			it("should ignore LIMIT inside string literals", () => {
+				const { transpiledSql, changed } = transpileSuiteQLDialect(
+					"SELECT id FROM customer WHERE memo = 'credit LIMIT 50' LIMIT 5",
+				);
+				expect(changed).toBe(true);
+				expect(transpiledSql).toBe(
+					"SELECT id FROM customer WHERE memo = 'credit LIMIT 50' FETCH FIRST 5 ROWS ONLY",
+				);
+			});
+
+			it("should return changed=false when no dialect transpilation needed", () => {
+				const { transpiledSql, changed } = transpileSuiteQLDialect(
+					"SELECT id FROM customer FETCH FIRST 10 ROWS ONLY",
+				);
+				expect(changed).toBe(false);
+				expect(transpiledSql).toBe(
+					"SELECT id FROM customer FETCH FIRST 10 ROWS ONLY",
+				);
 			});
 		});
 
