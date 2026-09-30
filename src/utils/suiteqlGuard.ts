@@ -697,9 +697,10 @@ export function diagnoseSuiteQLError(
 	// 5. Statement execution timeout or socket hang up
 	if (
 		/timeout of \d+ms exceeded/i.test(err) ||
-		/timed? ?out/i.test(err) ||
+		/\b(?:query|statement|request|connection)\s+timed?\s*out\b/i.test(err) ||
 		/socket hang up/i.test(err) ||
-		/ECONNABORTED/i.test(err)
+		/\bECONNABORTED\b/i.test(err) ||
+		/\bETIMEDOUT\b/i.test(err)
 	) {
 		const hasFunctionInJoin =
 			sql &&

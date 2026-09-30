@@ -125,10 +125,19 @@ export function classifyError(
 	}
 
 	if (
+		lower.includes("guardrail violation") ||
+		lower.includes("suiteql security guardrail")
+	) {
+		return "SUITEQL_SYNTAX";
+	}
+
+	if (
 		lower.includes("etimedout") ||
 		lower.includes("econnreset") ||
 		lower.includes("econnrefused") ||
-		lower.includes("timeout") ||
+		lower.includes("timeout of") ||
+		lower.includes("timed out") ||
+		lower.includes("timeout exceeded") ||
 		lower.includes("network error") ||
 		lower.includes("socket hang up") ||
 		lower.includes("gateway timeout") ||
