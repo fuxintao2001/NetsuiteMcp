@@ -33,6 +33,7 @@
     "test:compliance": "tsx scripts/test-official-docs-compliance.ts",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json",
     "logs:summary": "tsx scripts/summarize-errors.ts",
+    "logs:daily": "tsx scripts/summarize-errors.ts --daily",
     "check:safe": "node scripts/suitescript-safe-check.js",
     "check:upload": "node scripts/pre-upload-check.js"
   },

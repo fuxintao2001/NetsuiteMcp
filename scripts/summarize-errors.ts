@@ -19,12 +19,15 @@ function parseArgs() {
 		output?: string;
 		logsDir?: string;
 		json?: boolean;
+		daily?: boolean;
 		help?: boolean;
 	} = {};
 
 	for (const arg of args) {
 		if (arg === "--help" || arg === "-h") {
 			options.help = true;
+		} else if (arg === "--daily") {
+			options.daily = true;
 		} else if (arg.startsWith("--days=")) {
 			options.days = Number.parseInt(arg.split("=")[1], 10);
 		} else if (arg.startsWith("--tool=")) {
@@ -49,10 +52,12 @@ function printUsage() {
 
 Usage:
   npm run logs:summary [options]
+  npm run logs:daily
   tsx scripts/summarize-errors.ts [options]
 
 Options:
-  --days=<n>         Number of days to analyze (default: 7)
+  --daily            Daily digest mode (analyzes past 24h and auto-saves to logs/reports/daily-summary-YYYY-MM-DD.md)
+  --days=<n>         Number of days to analyze (default: 7, or 1 if --daily)
   --tool=<name>      Filter errors for a specific tool (e.g. --tool=ns_runCustomSuiteQL)
   --category=<cat>   Filter by error category (ARGUMENT_VALIDATION, SUITEQL_SYNTAX, etc.)
   --output=<path>    Write markdown report to specified file path
@@ -61,9 +66,10 @@ Options:
   --help, -h         Show this help message
 
 Examples:
+  npm run logs:daily
   npm run logs:summary
   npm run logs:summary -- --days=30
-  npm run logs:summary -- --tool=ns_runCustomSuiteQL --output=suiteql-report.md
+  npm run logs:summary -- --tool=ns_runCustomSuiteQL --output=logs/reports/suiteql-report.md
 `);
 }
 
@@ -75,13 +81,13 @@ async function main() {
 		process.exit(0);
 	}
 
-	const days = options.days || 7;
+	const days = options.days || (options.daily ? 1 : 7);
 	const logsDir = options.logsDir || getDefaultLogsDir();
 
 	console.log("🔍 [1/3] Scanning NetSuite MCP error logs...");
 	console.log(`📁 Log directory: ${logsDir}`);
 	console.log(
-		`⏱️  Time window: Past ${days} days${options.tool ? ` | Tool: ${options.tool}` : ""}${options.category ? ` | Category: ${options.category}` : ""}\n`,
+		`⏱️  Time window: Past ${days} day(s)${options.tool ? ` | Tool: ${options.tool}` : ""}${options.category ? ` | Category: ${options.category}` : ""}\n`,
 	);
 
 	try {
@@ -110,11 +116,30 @@ async function main() {
 
 		if (options.output) {
 			const outputPath = path.resolve(options.output);
+			const parentDir = path.dirname(outputPath);
+			if (!fs.existsSync(parentDir)) {
+				fs.mkdirSync(parentDir, { recursive: true });
+			}
 			fs.writeFileSync(outputPath, markdownReport, "utf-8");
 			console.log(
 				`✅ [3/3] Analysis report successfully generated and saved to:`,
 			);
 			console.log(`   📄 ${outputPath}\n`);
+		} else if (options.daily) {
+			const today = new Date().toISOString().slice(0, 10);
+			const reportsDir = path.join(logsDir, "reports");
+			if (!fs.existsSync(reportsDir)) {
+				fs.mkdirSync(reportsDir, { recursive: true });
+			}
+			const dailyFilePath = path.join(reportsDir, `daily-summary-${today}.md`);
+			const latestFilePath = path.join(reportsDir, "daily-summary-latest.md");
+			fs.writeFileSync(dailyFilePath, markdownReport, "utf-8");
+			fs.writeFileSync(latestFilePath, markdownReport, "utf-8");
+			console.log(
+				`✅ [3/3] Daily analysis reports successfully generated and saved to:`,
+			);
+			console.log(`   📄 ${dailyFilePath}`);
+			console.log(`   📄 ${latestFilePath}\n`);
 		} else {
 			console.log("📝 [3/3] Generated Report Preview:\n");
 			console.log(markdownReport);

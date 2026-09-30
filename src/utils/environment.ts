@@ -1,6 +1,11 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const projectRoot = path.resolve(__dirname, "../../");
 
 // ---------------------------------------------------------------------------
 // Environment detection utilities
@@ -97,8 +102,10 @@ export function getDefaultSessionsDir(): string {
 }
 
 /**
- * Get standard logs directory for NetSuite MCP (~/.config/netsuite-mcp/logs).
- * Supports NETSUITE_LOG_DIR or NETSUITE_LOGS_DIR environment variable override.
+ * Get standard logs directory for NetSuite MCP.
+ * Supports NETSUITE_LOG_DIR or NETSUITE_LOGS_DIR environment variable override,
+ * prioritizes local workspace project root `./logs` if present,
+ * and falls back to standard config directory (~/.config/netsuite-mcp/logs).
  */
 export function getDefaultLogsDir(): string {
 	if (process.env.NETSUITE_LOG_DIR) {
@@ -106,6 +113,10 @@ export function getDefaultLogsDir(): string {
 	}
 	if (process.env.NETSUITE_LOGS_DIR) {
 		return path.resolve(process.env.NETSUITE_LOGS_DIR);
+	}
+	const localProjectLogs = path.join(projectRoot, "logs");
+	if (fs.existsSync(localProjectLogs)) {
+		return localProjectLogs;
 	}
 	return path.join(getDefaultConfigDir(), "logs");
 }

@@ -13,6 +13,8 @@ sessions/
 .env.local
 
 # Logs
+logs/*.jsonl
+logs/*.log
 *.log
 npm-debug.log*
 
