@@ -2,13 +2,13 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { CallToolResult } from "@modelcontextprotocol/server";
+import { cacheService } from "../cache/cache.js";
 import type { OAuthManager } from "../oauth/manager.js";
-import { cacheService } from "../utils/cache.js";
-import { isSandboxAccount } from "../utils/environment.js";
 import {
 	formatSummaryToMarkdown,
 	summarizeToolErrors,
-} from "../utils/toolErrorSummarizer.js";
+} from "../telemetry/toolErrorSummarizer.js";
+import { isSandboxAccount } from "../utils/environment.js";
 import { GetErrorSummaryArgsSchema } from "./toolSchemas.js";
 
 type ToolResponse = CallToolResult;

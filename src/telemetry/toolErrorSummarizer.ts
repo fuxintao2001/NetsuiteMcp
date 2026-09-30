@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import readline from "node:readline";
-import { getDefaultLogsDir } from "./environment.js";
+import { getDefaultLogsDir } from "../utils/environment.js";
 import type { ToolErrorCategory, ToolErrorEntry } from "./toolErrorLogger.js";
 
 // ---------------------------------------------------------------------------

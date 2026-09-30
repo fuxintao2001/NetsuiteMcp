@@ -63,6 +63,18 @@ NetsuiteMcp/
 │   ├── daemon/                 # Background token keepalive & scheduler daemon
 │   │   ├── keepalive.ts        # Proactive multi-account token refresher loop
 │   │   └── installer.ts        # OS service installer (launchd / systemd)
+│   ├── cache/                  # Redis & in-memory caching and Redlock distributed locking
+│   │   ├── cache.ts            # Central CacheService singleton & memory cache
+│   │   ├── cacheProvider.ts    # CacheProvider interface definition
+│   │   ├── redisCacheProvider.ts # Distributed Redis cache provider
+│   │   ├── redisLock.ts        # Redlock distributed locking mechanism
+│   │   └── cache.test.ts       # Cache & locking resilience unit tests
+│   ├── telemetry/              # Invocation telemetry, error logging & self-healing diagnostics
+│   │   ├── toolErrorLogger.ts  # Structured telemetry recording (duration, errors, payload size)
+│   │   ├── toolErrorSummarizer.ts # Aggregated diagnostic summaries & self-healing suggestions
+│   │   ├── globalErrorHandlers.ts # Global uncaught exception & unhandled rejection handlers
+│   │   ├── toolErrorLogger.test.ts # Telemetry logger tests
+│   │   └── toolErrorSummarizer.test.ts # Diagnostic summarizer tests
 │   ├── utils/                  # Domain utilities & runtime guardrails
 │   │   ├── suiteqlGuard.ts     # AST & regex SuiteQL defense engine (blocks SELECT *, non-Oracle syntax)
 │   │   ├── environment.ts      # Environment classification (isSandboxAccount) & Production write locks
@@ -71,10 +83,6 @@ NetsuiteMcp/
 │   │   ├── suiteqlTemplates.ts # Oracle SAFE Guide certified high-frequency SuiteQL templates
 │   │   ├── contextSlimmer.ts   # Payload token compression & null stripping for LLM context optimization
 │   │   ├── suitecloudRunner.ts # SuiteCloud CLI runner wrapper (netsuite_suitecloud_upload)
-│   │   ├── toolErrorLogger.ts  # Structured telemetry recording (duration, errors, payload size)
-│   │   ├── toolErrorSummarizer.ts # Aggregated diagnostic summaries & self-healing suggestions
-│   │   ├── redisCacheProvider.ts # Distributed Redis cache provider
-│   │   ├── redisLock.ts        # Redlock distributed locking mechanism
 │   │   ├── resilience.ts       # Concurrency limiter & exponential backoff retry
 │   │   └── errors.ts           # NetSuite structured error parser & diagnostic classifier
 │   └── supervisor/             # Child process supervisor & connection resilience
@@ -143,7 +151,7 @@ When developing tools, handlers, and utilities in this codebase, enforce the fol
    - Tool error responses must provide structured diagnostic tags (`[Self-Healing Action]`, `[suiteqlGuard]`, `PERMISSION DENIED — HARD STOP`, `NETWORK_OR_TIMEOUT`, `[Production Safety Violation]`).
    - Distinguish transient network timeouts (`NETWORK_OR_TIMEOUT`: ETIMEDOUT, ECONNRESET, 504 Gateway Timeout) from SQL syntax errors (`SUITEQL_SYNTAX`). Do not rewrite valid queries on network timeouts.
    - Permission errors (`INSUFFICIENT_PERMISSION`, 403 Forbidden) must trigger a clean hard-stop with required role permission advice.
-5. **Observability & Telemetry (`toolErrorLogger.ts`)**:
+5. **Observability & Telemetry (`src/telemetry/toolErrorLogger.ts`)**:
    - Every MCP tool call must record structured metrics: `tool`, `durationMs`, `isError`, and `payloadChars`.
    - The aggregated error summarizer (`netsuite_get_error_summary`) must provide actionable pattern analysis for client agent self-healing.
 6. **MCP Tool Response Protocol & Context Slimming**:
@@ -152,7 +160,7 @@ When developing tools, handlers, and utilities in this codebase, enforce the fol
    - Large record payloads must be compressed via `contextSlimmer.ts` (stripping nulls, undefined, and empty arrays) to prevent LLM context exhaustion.
 7. **Concurrency Governance & Distributed Locking**:
    - All outbound NetSuite API calls must pass through `ConcurrencyLimiter` and `retryWithBackoff` (`src/utils/resilience.ts`) to respect NetSuite concurrency limits.
-   - Multi-instance token renewal and mutations must acquire distributed locks via Redlock (`src/utils/redisLock.ts`).
+   - Multi-instance token renewal and mutations must acquire distributed locks via Redlock (`src/cache/redisLock.ts`).
 8. **Adaptive Communication & Code Standards**:
    - Adapt conversational explanations, summaries, and interactive messages to the user's language (default to Simplified Chinese if prompted in Chinese).
    - Keep all code symbols, TypeScript types, variables, SQL keywords, and API syntax strictly in standard English.

@@ -4,9 +4,9 @@ import https from "node:https";
 import os from "node:os";
 import path from "node:path";
 import { Redis } from "ioredis";
+import { RedisLockProvider } from "../cache/redisLock.js";
 import type { SessionData, TokenData } from "../oauth/sessionStorage.js";
 import { shouldRefreshToken } from "../oauth/tokenExchange.js";
-import { RedisLockProvider } from "../utils/redisLock.js";
 import { checkNetworkReadiness } from "../utils/resilience.js";
 
 /**

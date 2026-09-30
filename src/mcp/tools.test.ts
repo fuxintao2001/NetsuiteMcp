@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cacheService } from "../utils/cache.js";
+import { cacheService } from "../cache/cache.js";
 import { httpClient } from "../utils/httpClient.js";
 import { NetSuiteMCPTools } from "./tools.js";
 

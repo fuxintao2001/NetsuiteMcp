@@ -2,8 +2,8 @@ import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import pino, { type Logger } from "pino";
-import { getDefaultLogsDir } from "./environment.js";
-import { isPermissionError } from "./errors.js";
+import { getDefaultLogsDir } from "../utils/environment.js";
+import { isPermissionError } from "../utils/errors.js";
 
 // ---------------------------------------------------------------------------
 // Types

@@ -3,11 +3,11 @@
 import fs from "node:fs";
 import path from "node:path";
 import { getDefaultLogsDir } from "../src/utils/environment.js";
-import type { ToolErrorCategory } from "../src/utils/toolErrorLogger.js";
+import type { ToolErrorCategory } from "../src/telemetry/toolErrorLogger.js";
 import {
 	formatSummaryToMarkdown,
 	summarizeToolErrors,
-} from "../src/utils/toolErrorSummarizer.js";
+} from "../src/telemetry/toolErrorSummarizer.js";
 
 // Parse CLI arguments
 function parseArgs() {

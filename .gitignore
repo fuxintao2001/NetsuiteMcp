@@ -52,6 +52,8 @@ netsuite.config.json
 
 # Test artifacts
 .test-handlers-root/
+.test-smoke-session/
+.test-*/
 coverage/
 
 # Temporary SDK clone

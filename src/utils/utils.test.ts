@@ -1,5 +1,6 @@
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { installGlobalErrorHandlers } from "../telemetry/globalErrorHandlers.js";
 import { getKnownClientId, SERVER_NAME } from "./constants.js";
 import {
 	buildEnvSuffix,
@@ -16,7 +17,6 @@ import {
 	sanitizeError,
 	sanitizeMessage,
 } from "./errors.js";
-import { installGlobalErrorHandlers } from "./globalErrorHandlers.js";
 import {
 	ConcurrencyLimiter,
 	checkNetworkReadiness,

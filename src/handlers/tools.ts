@@ -1,5 +1,9 @@
 import type { CallToolResult, Tool } from "@modelcontextprotocol/server";
 import { ProtocolError } from "@modelcontextprotocol/server";
+import {
+	classifyError,
+	recordToolError,
+} from "../telemetry/toolErrorLogger.js";
 import { normalizeStandardArgs } from "../utils/args.js";
 import {
 	cleanRecordPayload,
@@ -26,7 +30,6 @@ import {
 	splitSuiteQLStatements,
 	transpileSuiteQLDialect,
 } from "../utils/suiteqlGuard.js";
-import { classifyError, recordToolError } from "../utils/toolErrorLogger.js";
 import { handleGetErrorSummary, handleStatus } from "./authHandlers.js";
 import { handleBatchExecute } from "./batchHandler.js";
 import { handleSuitecloudUpload } from "./deployHandlers.js";

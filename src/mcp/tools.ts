@@ -2,9 +2,9 @@ import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { cacheService } from "../cache/cache.js";
 import type { OAuthManager } from "../oauth/manager.js";
 import { resolveRecordTypeParam } from "../utils/args.js";
-import { cacheService } from "../utils/cache.js";
 import {
 	formatNetSuiteAccountHost,
 	getSkillsDir,

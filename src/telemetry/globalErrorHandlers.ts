@@ -1,4 +1,4 @@
-import { sanitizeError, sanitizeMessage } from "./errors.js";
+import { sanitizeError, sanitizeMessage } from "../utils/errors.js";
 
 interface ProcessLike {
 	on(event: "uncaughtException", listener: (error: unknown) => void): unknown;

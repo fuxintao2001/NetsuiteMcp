@@ -5,6 +5,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Server } from "@modelcontextprotocol/server";
 import { StdioServerTransport } from "@modelcontextprotocol/server/stdio";
+import { cacheService } from "./cache/cache.js";
+import { RedisCacheProvider } from "./cache/redisCacheProvider.js";
 import { registerPromptHandlers } from "./handlers/prompts.js";
 import { registerResourceHandlers } from "./handlers/resources.js";
 import type { ToolHandlerDeps } from "./handlers/tools.js";
@@ -13,14 +15,12 @@ import { registerToolHandlers, textResult } from "./handlers/tools.js";
 import { NetSuiteMCPTools } from "./mcp/tools.js";
 import { OAuthManager } from "./oauth/manager.js";
 import { McpSupervisor } from "./supervisor/supervisor.js";
-import { cacheService } from "./utils/cache.js";
+import { installGlobalErrorHandlers } from "./telemetry/globalErrorHandlers.js";
+import { flushToolErrorLogger } from "./telemetry/toolErrorLogger.js";
 import { resolveSessionPath } from "./utils/config.js";
 import { getKnownClientId } from "./utils/constants.js";
 import { validateEnv } from "./utils/envValidator.js";
-import { installGlobalErrorHandlers } from "./utils/globalErrorHandlers.js";
 import { resolveCustomRecordRectype as resolveRectypeHelper } from "./utils/metadata.js";
-import { RedisCacheProvider } from "./utils/redisCacheProvider.js";
-import { flushToolErrorLogger } from "./utils/toolErrorLogger.js";
 
 // ---------------------------------------------------------------------------
 // Global error handlers

@@ -1,8 +1,8 @@
 import crypto from "node:crypto";
+import type { RedisLockProvider } from "../cache/redisLock.js";
 import { openBrowser } from "../utils/browserLauncher.js";
 import { getKnownClientId } from "../utils/constants.js";
 import { formatNetSuiteAccountHost } from "../utils/environment.js";
-import type { RedisLockProvider } from "../utils/redisLock.js";
 import { TokenRefreshScheduler } from "../utils/resilience.js";
 import { CallbackServer } from "./callbackServer.js";
 import type { PKCEChallenge } from "./pkce.js";
