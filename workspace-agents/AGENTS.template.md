@@ -80,7 +80,7 @@ To ensure high-density reasoning without context bloat, deep domain knowledge is
    - ⚡ **Fast-Path (Standard Core Business — Direct 1-Turn Execution)**:
      - For queries involving standard core tables (`transaction`, `transactionline`, `customer`, `vendor`, `item`, `account`, `subsidiary`, `aggregateitemlocation`, `accountingperiod`, `transactionaccountingline`, `employee`) or common document lineage:
      - **DO NOT call reconnaissance tools** (e.g. `ns_getSuiteQLMetadata`, `ns_getRecordTypeMetadata`, `netsuite_get_query_template`).
-     - **MUST generate precise SuiteQL and call `ns_runCustomSuiteQL` directly in Turn 1.** Detailed rules: [Fast-Path Routing](file://{{PROJECT_PATH}}/.agents/rules/fast-path-routing.md).
+     - **MUST generate precise SuiteQL and call `ns_runCustomSuiteQL` directly in Turn 1.** When retrieving multiple datasets, pass multiple statements separated by `;` or an array in `sqlQueries` to execute concurrently in 1 single turn. Detailed rules: [Fast-Path Routing](file://{{PROJECT_PATH}}/.agents/rules/fast-path-routing.md).
    - 🔍 **Slow-Path (Unknown Custom Records — Reconnaissance First)**:
      - When operating on unverified custom records (`customrecord_*`), custom fields (`custbody_*`, `custcol_*`), or unlisted tables:
      - **For SuiteQL database tables**: Call `ns_getSuiteQLMetadata` (inspect columns or search catalog).
@@ -99,7 +99,7 @@ To ensure high-density reasoning without context bloat, deep domain knowledge is
 ## 🧰 5. Tool Execution & Concurrency SOP
 
 1. **Tool Execution Hierarchy**:
-   - **Routine Queries (Fast-Path)**: `ns_runCustomSuiteQL` (Direct 1-turn execution; automatically transpiles MySQL/Postgres dialect habits).
+   - **Routine Queries (Fast-Path)**: `ns_runCustomSuiteQL` (Direct 1-turn execution; automatically transpiles MySQL/Postgres dialect habits; supports parallel multi-query execution via semicolon `;` syntax or `sqlQueries: [...]` array).
    - **Schema Reconnaissance (Slow-Path)**: `ns_getSuiteQLMetadata` (table columns & catalog search) ➔ `ns_getRecordTypeMetadata` (record fields & custom fields with offline fallback).
    - **Record Fetch & Inspection**: `ns_getRecord` (accepts numeric internal ID or document number `tranid`, automatically resolves natural keys and prunes null noise). For formatted Markdown table view, use `netsuite_inspect_record`.
    - **Logs, Diagnostics & Audit**: `netsuite_get_script_logs` (script execution logs) ➔ `netsuite_get_system_notes` (record-level audit trail by ID or document number) ➔ `netsuite_get_error_summary` (structured error frequency & self-healing diagnostics).
@@ -111,8 +111,9 @@ To ensure high-density reasoning without context bloat, deep domain knowledge is
    - **🚫 Pruned & Prohibited Tools**: `ns_prompt_library_app`, `ns_selector_app`, `ns_report_filters_app` (interactive browser modals that cause headless agent deadlocks; strictly blocked).
      - For Accounting Contexts: Query via `SELECT id, name FROM accountingbook`.
      - For Nexus IDs: Query via `SELECT id, description FROM nexus`.
-2. **Concurrency & Batching (`netsuite_batch_execute`)**:
-   - When executing multiple independent reads or checks (≥ 2 independent items), issue parallel tool calls or use `netsuite_batch_execute` in a single turn to eliminate serial latency.
+2. **Concurrency & Batching (`ns_runCustomSuiteQL` / `netsuite_batch_execute`)**:
+   - **For multiple SuiteQL queries**: Pass multiple statements separated by `;` or provide an array in `sqlQueries` within `ns_runCustomSuiteQL` directly. Queries run concurrently in parallel via the MCP 5-thread pool in 1 turn.
+   - **For heterogeneous / mixed tools**: When executing multiple independent operations across different tools (e.g. Inspect record + script logs + SuiteQL), use `netsuite_batch_execute` in a single turn to eliminate serial latency.
 3. **File Deployment Confirmation Protocol (`netsuite_suitecloud_upload`)**:
    - Before uploading code, display an interactive confirmation card via `ask_question` with ONLY the file's absolute path and choices: `Accept` and `Reject`.
    - Execute immediately upon acceptance; abort immediately upon rejection.
