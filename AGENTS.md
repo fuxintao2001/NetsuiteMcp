@@ -1,201 +1,213 @@
-# NetSuite MCP Server — AI Developer Guide (AGENTS.md)
+# NetSuite MCP Server — AI 编程助手权威行动指南与代码生成规约 (AGENTS.md)
 
-> 🤖 **Role & Purpose**: This document provides mandatory execution directives for AI coding agents developing, refactoring, and maintaining the **NetSuite MCP Server** (`@suiteinsider/netsuite-mcp`) repository.
-> 
-> ⚠️ **Workspace Boundary**: This repository is a **Node.js TypeScript MCP Server**, NOT a NetSuite SuiteScript client project. Client SuiteScript/SDF workspace directives are defined in `workspace-agents/AGENTS.template.md` and provisioned via `npm run sync-agents`.
-
-**Tech Stack**: TypeScript (strict mode) · Node.js ≥ 18 (ESM) · Stdio Transport · OAuth 2.0 PKCE · Redis Distributed Cache & Redlock Distributed Locking · Biome · Vitest
-
----
-
-## ⚙️ 1. Development & Testing Commands
-
-All code modifications in this repository must be verified using the following standard commands:
-
-| Command | Purpose & Standard |
-|:---|:---|
-| `npm run build` | Clean production build (`rimraf dist && tsc && node scripts/stamp-build.js`). |
-| `npm run dev` | Start the MCP server in development mode via `tsx src/index.ts`. |
-| `npm run lint` | Run Biome linter & code formatter check (`biome check src`). Must report 0 errors. |
-| `npm test` | Run all Vitest unit tests (`vitest run`). All unit tests must pass 100%. |
-| `npm run typecheck` | Strict TypeScript type checking across source and test configs (`tsc --noEmit && tsc --noEmit -p tsconfig.test.json`). |
-| `npm run score` | Run the 360° ISO/IEC 25010 & Oracle SAFE architectural scoring suite (`scripts/test-system-architecture-score.ts`). Must maintain 100/100 (Level 5 Optimizing). |
-| `npm run test:compliance` | Run the Oracle NetSuite official documentation compliance & anti-hallucination test suite (`scripts/test-official-docs-compliance.ts`). Must pass 100%. |
-| `npm run sync-agents` | Synchronize `workspace-agents/` templates and rules to all connected NetSuite client workspaces. |
-| `npm run sync:push` | Synchronize and git commit/push updates to all client workspace repositories (`node scripts/sync-agents.js --push`). |
-| `npm run fetch-skills` | Download and update latest Oracle SuiteCloud Agent Skills to local cache. |
-| `npm run auth:all` | Multi-tenant bulk OAuth authorization across configured workspaces (`tsx scripts/bulk-auth.ts`). |
-| `npm run daemon:status` | Inspect background token keepalive daemon status (`node scripts/daemon.js status`). |
-| `npm run logs:summary` | Inspect aggregated MCP tool error logs and invocation telemetry (`tsx scripts/summarize-errors.ts`). |
-| `npm run check:safe` | Run SuiteScript SAFE Guide offline AST linter (`node scripts/suitescript-safe-check.js`). |
-| `npm run check:upload` | Run SuiteCloud upload pre-flight syntax & credential leak gate (`node scripts/pre-upload-check.js`). |
+> 🤖 **角色与核心定位**：本文档为大语言模型编程智能体（AI Coding Agents，如 Claude Code、Cursor、Windsurf、Antigravity）在开发、重构、维护 **NetSuite MCP Server** 仓库及生成 NetSuite 领域代码时的**最高优先级执行指令与工程规范**。
+>
+> ⚠️ **双重代码生成场景边界**：
+> 1. **场景 A（本仓库开发）**：针对本 MCP 服务端（Node.js / TypeScript 严格模式 / Stdio Transport / Redis / Redlock）的架构迭代与工具扩展。
+> 2. **场景 B（NetSuite 领域代码生成）**：当用户在当前会话中要求 AI 编写、审查或调试 NetSuite 客户端代码时，必须严格执行 Oracle SAFE Guide 2025.2、SuiteScript 2.1 与 SuiteQL 权威防线。
 
 ---
 
-## 🏗️ 2. Repository Architecture & Codebase Map
+## 🏛️ 1. 标杆项目矩阵 (Benchmark Reference Matrix)
 
-When navigating, maintaining, or adding features to this repository, adhere strictly to the established module boundaries:
+在设计、编写与重构 MCP 工具、类型系统、运行时防护及可观测性架构时，AI Agent 必须严格对标以下业界标杆项目的最佳实践：
+
+| **#** | **项目** | **GitHub URL** | **星标** | **参照价值与本仓库落地对齐** |
+| :---: | :--- | :--- | :---: | :--- |
+| ① | **MCP Official Servers** | `github.com/modelcontextprotocol/servers` | ~90k★ | **工具设计的“黄金标准”**：工具命名动名词规范（`netsuite_inspect_record`）、精准的 description 描述（明确输入与输出预期）、严格的 Zod inputSchema 范式、标准错误返回格式（`textResult({ isError: true })`）。参考实现：`filesystem`、`git`。 |
+| ② | **MCP TypeScript SDK** | `github.com/modelcontextprotocol/typescript-sdk` | ~13k★ | **SDK 层工程最佳实践**：Stdio Transport 抽象生命周期、Zod schema 与 TypeScript 静态类型推导（`z.infer<typeof Schema>`）、无锁且高效的 JSON-RPC 协议封装。 |
+| ③ | **GitHub MCP Server** | `github.com/github/github-mcp-server` | ~17k★ | **企业级大型工具集治理**：分域管理策略（Auth, Query, Record, Deployment, Diagnostics）、清晰的命名空间划分（本地增强 `netsuite_*` vs 远端代理 `ns_*`）、生产/沙箱权限分级契约。 |
+| ④ | **Supabase MCP** | `github.com/supabase/mcp` | — | **数据库/ERP 集成范本**：Feature Group 分组、环境写安全保护（生产环境物理阻断写操作）、统一数据透视与实体字典反查。 |
+| ⑤ | **Sentry MCP** | `github.com/getsentry/sentry-mcp` | — | **全链路可观测性标杆**：每次 Tool 调用的自动化指标采集（耗时 `durationMs`、有效负载 `payloadChars`、错误分类 `errorCategory`）、脱敏日志追踪、基于频次分析的自愈诊断（`netsuite_get_error_summary`）。 |
+| ⑥ | **Playwright MCP** | `github.com/microsoft/playwright-mcp` | — | **复杂工具集 UX 设计**：Description 采用“前 5 词动词 + 资源”精准写法，避免大模型幻觉与误触发；按需曝光工具，杜绝交互死锁。 |
+| ⑦ | **Context7 MCP** | `github.com/upstash/context7-mcp` | — | **Context 经济性极致优化**：极简响应载荷、噪点裁剪（`contextSlimmer` 自动剥离 `null`/`undefined`）、自动格式化为高密度 Markdown 表格，降低 60%+ LLM Token 消耗。 |
+| ⑧ | **ERPNext MCP Server** | `github.com/rakeshgangwar/erpnext-mcp-server` | — | **同类 ERP 业务抽象范式**：针对 ERP 复杂实体模型的元数据反查（`ns_getSuiteQLMetadata` / `ns_getRecordTypeMetadata`）、记录 CRUD 统一接口规范、自然键（tranid）与内部键（id）自动解析。 |
+
+---
+
+## 🧼 2. 代码工艺与反兼容膨胀禁令 (Anti-Compatibility Bloat)
+
+AI Agent 在编写、审查或重构任何代码（TypeScript、JavaScript、SQL）时，必须严格贯彻**单一权威实现（Single Authoritative Implementation）**原则：
+
+1. **彻底干净替换，严禁双轨并行**：
+   - ❌ **严禁**：因新旧方案兼容而写 `try { newWay(); } catch (e) { oldWay(); }`。
+   - ❌ **严禁**：添加分支嗅探 `if (supportsNewWay) { ... } else { ... }` 维系旧缺陷代码。
+   - ❌ **严禁**：因元数据定义不确定而链式回退（如 `val = newProp ?? oldProp ?? fallback`）。
+   - ✅ **强制要求**：查证唯一权威标准，执行 **100% 彻底干净的替换**。
+2. **立即物理删除死代码**：
+   - 废弃的实现、过时的方法、无效的参数必须**立即从源码中物理删除**。
+   - 严禁将死代码以注释形式留存，杜绝任何“以防万一”的防御性代码膨胀。
+3. **直面报错根因，严禁消极掩盖**：
+   - 报错意味着类型缺陷、字段不匹配或假设错误。必须精准定位根因并从源头彻底修复，严禁使用盲目的 try-catch 吞没异常。
+4. **仅描述当前最新状态（零版本演进叙事）**：
+   - ❌ **严禁**：在代码注释、回复或文档中叙述历史变迁流水账（如“以前版本是 X，现在重构成 Y”，“相比之前我们优化了 Z”）。
+   - ✅ **强制要求**：**仅描述当前最新代码的确定性状态与逻辑**。将当前代码库视为唯一的独立权威基准，直接阐述其最新架构与业务逻辑。
+
+---
+
+## 🛠️ 3. 本仓库 TypeScript MCP 服务端开发规约
+
+### 3.1 技术栈与架构分层
+
+- **环境要求**：Node.js ≥ 18，TypeScript 严格模式（Strict Mode），ESM 模块（导入路径必须包含 `.js` 扩展名）。
+- **禁止 `any`**：严禁使用 `any` 类型。未知数据使用 `unknown`，并通过 Zod Schema 或类型收窄（Type Guards）进行校验。
 
 ```
-NetsuiteMcp/
-├── src/
-│   ├── index.ts                # Server entry point, CLI args, stdio transport initialization
-│   ├── mcp/                    # Core NetSuite MCP business service layer
-│   │   ├── tools.ts            # NetSuiteMCPTools service class (SuiteQL, REST WS, inspect, reports)
-│   │   └── tools.test.ts       # SuiteQL & resilience unit tests
-│   ├── handlers/               # MCP Protocol Handlers (JSON-RPC dispatchers & schemas)
-│   │   ├── tools.ts            # Central MCP tool registry & request dispatcher
-│   │   ├── toolSchemas.ts      # Zod validation schemas for all MCP tool parameters
-│   │   ├── recordHandlers.ts   # netsuite_inspect_record, ns_getRecord natural key resolution, mutations
-│   │   ├── queryHandlers.ts    # ns_runCustomSuiteQL, ns_getSuiteQLMetadata, query templates, reports
-│   │   ├── authHandlers.ts     # netsuite_authenticate, netsuite_get_auth_status
-│   │   ├── batchHandler.ts     # netsuite_batch_execute parallel tool dispatcher
-│   │   ├── deployHandlers.ts   # netsuite_suitecloud_upload deployment handler
-│   │   ├── prompts.ts          # MCP Prompts: review_suitescript, debug_script_error, generate_suiteql, etc.
-│   │   ├── resources.ts        # MCP Resources: netsuite://records/reference, golden-templates, etc.
-│   │   └── metadataHydrator.ts # In-memory metadata pre-warming & cache hydration
-│   ├── oauth/                  # OAuth 2.0 PKCE authentication subsystem
-│   │   ├── manager.ts          # OAuthManager: token lifecycle, proactive renewal & auto-recovery
-│   │   ├── tokenExchange.ts    # Token exchange & refresh endpoints with backoff retry
-│   │   ├── sessionStorage.ts   # Persistent token storage (~/.netsuite/sessions.json)
-│   │   ├── callbackServer.ts   # Ephemeral local HTTP callback server for OAuth redirect
-│   │   └── pkce.ts             # PKCE code challenge & verifier generator
-│   ├── daemon/                 # Background token keepalive & scheduler daemon
-│   │   ├── keepalive.ts        # Proactive multi-account token refresher loop
-│   │   └── installer.ts        # OS service installer (launchd / systemd)
-│   ├── cache/                  # Redis & in-memory caching and Redlock distributed locking
-│   │   ├── cache.ts            # Central CacheService singleton & memory cache
-│   │   ├── cacheProvider.ts    # CacheProvider interface definition
-│   │   ├── redisCacheProvider.ts # Distributed Redis cache provider
-│   │   ├── redisLock.ts        # Redlock distributed locking mechanism
-│   │   └── cache.test.ts       # Cache & locking resilience unit tests
-│   ├── telemetry/              # Invocation telemetry, error logging & self-healing diagnostics
-│   │   ├── toolErrorLogger.ts  # Structured telemetry recording (duration, errors, payload size)
-│   │   ├── toolErrorSummarizer.ts # Aggregated diagnostic summaries & self-healing suggestions
-│   │   ├── globalErrorHandlers.ts # Global uncaught exception & unhandled rejection handlers
-│   │   ├── toolErrorLogger.test.ts # Telemetry logger tests
-│   │   └── toolErrorSummarizer.test.ts # Diagnostic summarizer tests
-│   ├── utils/                  # Domain utilities & runtime guardrails
-│   │   ├── suiteqlGuard.ts     # AST & regex SuiteQL defense engine (blocks SELECT *, non-Oracle syntax)
-│   │   ├── environment.ts      # Environment classification (isSandboxAccount) & Production write locks
-│   │   ├── recordsReference.ts # 272 standard NetSuite record types offline catalog & field definitions
-│   │   ├── metadata.ts         # SuiteQL table catalog & record type reflection
-│   │   ├── suiteqlTemplates.ts # Oracle SAFE Guide certified high-frequency SuiteQL templates
-│   │   ├── contextSlimmer.ts   # Payload token compression & null stripping for LLM context optimization
-│   │   ├── suitecloudRunner.ts # SuiteCloud CLI runner wrapper (netsuite_suitecloud_upload)
-│   │   ├── resilience.ts       # Concurrency limiter & exponential backoff retry
-│   │   └── errors.ts           # NetSuite structured error parser & diagnostic classifier
-│   └── supervisor/             # Child process supervisor & connection resilience
-├── scripts/                    # Engineering evaluation, lifecycle hooks & automation scripts
-│   ├── test-system-architecture-score.ts # ISO/IEC 25010 & SAFE 6-pillar architecture benchmark
-│   ├── test-official-docs-compliance.ts  # Oracle NetSuite documentation compliance & anti-hallucination suite
-│   ├── sync-agents.js          # Multi-tenant workspace AGENTS.md / rules synchronization engine
-│   ├── post-tool-sync.js       # Antigravity PostToolUse hook for auto-syncing workspace-agents
-│   ├── pre-upload-check.js     # SuiteCloud upload pre-flight syntax & credential leak gate
-│   └── suitescript-safe-check.js # SuiteScript SAFE Guide offline AST linter
-├── workspace-agents/           # Distribution templates for NetSuite client workspaces
-│   ├── AGENTS.template.md      # Template for client workspace AGENTS.md (SuiteScript/SDF directives)
-│   ├── hooks.template.json     # Template for client workspace Antigravity lifecycle hooks
-│   ├── workspaces.json         # Workspace path → NetSuite account/environment mapping
-│   └── rules/                  # Modular domain rule templates (fast-path, suiteql, safe, locks, ui)
-└── .agents/                    # Local Antigravity configuration for this MCP Server repository
-    ├── hooks.json              # Local PreToolUse and PostToolUse lifecycle gates
-    └── rules/                  # Local engineering rules
+src/
+├── index.ts                # 服务端入口：CLI 参数解析、Stdio 传输初始化
+├── mcp/                    # NetSuite 底层业务通讯层
+│   └── tools.ts            # NetSuiteMCPTools：封装 SuiteQL、REST WS、HTTP 边界
+├── handlers/               # MCP 协议调度层
+│   ├── tools.ts            # 工具注册表（LOCAL_TOOLS）与请求总分发器
+│   ├── toolSchemas.ts      # 所有工具的 Zod 参数模式与类型推导
+│   ├── recordHandlers.ts   # 记录透视、自然键解析、字段字典
+│   ├── queryHandlers.ts    # SuiteQL 执行、元数据反查、黄金模板
+│   ├── authHandlers.ts     # OAuth 鉴权状态、注销、诊断
+│   ├── batchHandler.ts     # 批量并发调度器（p-limit 并发控制）
+│   └── deployHandlers.ts   # SuiteCloud 部署上传与生产写屏障
+├── oauth/                  # OAuth 2.0 PKCE 鉴权子系统
+├── cache/                  # Redis 缓存与 Redlock 分布式锁
+├── telemetry/              # 结构化调用遥测与错误自愈诊断器
+└── utils/                  # 运行时防线：suiteqlGuard、环境隔离、上下文瘦身
+```
+
+### 3.2 新增与重构 MCP 工具标准范式 (Standard Recipe)
+
+任何新增或重构的 MCP 工具必须严格遵循以下 4 步标准闭环：
+
+#### 步骤 1：在 `src/handlers/toolSchemas.ts` 中定义 Zod Schema
+```typescript
+export const InspectRecordArgsSchema = z.object({
+  recordType: z
+    .string()
+    .trim()
+    .toLowerCase()
+    .min(1, "recordType is required")
+    .describe("NetSuite record type ID (e.g. salesorder, customer, customrecord_xxx)."),
+  id: z
+    .string()
+    .trim()
+    .min(1, "id is required")
+    .describe("Internal ID or document number (tranid) of the record."),
+});
+export type InspectRecordArgs = z.infer<typeof InspectRecordArgsSchema>;
+```
+
+#### 步骤 2：在 `src/handlers/tools.ts` 中注册 Tool 元数据
+严格遵循 Playwright MCP 动名词规范与“前 5 词动词 + 资源”精准 description 规则：
+```typescript
+{
+  name: "netsuite_inspect_record",
+  description: "Inspect real NetSuite records in the target account. Separates header fields from custom fields with empty fields filtered out.",
+  inputSchema: zodToJsonSchema(InspectRecordArgsSchema),
+}
+```
+
+#### 步骤 3：编写独立 Handler 业务逻辑
+- 参数归一化（去除首尾空格、小写化）
+- 结构化捕获异常，包裹遥测记录
+- 结果经由 `contextSlimmer` 自动瘦身或转换为 Markdown 表格
+- 统一通过 `textResult()` 返回标准 MCP 结果
+
+```typescript
+export async function handleInspectRecord(
+  args: InspectRecordArgs,
+  deps: ToolHandlerDeps
+): Promise<CallToolResult> {
+  try {
+    const rawData = await deps.tools.getRecord(args.recordType, args.id);
+    const cleaned = cleanRecordPayload(rawData);
+    return textResult(formatRecordToMarkdown(cleaned));
+  } catch (error) {
+    const classified = classifyError(error);
+    return textResult(`❌ [Record Inspection Failed]: ${error.message}\n👉 ${classified.actionAdvice}`, { isError: true });
+  }
+}
+```
+
+#### 步骤 4：编写 Vitest 单元测试
+在对应的 `*.test.ts` 中覆盖正常流程、参数边界及异常场景（如网络超时、无权限、账号类型阻断），并 Mock 外部网络与 Redis 依赖。
+
+---
+
+## 🛡️ 4. NetSuite 领域代码生成规约 (SuiteScript & SuiteQL)
+
+当用户在当前工作区中要求 AI 编写或调试 NetSuite 业务代码时，必须无条件执行以下硬性标准：
+
+### 4.1 SuiteScript 2.1 现代规范与 SAFE Guide 2025.2
+
+1. **严格 AMD 模块加载**：采用标准的 `@NApiVersion 2.1` 与规范的 JSDoc 声明，使用 ES6+（`const`/`let`、箭头函数、解构赋值、模板字符串），严禁使用已废弃的 `var` 或 SuiteScript 1.0 `nlapi*` API。
+2. **治理预算红线 (Governance Unit Defense)**：
+   - ❌ **绝对禁止在循环体内部执行 `record.load()` 或 `record.submitFields()`**（触发 `SAFE-GOV-001` 违规，治理点急速枯竭）。
+   - ❌ **绝对禁止在循环体内调用 `search.create()` 或 `query.run()`**（触发 `SAFE-GOV-002`，必须进行查询外提 Query Hoisting）。
+   - 大数据量批处理必须采用 **Map/Reduce 脚本**，通过 `getInputData` 产出迭代源。
+3. **敏感凭证防泄漏**：严禁在代码中硬编码任何 API Key、Token、密码或私钥（触发 `SAFE-SEC-001` 门禁）。
+4. **防御性异常处理**：仅在外部 I/O 交互（`N/https`、`record.submitFields()`）处包裹精准的 try-catch，并记录明确的业务上下文。
+
+### 4.2 SuiteQL 7 项黄金防线与核心模式不变量
+
+所有生成的 SuiteQL 查询必须通过本仓库 `src/utils/suiteqlGuard.ts` 的静态与运行时检验：
+
+1. **严禁 `SELECT *`**：必须提供显式列投影（如 `SELECT id, tranid, entity, total FROM transaction`），严防宽表爆炸。
+2. **强制 `mainline` 过滤**：凡是涉及 `transactionline` 表关联，必须显式指定 `tl.mainline = 'F'`（明细行）或 `tl.mainline = 'T'`（表头汇总行），杜绝数据行数与金额翻倍畸高。
+3. **强制包含分页保护**：单次查询必须显式包含分页（`FETCH FIRST N ROWS ONLY`、`ROWNUM <= N` 或标准 `OFFSET M ROWS FETCH NEXT N ROWS ONLY`）。
+4. **严禁跨表关联 `SystemNote`**：严禁 `JOIN systemnote`（SAFE Pitfall 11，全表扫描必触发 45s+ 超时崩溃）。审计需求必须调用 `netsuite_get_system_notes`。
+5. **严禁 MySQL/PostgreSQL 专属方言**：禁止使用裸 `LIMIT` 或裸 `OFFSET`，必须使用 Oracle 官方标准语法。
+6. **核心模式防幻觉不变量 (Zero Hallucination)**：
+   - `item` 表使用 **`itemtype`** 与 **`subtype`**；`item` 表**绝不存在 `recordtype` 字段**。
+   - `createdfrom`（单据来源）**仅存在于 `transactionline` 行表**，绝不存在于 `transaction` 主表表头。
+   - `transaction` 与 `entity` 使用 `type` 或 `recordtype`。
+7. **驱动索引过滤**：必须通过 `trandate`、`id` 或 `type` 等有索引的字段作为主驱动过滤条件。
+
+### 4.3 生产环境写操作绝对物理锁
+
+- 严禁在生产账号执行任何破坏性写入操作（`ns_createRecord`, `ns_updateRecord`）。
+- 部署脚本前必须进行语法预检与权限确认。
+
+---
+
+## 🚦 5. 质量门禁与交付验证流水线
+
+任何代码变更完成后，AI Agent 必须依次执行以下自动化验证命令，确保维持 **100/100 分卓越评级**：
+
+```bash
+# 1. 严格 TypeScript 编译与类型检查
+npm run typecheck
+
+# 2. Biome 代码风格与静态分析 (0 错误 0 告警)
+npm run lint
+
+# 3. Vitest 单元与集成测试 (100% 通过, 295+ 测试项全绿)
+npm test
+
+# 4. ISO/IEC 25010 & Oracle SAFE 综合系统架构评分 (维持 100/100 Level 5)
+npm run score
+
+# 5. Oracle NetSuite 官方权威文档合规性对抗评测 (维持 100/100 绝对合规)
+npm run test:compliance
 ```
 
 ---
 
-## 🧼 3. Code Craftsmanship & Anti-Compatibility Bloat
+## 🔄 6. 结构化错误诊断与自愈 SOP
 
-When writing, refactoring, or reviewing code (TypeScript, JavaScript, SQL), AI agents must strictly adhere to the **Single Authoritative Implementation** principle:
+当 MCP 工具返回错误时，AI Agent 必须识别结构化诊断标签并执行针对性修复，严禁未经调整的盲目重试：
 
-1. **Clean Replacement, Never Dual-Track**:
-   - ❌ **PROHIBITED**: Wrapping defective or outdated implementations in `try { newWay(); } catch (e) { oldWay(); }` to "support both ways".
-   - ❌ **PROHIBITED**: Adding dual-branch sniffing `if (supportsNewWay) { ... } else { ... }` when the previous way was defective or obsolete.
-   - ❌ **PROHIBITED**: Chaining speculative fallbacks due to unverified schemas (e.g. `val = newProp ?? oldProp`).
-   - ✅ **MANDATE**: Identify the single officially sanctioned correct approach, and execute a **100% clean, total replacement**.
-2. **Immediate Physical Dead-Code Elimination**:
-   - When superseding an outdated implementation, immediately and physically delete obsolete functions, dead variables, deprecated arguments, and legacy logic.
-   - NEVER leave dead code behind as comments or "just in case" fallbacks. Zero tolerance for defensive code bloat. Adhere strictly to the KISS principle.
-3. **Root Cause Resolution Over Defensive Masking**:
-   - Errors signify invalid assumptions, type defects, or schema mismatches. Confront errors directly, identify the exact defect, and fix it definitively at the source. Never mask unverified failures with defensive try-catch traps or silent fallback branching.
-4. **Current-State-Only Explanations (Zero Version Iteration Narrative)**:
-   - ❌ **PROHIBITED**: Narrating code evolution history, migration trajectories, or past vs present comparisons (strictly prohibit narratives like "in the previous version it was X, now we upgraded to Y", "previously we used A, now refactored to B", "compared to earlier versions...").
-   - ❌ **PROHIBITED**: Inserting changelog commentary, historical diff reflections, or superseded implementation post-mortems into code comments, technical responses, or documentation.
-   - ✅ **MANDATE**: In all code comments, technical responses, and documentation, **describe ONLY the current, definitive state and logic of the latest code**. Treat the current codebase as the sole authoritative, standalone implementation. Explain directly its latest architecture, data flow, parameter semantics, and business logic, completely excising all version iteration narratives.
+| 诊断标签 / 错误特征 | 根因分类 | 强制自愈动作 (Mandated Self-Healing Action) |
+| :--- | :--- | :--- |
+| `[Self-Healing Action]: Call ns_getSuiteQLMetadata` | 字段或表名不存在 | 立即调用 `ns_getSuiteQLMetadata` 反查合法列名，修正 SQL 后重新执行。 |
+| `[suiteqlGuard] Missing 'mainline' filter` | 交易行缺少标志位 | 在 WHERE 条件中补充 `tl.mainline = 'F'` 或 `'T'`。 |
+| `[suiteqlGuard] Use FETCH FIRST N ROWS ONLY` | 使用了非法方言（LIMIT） | 改用 `FETCH FIRST 100 ROWS ONLY` 或 `ROWNUM <= 100`。 |
+| `PERMISSION DENIED — HARD STOP` | 权限不足 (403) | **立即硬停止！** 严禁伪造数据，直接向用户报告缺失的角色权限代码。 |
+| `[Production Safety Violation]` | 生产环境写拦截 | 停止操作，明确告知用户写操作仅允许在沙箱（Sandbox）执行。 |
+| `NETWORK_OR_TIMEOUT` | 网络瞬时抖动或网关超时 | **不要修改 SQL**，在控制重试次数（≤2次）的前提下进行指数退避重试或缩减分页大小。 |
 
 ---
 
-## 👑 4. MCP Server Core Engineering Invariants
+## 💬 7. 交互与沟通规范
 
-When developing tools, handlers, and utilities in this codebase, enforce the following core invariants:
-
-1. **Official Documentation Absolute Priority & Zero Hallucination**:
-   - Oracle NetSuite Official Documentation (Tier 1: Help Center, SuiteAnswers, Records Catalog, SuiteScript 2.1 API Reference, SAFE Guide 2025.2) unconditionally supersedes third-party forum posts and LLM training intuition.
-   - NEVER fabricate non-existent NetSuite tables or field IDs (e.g. `transaction.createdfrom`, `item.recordtype`, `LotNumberedAssemblyItemLocations`).
-   - **Schema Invariants**:
-     - `item` uses **`itemtype`** and **`subtype`**; `item` NEVER has `recordtype`.
-     - `transaction` and `entity` use `type` or `recordtype`.
-     - `createdfrom` exists exclusively on `transactionline`, NEVER on `transaction` header.
-2. **Runtime SuiteQL Guard Integrity (`suiteqlGuard.ts`)**:
-   - Zero tolerance for `SELECT *` (hard-blocked with structured guidance).
-   - Zero tolerance for MySQL/PostgreSQL dialects (`LIMIT` or bare non-standard `OFFSET`; Oracle-standard `OFFSET M ROWS FETCH NEXT N ROWS ONLY` passes cleanly).
-   - Hard-block unindexed Cartesian joins on `systemnote` (SAFE Guide Pitfall 11).
-   - Enforce `tl.mainline = 'F'` or `tl.mainline = 'T'` on `transactionline` joins to prevent line duplication.
-   - Auto-inject safe pagination bounds (`FETCH FIRST 100 ROWS ONLY`) when pagination is omitted.
-3. **Dual-Gate Environment & Write Safety (`environment.ts`)**:
-   - `isSandboxAccount(accountId)` is the single authoritative environment gate.
-   - Mutation tools (`ns_createRecord`, `ns_updateRecord`) MUST remain physically disabled in Production accounts.
-   - Code uploads (`netsuite_suitecloud_upload`) MUST block Production deployments unless `allowProduction: true` is explicitly provided.
-4. **Structured Error Diagnostics & Self-Healing SOP**:
-   - Tool error responses must provide structured diagnostic tags (`[Self-Healing Action]`, `[suiteqlGuard]`, `PERMISSION DENIED — HARD STOP`, `NETWORK_OR_TIMEOUT`, `[Production Safety Violation]`).
-   - Distinguish transient network timeouts (`NETWORK_OR_TIMEOUT`: ETIMEDOUT, ECONNRESET, 504 Gateway Timeout) from SQL syntax errors (`SUITEQL_SYNTAX`). Do not rewrite valid queries on network timeouts.
-   - Permission errors (`INSUFFICIENT_PERMISSION`, 403 Forbidden) must trigger a clean hard-stop with required role permission advice.
-5. **Observability & Telemetry (`src/telemetry/toolErrorLogger.ts`)**:
-   - Every MCP tool call must record structured metrics: `tool`, `durationMs`, `isError`, and `payloadChars`.
-   - The aggregated error summarizer (`netsuite_get_error_summary`) must provide actionable pattern analysis for client agent self-healing.
-6. **MCP Tool Response Protocol & Context Slimming**:
-   - MCP tools must return standard MCP-compliant text results via `textResult()`.
-   - Tool parameters must be strictly validated with Zod schemas in `src/handlers/toolSchemas.ts`.
-   - Large record payloads must be compressed via `contextSlimmer.ts` (stripping nulls, undefined, and empty arrays) to prevent LLM context exhaustion.
-7. **Concurrency Governance & Distributed Locking**:
-   - All outbound NetSuite API calls must pass through `ConcurrencyLimiter` and `retryWithBackoff` (`src/utils/resilience.ts`) to respect NetSuite concurrency limits.
-   - Multi-instance token renewal and mutations must acquire distributed locks via Redlock (`src/cache/redisLock.ts`).
-8. **Adaptive Communication & Code Standards**:
-   - Adapt conversational explanations, summaries, and interactive messages to the user's language (default to Simplified Chinese if prompted in Chinese).
-   - Keep all code symbols, TypeScript types, variables, SQL keywords, and API syntax strictly in standard English.
-   - Git commit messages pushed to remote must be in Simplified Chinese.
-
----
-
-## 📚 5. On-Demand Skills & Knowledge Routing Matrix
-
-When maintaining or extending NetSuite domain features in this server (e.g. metadata definitions, SuiteQL templates, prompt templates, or AST analyzers), consult the corresponding Antigravity skills in `~/.gemini/config/skills/` and MCP resources:
-
-| Development Domain | On-Demand Target Path / Resource | Key Server Architecture Alignment |
-|:---|:---|:---|
-| **SuiteScript 2.1 & SAFE Guide Review** | `~/.gemini/config/skills/netsuite-sdf-safe-guide/SKILL.md` | SAFE Guide rules for `suitescript-safe-check.js`, `review_suitescript` prompt, and governance budgeting. |
-| **SuiteScript Records & Fields Schema** | `~/.gemini/config/skills/netsuite-suitescript-records-reference/SKILL.md`<br>Resource: `netsuite://records/reference` | Standard 272 record definitions in `src/utils/recordsReference.ts` and `ns_getRecordTypeMetadata` offline fallback. |
-| **SuiteQL Modeling & Anti-Slow-Query** | `~/.gemini/config/skills/netsuite-ai-connector-instructions/SKILL.md`<br>Resource: `netsuite://queries/golden-templates`<br>Tool: `netsuite_get_query_template` | SuiteQL validation rules in `src/utils/suiteqlGuard.ts` and golden templates in `src/utils/suiteqlTemplates.ts`. |
-| **SuiteScript 1.0 → 2.1 Modernization** | `~/.gemini/config/skills/netsuite-suitescript-upgrade/SKILL.md` | Migration mappings in `upgrade_suitescript` prompt and AST deprecation checks in `suitescript-safe-check.js`. |
-| **OWASP & Secure Coding Standards** | `~/.gemini/config/skills/netsuite-owasp-secure-coding/SKILL.md` | SQL injection detection, credential scanning in `scripts/pre-upload-check.js`, and parameter sanitization. |
-| **Financial Operations & Reporting** | `~/.gemini/config/skills/netsuite-finance-analyst/SKILL.md` | Financial statements reporting logic in `ns_runReport` and accounting period queries. |
-| **SDF Roles & Permissions Config** | `~/.gemini/config/skills/netsuite-sdf-roles-and-permissions/SKILL.md` | Role permission validation in `toolErrorSummarizer.ts` and SDF permission structures. |
-| **SDF Project Documentation** | `~/.gemini/config/skills/netsuite-sdf-project-documentation/SKILL.md` | SDF architecture diagrams, manifest analysis, and deployment troubleshooting. |
-| **UIF SPA Component Development** | `~/.gemini/config/skills/netsuite-uif-spa-reference/SKILL.md` | Modern NetSuite UIF SPA development patterns and `@uif-js/core` specifications. |
-
----
-
-## ⚙️ 6. Antigravity Native Customization Architecture (.agents/)
-
-This workspace adheres strictly to the official Google Antigravity Customization Architecture (`agy-customizations`):
-
-- **Lifecycle Hooks ([`.agents/hooks.json`](file:///Users/fuxintao/WebstormProjects/NetsuiteMcp/.agents/hooks.json))**:
-  - `PreToolUse`: Automated pre-upload safety and syntax checks (`scripts/pre-upload-check.js`).
-  - `PostToolUse`: Automated code formatting and SAFE Guide static checks (`scripts/suitescript-safe-check.js`), plus workspace template synchronization (`scripts/post-tool-sync.js`).
-- **Modular Directory Rules ([`.agents/rules/`](file:///Users/fuxintao/WebstormProjects/NetsuiteMcp/.agents/rules))**:
-  - [Fast-Path Routing](file:///Users/fuxintao/WebstormProjects/NetsuiteMcp/.agents/rules/fast-path-routing.md): 1-turn direct execution on standard tables.
-  - [SuiteQL Guardrails](file:///Users/fuxintao/WebstormProjects/NetsuiteMcp/.agents/rules/suiteql-guardrails.md): 7 golden SQL defense rules.
-  - [SAFE Guide Standards](file:///Users/fuxintao/WebstormProjects/NetsuiteMcp/.agents/rules/safe-guide-standards.md): SAFE Guide 2025.2 & OWASP secure coding directives.
-  - [Environment Locks](file:///Users/fuxintao/WebstormProjects/NetsuiteMcp/.agents/rules/environment-locks.md): Production write lockout & upload card gates.
-  - [Generative UI](file:///Users/fuxintao/WebstormProjects/NetsuiteMcp/.agents/rules/generative-ui.md): Antigravity Generative UI styling, CSS theme variables, and `<agent-embed>` directives.
+1. **语言风格**：
+   - 交互解释、分析摘要与排错建议必须使用**自然流利的简体中文**。
+   - 所有代码标识符、TypeScript 类型、SQL 关键字、表名字段名必须保持**纯正标准英文**。
+2. **专注当前状态**：
+   - 永远只解释最新代码的设计与运行逻辑，彻底禁止引入历史版本迭代叙事。
