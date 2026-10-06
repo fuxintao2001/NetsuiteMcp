@@ -126,4 +126,26 @@ describe("Token Keepalive Daemon", () => {
 
 		consoleErrorSpy.mockRestore();
 	});
+
+	it("should skip entire keepalive scan if macOS is asleep / UserIsActive is 0", async () => {
+		const resilience = await import("../utils/resilience.js");
+		const spy = vi
+			.spyOn(resilience, "isUserActiveOnMacOS")
+			.mockResolvedValue(false);
+
+		const consoleErrorSpy = vi
+			.spyOn(console, "error")
+			.mockImplementation(() => {});
+
+		await runKeepAlive();
+
+		expect(consoleErrorSpy).toHaveBeenCalledWith(
+			expect.stringContaining(
+				"macOS is in sleep / DarkWake mode (UserIsActive = 0)",
+			),
+		);
+
+		consoleErrorSpy.mockRestore();
+		spy.mockRestore();
+	});
 });

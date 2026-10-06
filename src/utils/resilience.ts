@@ -3,9 +3,67 @@
  * Provides proactive token refresh scheduling to maintain session validity.
  */
 
+import { execFile } from "node:child_process";
 import { lookup } from "node:dns/promises";
 import https from "node:https";
+import { promisify } from "node:util";
 import pLimit, { type LimitFunction } from "p-limit";
+
+const execFileAsync = promisify(execFile);
+
+/**
+ * Parses pmset assertion output to verify if the user is actively using the system.
+ * Returns true if UserIsActive is 1 or more, false if 0, and true if indeterminate.
+ */
+export function parseUserActiveAssertion(output: string): boolean {
+	const match = output.match(/^\s*UserIsActive\s+(\d+)/m);
+	if (match?.[1]) {
+		return parseInt(match[1], 10) > 0;
+	}
+	return true;
+}
+
+/**
+ * Checks if the macOS user is currently active (display awake, lid open, not in DarkWake / sleep).
+ *
+ * Background:
+ * On macOS, when the lid is closed or the display sleeps, pmset assertions shows `UserIsActive 0`.
+ * macOS periodically enters "DarkWake" (Power Nap / maintenance wake for ~45 seconds).
+ * Trying to refresh NetSuite OAuth tokens during DarkWake or while sleep is imminent risks
+ * severed TLS sockets, which permanently burns the single-use refresh token.
+ *
+ * By skipping proactive token rotation when `isUserActiveOnMacOS() === false`, we protect
+ * the 7~30 day refresh token on disk. Token refresh will instead occur safely once the
+ * user wakes the Mac and actively issues requests.
+ *
+ * Returns `true` if not macOS, if in test mode, if UserIsActive >= 1, or if check fails.
+ */
+export async function isUserActiveOnMacOS(): Promise<boolean> {
+	if (process.platform !== "darwin") {
+		return true;
+	}
+	if (
+		process.env.NODE_ENV === "test" ||
+		process.env.VITEST ||
+		process.env.JEST_WORKER_ID
+	) {
+		return true;
+	}
+	try {
+		const { stdout } = await execFileAsync(
+			"/usr/bin/pmset",
+			["-g", "assertions"],
+			{
+				encoding: "utf-8",
+				timeout: 1500,
+				maxBuffer: 1024 * 64,
+			},
+		);
+		return parseUserActiveAssertion(stdout);
+	} catch {
+		return true;
+	}
+}
 
 /**
  * Checks if basic network connectivity is up by resolving a well-known NetSuite API hostname.
@@ -72,6 +130,7 @@ export class TokenRefreshScheduler {
 	private intervalId: ReturnType<typeof setInterval> | null = null;
 	private readonly target: TokenRefreshTarget;
 	private readonly intervalMs: number;
+	private readonly isUserActiveFn: () => Promise<boolean>;
 	private lastTickTime: number = Date.now();
 
 	constructor(
@@ -80,9 +139,11 @@ export class TokenRefreshScheduler {
 			process.env.MCP_TOKEN_CHECK_INTERVAL_MS || "60000",
 			10,
 		),
+		isUserActiveFn: () => Promise<boolean> = isUserActiveOnMacOS,
 	) {
 		this.target = target;
 		this.intervalMs = intervalMs;
+		this.isUserActiveFn = isUserActiveFn;
 	}
 
 	/** Start the periodic refresh check. Idempotent. */
@@ -132,6 +193,13 @@ export class TokenRefreshScheduler {
 	 */
 	private async tick(): Promise<void> {
 		try {
+			// macOS Sleep / DarkWake guard:
+			// If macOS display is off / lid is closed / system in DarkWake, do not proactively rotate tokens.
+			// The refresh token has a 7~30 day lifetime; rotate on-demand when user wakes up and makes requests.
+			if (!(await this.isUserActiveFn())) {
+				return;
+			}
+
 			// Detect sleep/wake: if elapsed time >> intervalMs, system likely just woke up
 			const now = Date.now();
 			const elapsed = now - this.lastTickTime;

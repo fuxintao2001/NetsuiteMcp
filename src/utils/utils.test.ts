@@ -21,6 +21,8 @@ import {
 	ConcurrencyLimiter,
 	checkNetworkReadiness,
 	getRetryAfterMs,
+	isUserActiveOnMacOS,
+	parseUserActiveAssertion,
 	retryWithBackoff,
 	TokenRefreshScheduler,
 } from "./resilience.js";
@@ -566,6 +568,37 @@ SPACED = trimmed
 			});
 		});
 
+		describe("isUserActiveOnMacOS & parseUserActiveAssertion", () => {
+			it("should parse UserIsActive assertion correctly", () => {
+				const activeOutput = `
+Assertion status system-wide:
+   BackgroundTask                 0
+   UserIsActive                   1
+   PreventUserIdleDisplaySleep    1
+`;
+				expect(parseUserActiveAssertion(activeOutput)).toBe(true);
+
+				const sleepOutput = `
+Assertion status system-wide:
+   BackgroundTask                 0
+   UserIsActive                   0
+   PreventUserIdleDisplaySleep    0
+`;
+				expect(parseUserActiveAssertion(sleepOutput)).toBe(false);
+
+				const missingOutput = `
+Assertion status system-wide:
+   BackgroundTask                 0
+`;
+				expect(parseUserActiveAssertion(missingOutput)).toBe(true);
+			});
+
+			it("should return true in test environment for isUserActiveOnMacOS", async () => {
+				const active = await isUserActiveOnMacOS();
+				expect(active).toBe(true);
+			});
+		});
+
 		describe("retryWithBackoff", () => {
 			it("should resolve immediately if function succeeds first time", async () => {
 				const fn = vi.fn<() => Promise<string>>().mockResolvedValue("success");
@@ -705,6 +738,21 @@ SPACED = trimmed
 				scheduler.start();
 				await new Promise((resolve) => setTimeout(resolve, 20));
 				expect(mockTarget.tryAutoRecover).toHaveBeenCalledWith(1);
+			});
+
+			it("should skip proactive refresh when macOS is asleep / UserIsActive is 0", async () => {
+				const sleepingScheduler = new TokenRefreshScheduler(
+					mockTarget,
+					100,
+					async () => false,
+				);
+				sleepingScheduler.start();
+				await new Promise((resolve) => setTimeout(resolve, 20));
+
+				expect(mockTarget.hasValidSession).not.toHaveBeenCalled();
+				expect(mockTarget.ensureValidToken).not.toHaveBeenCalled();
+
+				sleepingScheduler.stop();
 			});
 		});
 	});

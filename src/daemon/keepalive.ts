@@ -8,7 +8,10 @@ import { RedisLockProvider } from "../cache/redisLock.js";
 import type { SessionData, TokenData } from "../oauth/sessionStorage.js";
 import { shouldRefreshToken } from "../oauth/tokenExchange.js";
 import { formatNetSuiteAccountHost } from "../utils/environment.js";
-import { checkNetworkReadiness } from "../utils/resilience.js";
+import {
+	checkNetworkReadiness,
+	isUserActiveOnMacOS,
+} from "../utils/resilience.js";
 
 /**
  * Helper to get ISO timestamp for logs
@@ -219,6 +222,18 @@ async function refreshTokens(
  */
 export async function runKeepAlive(): Promise<void> {
 	logInfo("Starting token keepalive execution scan...");
+
+	// macOS Sleep / DarkWake guard:
+	// If the user is not actively using macOS (lid closed, sleeping, or DarkWake maintenance),
+	// skip the entire keepalive scan. This protects the 7~30 day refresh token from being rotated
+	// during a severed socket or imminent sleep.
+	const userActive = await isUserActiveOnMacOS();
+	if (!userActive) {
+		logInfo(
+			"macOS is in sleep / DarkWake mode (UserIsActive = 0). Skipping keepalive scan to protect refresh tokens.",
+		);
+		return;
+	}
 
 	// Wait for network readiness (especially critical immediately after wake from sleep)
 	// Skip during unit tests to avoid DNS lookup timeout when testing local file processing
