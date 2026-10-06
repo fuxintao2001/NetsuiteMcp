@@ -275,6 +275,22 @@ class NetSuiteMCPServer {
 
 		// Check for existing authentication and log diagnostics
 		this.isAuthenticated = await this.oauthManager.hasValidSession();
+		if (!this.isAuthenticated) {
+			try {
+				logger.info(
+					"Session expired or unauthenticated on startup. Attempting auto-recovery...",
+				);
+				await this.oauthManager.tryAutoRecover(2);
+				this.isAuthenticated = await this.oauthManager.hasValidSession();
+				if (this.isAuthenticated) {
+					logger.info("✅ Auto-recovery on startup succeeded!");
+				}
+			} catch (err: unknown) {
+				const message = err instanceof Error ? err.message : String(err);
+				logger.warn(`Startup auto-recovery skipped/failed: ${message}`);
+			}
+		}
+
 		const sessionDiag = await this.oauthManager.getSessionDiagnostics();
 		if (sessionDiag) {
 			const expiresIn = sessionDiag.expiresAt

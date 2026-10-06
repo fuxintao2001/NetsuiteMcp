@@ -419,5 +419,58 @@ describe("OAuth Module", () => {
 				expect(finalSession.tokens.access_token).toBe("recovered-access-token");
 			});
 		});
+
+		describe("trySilentReauth", () => {
+			it("should return false if credentials are not available", async () => {
+				const result = await manager.trySilentReauth(100);
+				expect(result).toBe(false);
+			});
+
+			it("should call startAuthFlow and return true upon successful session creation", async () => {
+				const mockSession = {
+					config: {
+						accountId: "123456",
+						clientId: "my-client-id",
+						redirectUri: "http://localhost:8080/callback",
+					},
+					authenticated: false,
+				};
+				await fs.mkdir(testStoragePath, { recursive: true });
+				await fs.writeFile(
+					path.join(testStoragePath, "session.json"),
+					JSON.stringify(mockSession),
+					"utf-8",
+				);
+
+				const startAuthFlowSpy = vi
+					.spyOn(manager, "startAuthFlow")
+					.mockImplementation(async () => {
+						await fs.writeFile(
+							path.join(testStoragePath, "session.json"),
+							JSON.stringify({
+								...mockSession,
+								authenticated: true,
+								tokens: {
+									access_token: "sso-access-token",
+									refresh_token: "sso-refresh-token",
+									expires_in: 3600,
+									expires_at: Date.now() + 3600000,
+									accountId: "123456",
+									clientId: "my-client-id",
+								},
+							}),
+							"utf-8",
+						);
+						return "http://localhost:8080/auth";
+					});
+
+				const result = await manager.trySilentReauth(5000);
+				expect(startAuthFlowSpy).toHaveBeenCalledWith(
+					{ accountId: "123456", clientId: "my-client-id" },
+					5000,
+				);
+				expect(result).toBe(true);
+			});
+		});
 	});
 });

@@ -36,6 +36,7 @@ export class OAuthManager {
 	private callbackServer: CallbackServer;
 	private tokenRefreshScheduler: TokenRefreshScheduler;
 	private refreshPromise: Promise<string> | null = null;
+	private authPromise: Promise<string> | null = null;
 	private lockProvider: RedisLockProvider | null;
 
 	constructor(config: OAuthManagerConfig = {}) {
@@ -56,89 +57,115 @@ export class OAuthManager {
 	/**
 	 * Start OAuth flow with local callback server
 	 */
-	async startAuthFlow(config: Partial<AuthFlowConfig> = {}): Promise<string> {
-		const existingSession = await this.storage.load();
-		const accountId = config.accountId || existingSession?.config?.accountId;
-		let clientId = config.clientId || existingSession?.config?.clientId;
+	async startAuthFlow(
+		config: Partial<AuthFlowConfig> = {},
+		timeoutMs?: number,
+	): Promise<string> {
+		if (this.authPromise) {
+			return this.authPromise;
+		}
 
-		if (
-			!clientId ||
-			clientId === "my-client-id" ||
-			clientId === "default_client_id"
-		) {
-			if (
-				existingSession?.config?.clientId &&
-				existingSession.config.clientId !== "my-client-id"
-			) {
-				clientId = existingSession.config.clientId;
-			} else if (
-				existingSession?.tokens?.clientId &&
-				existingSession.tokens.clientId !== "my-client-id"
-			) {
-				clientId = existingSession.tokens.clientId;
-			} else if (accountId) {
-				const fallback = getKnownClientId(accountId);
-				if (fallback) {
-					clientId = fallback;
+		this.authPromise = (async () => {
+			try {
+				const existingSession = await this.storage.load();
+				const accountId =
+					config.accountId ||
+					existingSession?.config?.accountId ||
+					process.env.NETSUITE_ACCOUNT_ID;
+				let clientId =
+					config.clientId ||
+					existingSession?.config?.clientId ||
+					process.env.NETSUITE_CLIENT_ID;
+
+				if (
+					!clientId ||
+					clientId === "my-client-id" ||
+					clientId === "default_client_id"
+				) {
+					if (
+						existingSession?.config?.clientId &&
+						existingSession.config.clientId !== "my-client-id"
+					) {
+						clientId = existingSession.config.clientId;
+					} else if (
+						existingSession?.tokens?.clientId &&
+						existingSession.tokens.clientId !== "my-client-id"
+					) {
+						clientId = existingSession.tokens.clientId;
+					} else if (accountId) {
+						const fallback = getKnownClientId(accountId);
+						if (fallback) {
+							clientId = fallback;
+						}
+					}
 				}
+
+				if (!accountId || !clientId) {
+					throw new Error("accountId and clientId are required");
+				}
+
+				const pkce = generatePKCE();
+				const state = crypto.randomBytes(16).toString("hex");
+				const redirectUri = `http://localhost:${this.callbackPort}/callback`;
+
+				// Preserve existing tokens and authenticated state — don't destroy a recoverable session
+				await this.storage.save({
+					...existingSession,
+					pkce: pkce.code_verifier,
+					state,
+					config: { accountId, clientId, redirectUri },
+					timestamp: Date.now(),
+				});
+
+				// Generate authorization URL
+				const authUrl = this.buildAuthorizationUrl(
+					accountId,
+					clientId,
+					redirectUri,
+					state,
+					pkce,
+				);
+
+				console.error(`\n🔐 NetSuite Authentication Required`);
+				console.error(`📋 Opening browser for authentication...\n`);
+
+				// Automatically open browser
+				await openBrowser(authUrl);
+
+				console.error(`📋 If browser didn't open, use this URL:\n`);
+				console.error(`   ${authUrl}\n`);
+				console.error(`⏳ Waiting for authentication...`);
+
+				// Start callback server and wait for OAuth callback
+				try {
+					await this.callbackServer.start(
+						state,
+						async (code: string) => {
+							await this.handleAuthorizationCode(code);
+						},
+						timeoutMs,
+					);
+					console.error(`✅ Authentication successful!\n`);
+				} catch (error: unknown) {
+					const message =
+						error instanceof Error ? error.message : String(error);
+					console.error(`❌ Authentication failed: ${message}\n`);
+					// Restore existing session if it had tokens, clearing PKCE/state
+					if (existingSession?.tokens) {
+						await this.storage.save(existingSession);
+					} else {
+						await this.storage.save(existingSession || {});
+					}
+					throw error;
+				}
+
+				return authUrl;
+			} finally {
+				this.authPromise = null;
 			}
-		}
+		})();
 
-		if (!accountId || !clientId) {
-			throw new Error("accountId and clientId are required");
-		}
-
-		const pkce = generatePKCE();
-		const state = crypto.randomBytes(16).toString("hex");
-		const redirectUri = `http://localhost:${this.callbackPort}/callback`;
-
-		// Preserve existing tokens and authenticated state — don't destroy a recoverable session
-		await this.storage.save({
-			...existingSession,
-			pkce: pkce.code_verifier,
-			state,
-			config: { accountId, clientId, redirectUri },
-			timestamp: Date.now(),
-		});
-
-		// Generate authorization URL
-		const authUrl = this.buildAuthorizationUrl(
-			accountId,
-			clientId,
-			redirectUri,
-			state,
-			pkce,
-		);
-
-		console.error(`\n🔐 NetSuite Authentication Required`);
-		console.error(`📋 Opening browser for authentication...\n`);
-
-		// Automatically open browser
-		await openBrowser(authUrl);
-
-		console.error(`📋 If browser didn't open, use this URL:\n`);
-		console.error(`   ${authUrl}\n`);
-		console.error(`⏳ Waiting for authentication...`);
-
-		// Start callback server and wait for OAuth callback
-		try {
-			await this.callbackServer.start(state, async (code: string) => {
-				await this.handleAuthorizationCode(code);
-			});
-			console.error(`✅ Authentication successful!\n`);
-		} catch (error: unknown) {
-			const message = error instanceof Error ? error.message : String(error);
-			console.error(`❌ Authentication failed: ${message}\n`);
-			// Restore existing session if it had tokens, clearing PKCE/state
-			if (existingSession?.tokens) {
-				await this.storage.save(existingSession);
-			} else {
-				await this.storage.save(existingSession || {});
-			}
-			throw error;
-		}
-
-		return authUrl;
+		return this.authPromise;
 	}
 
 	/**
@@ -204,7 +231,7 @@ export class OAuthManager {
 		this.refreshPromise = (async () => {
 			const accountId =
 				session?.config?.accountId || session?.tokens?.accountId || "unknown";
-			const lockResource = `token_refresh:${accountId}`;
+			const lockResource = `token_refresh:${formatNetSuiteAccountHost(accountId)}`;
 			let lockId: unknown = null;
 
 			try {
@@ -285,18 +312,14 @@ export class OAuthManager {
 			} catch (error: unknown) {
 				if (error instanceof TokenRefreshError && !error.recoverable) {
 					console.error(
-						"🔒 Refresh token expired — session requires re-authentication",
+						"🔒 Refresh token expired — marking session unauthenticated",
 					);
 					// Mark session as unauthenticated while preserving config for potential re-auth
 					const current = await this.storage.load();
-					if (
-						current &&
-						(current.authenticated !== false || !current.unrecoverable)
-					) {
+					if (current && current.authenticated !== false) {
 						await this.storage.save({
 							...current,
 							authenticated: false,
-							unrecoverable: true,
 						});
 					}
 				}
@@ -313,6 +336,47 @@ export class OAuthManager {
 	}
 
 	/**
+	 * Attempt silent re-authentication via browser SSO.
+	 * If the user's browser has an active NetSuite login session, this completes
+	 * in 1-3 seconds without prompting for credentials.
+	 */
+	async trySilentReauth(timeoutMs = 60000): Promise<boolean> {
+		const session = await this.storage.load();
+		const accountId = session?.config?.accountId || session?.tokens?.accountId;
+		let clientId = session?.config?.clientId || session?.tokens?.clientId;
+
+		if (
+			!clientId ||
+			clientId === "my-client-id" ||
+			clientId === "default_client_id"
+		) {
+			if (accountId) {
+				const fallback = getKnownClientId(accountId);
+				if (fallback) clientId = fallback;
+			}
+		}
+
+		if (!accountId || !clientId) {
+			return false;
+		}
+
+		try {
+			console.error(
+				`🔄 [OAuthManager] Attempting silent browser re-authentication for account ${accountId}...`,
+			);
+			await this.startAuthFlow({ accountId, clientId }, timeoutMs);
+			const refreshed = await this.storage.load();
+			return !!(refreshed?.authenticated && refreshed?.tokens);
+		} catch (err: unknown) {
+			const message = err instanceof Error ? err.message : String(err);
+			console.error(
+				`⚠️ [OAuthManager] Silent re-authentication did not complete: ${message}`,
+			);
+			return false;
+		}
+	}
+
+	/**
 	 * Ensure token is valid, auto-refresh if expiring soon
 	 */
 	async ensureValidToken(): Promise<string> {
@@ -324,8 +388,20 @@ export class OAuthManager {
 		// 2. Wrap load, expiration check, and validation inside a single cached promise
 		this.refreshPromise = (async () => {
 			try {
-				const session = await this.storage.load();
-				if (!session?.tokens) {
+				let session = await this.storage.load();
+
+				// If not authenticated or no tokens, attempt silent re-authentication before failing
+				if (!session?.tokens || !session.authenticated) {
+					console.error(
+						"⚠️ No active authenticated session, attempting silent re-authentication...",
+					);
+					const silentSuccess = await this.trySilentReauth(60000);
+					if (silentSuccess) {
+						session = await this.storage.load();
+					}
+				}
+
+				if (!session?.tokens || !session.authenticated) {
 					throw new Error(
 						"Not authenticated. Please run authentication first.",
 					);
@@ -333,10 +409,29 @@ export class OAuthManager {
 
 				if (shouldRefreshToken(session.tokens)) {
 					console.error("⚠️ Token expiring soon, refreshing...");
-					return await this.executeTokenRefresh(
-						session,
-						session.tokens.access_token,
-					);
+					try {
+						return await this.executeTokenRefresh(
+							session,
+							session.tokens.access_token,
+						);
+					} catch (refreshError: unknown) {
+						if (
+							refreshError instanceof TokenRefreshError &&
+							!refreshError.recoverable
+						) {
+							console.error(
+								"🔄 Refresh token expired/invalid, attempting silent re-authentication via browser SSO...",
+							);
+							const silentSuccess = await this.trySilentReauth(60000);
+							if (silentSuccess) {
+								const reloaded = await this.storage.load();
+								if (reloaded?.tokens?.access_token) {
+									return reloaded.tokens.access_token;
+								}
+							}
+						}
+						throw refreshError;
+					}
 				}
 
 				return session.tokens.access_token;
@@ -352,7 +447,14 @@ export class OAuthManager {
 	 * Force refresh the access token (used by retry logic after 401)
 	 */
 	async forceRefreshToken(failedToken?: string): Promise<string> {
-		const session = await this.storage.load();
+		let session = await this.storage.load();
+		if (!session?.tokens) {
+			const silentSuccess = await this.trySilentReauth(60000);
+			if (silentSuccess) {
+				session = await this.storage.load();
+			}
+		}
+
 		if (!session?.tokens) {
 			throw new Error("Not authenticated. Please run authentication first.");
 		}
@@ -378,7 +480,20 @@ export class OAuthManager {
 	 * Check if has valid authenticated session
 	 */
 	async hasValidSession(): Promise<boolean> {
-		return await this.storage.isAuthenticated();
+		const isAuth = await this.storage.isAuthenticated();
+		if (isAuth) return true;
+
+		// If tokens exist with refresh_token, attempt quick auto-recovery
+		const session = await this.storage.load();
+		if (session?.tokens?.refresh_token && !session.unrecoverable) {
+			try {
+				await this.tryAutoRecover(1);
+				return await this.storage.isAuthenticated();
+			} catch {
+				return false;
+			}
+		}
+		return false;
 	}
 
 	/**
@@ -449,7 +564,9 @@ export class OAuthManager {
 		if (!session?.tokens?.refresh_token) return;
 
 		let lockId: unknown = null;
-		const lockResource = `token_refresh:${session?.config?.accountId || session?.tokens?.accountId || "unknown"}`;
+		const accountId =
+			session?.config?.accountId || session?.tokens?.accountId || "unknown";
+		const lockResource = `token_refresh:${formatNetSuiteAccountHost(accountId)}`;
 
 		for (let attempt = 1; attempt <= maxRetries; attempt++) {
 			try {
@@ -511,20 +628,16 @@ export class OAuthManager {
 				console.error("✅ Auto-recovery successful");
 				return;
 			} catch (error: unknown) {
-				// Unrecoverable: refresh token itself is expired/invalid — don't retry
+				// Unrecoverable: refresh token itself is expired/invalid — don't retry in this loop
 				if (error instanceof TokenRefreshError && !error.recoverable) {
 					console.error(
-						"🔒 Refresh token expired — re-authentication required",
+						"🔒 Refresh token expired or invalid — auto-recovery stopped",
 					);
 					const current = await this.storage.load();
-					if (
-						current &&
-						(current.authenticated !== false || !current.unrecoverable)
-					) {
+					if (current && current.authenticated !== false) {
 						await this.storage.save({
 							...current,
 							authenticated: false,
-							unrecoverable: true,
 						});
 					}
 					throw error;

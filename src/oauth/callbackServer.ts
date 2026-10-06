@@ -37,6 +37,7 @@ export class CallbackServer {
 	start(
 		expectedState: string,
 		onCodeReceived: (code: string) => Promise<void>,
+		timeoutMs = 5 * 60 * 1000,
 	): Promise<void> {
 		return new Promise<void>((resolve, reject) => {
 			let settled = false;
@@ -83,13 +84,15 @@ export class CallbackServer {
 				);
 			});
 
-			// 5-minute authentication timeout
-			const timeoutId = setTimeout(
-				() => {
-					settle("reject", new Error("Authentication timeout (5 minutes)"));
-				},
-				5 * 60 * 1000,
-			);
+			// Authentication timeout
+			const timeoutId = setTimeout(() => {
+				settle(
+					"reject",
+					new Error(
+						`Authentication timeout (${Math.round(timeoutMs / 1000)}s)`,
+					),
+				);
+			}, timeoutMs);
 		});
 	}
 

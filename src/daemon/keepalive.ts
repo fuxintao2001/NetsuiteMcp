@@ -7,6 +7,7 @@ import { Redis } from "ioredis";
 import { RedisLockProvider } from "../cache/redisLock.js";
 import type { SessionData, TokenData } from "../oauth/sessionStorage.js";
 import { shouldRefreshToken } from "../oauth/tokenExchange.js";
+import { formatNetSuiteAccountHost } from "../utils/environment.js";
 import { checkNetworkReadiness } from "../utils/resilience.js";
 
 /**
@@ -33,13 +34,6 @@ function logWarn(msg: string) {
 
 function logError(msg: string) {
 	console.error(`[${getTimestamp()}] ❌ [Keepalive] ${msg}`);
-}
-
-/**
- * Format NetSuite Account ID to API host format (e.g. 9260916_SB1 -> 9260916-sb1)
- */
-function formatNetSuiteAccountHost(accountId: string): string {
-	return accountId.toLowerCase().replace(/_/g, "-");
 }
 
 /**
@@ -367,7 +361,7 @@ export async function runKeepAlive(): Promise<void> {
 						`[${accountId}] Needs refresh (expiry in ${Math.round(timeUntilExpiry / 1000)}s, authenticated: ${session.authenticated}). Acquiring lock...`,
 					);
 
-					const lockResource = `token_refresh:${accountId}`;
+					const lockResource = `token_refresh:${formatNetSuiteAccountHost(accountId)}`;
 					if (lockProvider) {
 						lockId = await lockProvider.acquire(lockResource);
 						if (!lockId) {
@@ -441,13 +435,15 @@ export async function runKeepAlive(): Promise<void> {
 						continue;
 					}
 
-					const updatedSession: SessionData = {
-						...lockedSession,
-						previous_tokens: lockedSession.tokens,
-						tokens: updatedTokens,
-						authenticated: true,
-						unrecoverable: false,
-					};
+					const updatedSession: SessionData & { consecutiveFailures?: number } =
+						{
+							...lockedSession,
+							previous_tokens: lockedSession.tokens,
+							tokens: updatedTokens,
+							authenticated: true,
+							unrecoverable: false,
+							consecutiveFailures: 0,
+						};
 
 					// Save atomic
 					const tempFile = `${sessionFile}.tmp`;
@@ -474,21 +470,30 @@ export async function runKeepAlive(): Promise<void> {
 						`[${accountId}] Failed during refresh operation: ${message}`,
 					);
 					failedAccounts++;
-					// If refresh token is unrecoverable, mark session unauthenticated
+					// If refresh token has an unrecoverable response, track consecutive failures
 					try {
 						if (message.includes("Unrecoverable")) {
 							const fileContent = await fs.readFile(sessionFile, "utf-8");
-							const session = JSON.parse(fileContent) as SessionData;
-							if (session.authenticated !== false || !session.unrecoverable) {
-								session.authenticated = false;
-								session.unrecoverable = true;
-								await fs.writeFile(
-									sessionFile,
-									JSON.stringify(session, null, 2),
-									{ mode: 0o600 },
-								);
+							const session = JSON.parse(fileContent) as SessionData & {
+								consecutiveFailures?: number;
+							};
+							const failures = (session.consecutiveFailures ?? 0) + 1;
+							session.authenticated = false;
+							session.consecutiveFailures = failures;
+							// Only mark unrecoverable after 5 consecutive failures (~50 minutes)
+							session.unrecoverable = failures >= 5;
+							await fs.writeFile(
+								sessionFile,
+								JSON.stringify(session, null, 2),
+								{ mode: 0o600 },
+							);
+							if (session.unrecoverable) {
 								logWarn(
-									`[${accountId}] Session marked unauthenticated and unrecoverable due to unrecoverable token expiration.`,
+									`[${accountId}] Session marked unrecoverable after ${failures} consecutive failed refresh attempts.`,
+								);
+							} else {
+								logWarn(
+									`[${accountId}] Session marked unauthenticated (${failures}/5 failed attempts). Will retry next scan.`,
 								);
 							}
 						}
@@ -497,7 +502,10 @@ export async function runKeepAlive(): Promise<void> {
 					}
 				} finally {
 					if (lockId && lockProvider) {
-						await lockProvider.release(`token_refresh:${accountId}`, lockId);
+						await lockProvider.release(
+							`token_refresh:${formatNetSuiteAccountHost(accountId)}`,
+							lockId,
+						);
 					} else if (lockAcquired) {
 						await releaseLock(path.join(sessionDir, "session.lock"));
 					}

@@ -15,6 +15,7 @@ sessions/
 # Logs
 logs/*.jsonl
 logs/*.log
+logs/reports/*.md
 *.log
 npm-debug.log*
 
