@@ -1,5 +1,7 @@
 # NetSuite MCP Server
 
+[English](README_EN.md) | [简体中文](README.md)
+
 [![Node.js Version](https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen.svg)](https://nodejs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x%20Strict-blue.svg)](https://www.typescriptlang.org/)
 [![MCP Protocol](https://img.shields.io/badge/MCP-Protocol%20v2-purple.svg)](https://modelcontextprotocol.io/)

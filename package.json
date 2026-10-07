@@ -6,7 +6,8 @@
   "main": "dist/index.js",
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "README_EN.md"
   ],
   "bin": {
     "netsuite-mcp": "./dist/index.js"
