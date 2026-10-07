@@ -1,55 +1,133 @@
 import { z } from "zod";
 
 // ---------------------------------------------------------------------------
-// Zod Schemas & Inferred Types
+// 8 Authoritative Zod Schemas & Inferred Types (Zero Bloat, First Principles)
 // ---------------------------------------------------------------------------
 
-export const GetRecordLinkArgsSchema = z.object({
-	recordId: z
-		.string()
-		.trim()
-		.min(1, "recordId is required")
-		.describe("Internal ID of the NetSuite record."),
-	recordType: z
-		.string()
-		.trim()
-		.toLowerCase()
-		.optional()
-		.describe("Record type (e.g. salesorder, customer, customrecord_xxx)."),
-	accountId: z
+/**
+ * 1. netsuite_run_suiteql
+ * Single authoritative tool for executing read-only SuiteQL queries.
+ */
+export const RunSuiteQLArgsSchema = z.object({
+	sqlQuery: z
 		.string()
 		.trim()
 		.optional()
 		.describe(
-			"Override account ID (defaults to current authenticated account).",
+			"The SuiteQL query string to execute. Follows Oracle NetSuite dialect rules. Multiple queries can be separated by ';'.",
 		),
-	rectype: z
+	sqlQueries: z
+		.array(z.string())
+		.optional()
+		.describe(
+			"Optional array of SuiteQL query strings to execute concurrently in parallel (max 10).",
+		),
+	limit: z
 		.number()
 		.int()
+		.positive()
 		.optional()
-		.describe("Numeric custom record type ID. Auto-resolved if omitted."),
+		.describe("Optional safe maximum row limit (default: 100)."),
+	customRecordMappings: z
+		.array(
+			z.object({
+				rectype: z.union([z.string(), z.number()]),
+				scriptId: z.string().optional(),
+			}),
+		)
+		.optional()
+		.describe(
+			"Optional mappings for custom record types (rectype and scriptId).",
+		),
 });
+export type RunSuiteQLArgs = z.infer<typeof RunSuiteQLArgsSchema>;
 
-const BatchTaskSchema = z.object({
-	toolName: z
+/**
+ * 2. netsuite_get_metadata
+ * Single authoritative tool for table schema, column definitions, and 272 records.
+ */
+export const GetMetadataArgsSchema = z.object({
+	table: z
 		.string()
 		.trim()
-		.min(1, "toolName is required")
-		.describe("The name of the tool to execute."),
-	arguments: z
-		.record(z.string(), z.unknown())
+		.toLowerCase()
 		.optional()
-		.describe("Arguments dictionary for the specified tool."),
+		.describe(
+			"NetSuite database table name or record type ID (e.g. 'customer', 'transaction', 'transactionline', 'item', 'salesorder'). Omit to list or search the table catalog.",
+		),
+	keyword: z
+		.string()
+		.trim()
+		.optional()
+		.describe(
+			"Optional keyword to filter tables, column names, labels, or descriptions.",
+		),
+	source: z
+		.enum(["auto", "offline", "remote"])
+		.default("auto")
+		.optional()
+		.describe(
+			"Metadata source: 'auto' (cached/remote), 'offline' (272 catalog), or 'remote' (live NetSuite API).",
+		),
 });
+export type GetMetadataArgs = z.infer<typeof GetMetadataArgsSchema>;
 
-export const BatchExecuteArgsSchema = z.object({
-	tasks: z
-		.array(BatchTaskSchema)
-		.min(1, "tasks must be a non-empty array")
-		.max(10, "tasks array exceeds maximum limit of 10")
-		.describe("Array of tasks to execute in parallel (maximum 10 tasks)."),
+/**
+ * 3. netsuite_get_record
+ * Single authoritative tool for inspecting records (with fields pruned + active Web UI link).
+ */
+export const GetRecordArgsSchema = z.object({
+	recordType: z
+		.string()
+		.trim()
+		.toLowerCase()
+		.min(1, "recordType is required")
+		.describe(
+			"NetSuite record type ID (e.g. 'salesorder', 'customer', 'invoice', 'customrecord_xxx').",
+		),
+	id: z
+		.string()
+		.trim()
+		.min(1, "id is required")
+		.describe(
+			"Numeric internal ID (e.g. '12345') or document number / tranid (e.g. 'SO10023').",
+		),
+	includeSublists: z
+		.boolean()
+		.optional()
+		.default(true)
+		.describe(
+			"Whether to include line-item sublists in the output (default: true).",
+		),
+	linesMode: z
+		.enum(["all", "summary"])
+		.optional()
+		.default("all")
+		.describe(
+			"Line item detail mode: 'all' (full lines) or 'summary' (count summary only).",
+		),
+	maxLines: z
+		.number()
+		.int()
+		.positive()
+		.optional()
+		.describe("Maximum number of lines to display per sublist."),
+	lineFields: z
+		.array(z.string())
+		.optional()
+		.describe("Specific sublist columns/fields to include."),
+	format: z
+		.enum(["markdown", "compact_json"])
+		.optional()
+		.default("markdown")
+		.describe("Output format: 'markdown' (default) or 'compact_json'."),
 });
+export type GetRecordArgs = z.infer<typeof GetRecordArgsSchema>;
 
+/**
+ * 4. netsuite_get_script_logs
+ * Single authoritative tool for debugging SuiteScript execution logs (ScriptNote).
+ */
 export const GetScriptLogsArgsSchema = z.object({
 	scriptId: z
 		.string()
@@ -59,12 +137,7 @@ export const GetScriptLogsArgsSchema = z.object({
 			"Filter by script's Script ID (e.g. customscript_my_ue). Matches against Script.scriptid.",
 		),
 	type: z
-		.enum(["DEBUG", "AUDIT", "ERROR", "EMERGENCY"], {
-			error: () => ({
-				message:
-					"Invalid log type. Must be one of: DEBUG, AUDIT, ERROR, EMERGENCY.",
-			}),
-		})
+		.enum(["DEBUG", "AUDIT", "ERROR", "EMERGENCY"])
 		.optional()
 		.describe("Filter by log level: DEBUG, AUDIT, ERROR, or EMERGENCY."),
 	dateFrom: z
@@ -77,16 +150,11 @@ export const GetScriptLogsArgsSchema = z.object({
 		.regex(/^\d{4}-\d{2}-\d{2}$/, "Invalid dateTo format. Use YYYY-MM-DD.")
 		.optional()
 		.describe("End date filter in YYYY-MM-DD format (inclusive)."),
-	title: z
+	keyword: z
 		.string()
 		.trim()
 		.optional()
-		.describe("Filter by log title keyword (LIKE fuzzy match)."),
-	detail: z
-		.string()
-		.trim()
-		.optional()
-		.describe("Filter by log detail/message keyword (LIKE fuzzy match)."),
+		.describe("Filter by keyword matching log title or detail text."),
 	deploymentId: z
 		.string()
 		.trim()
@@ -103,357 +171,204 @@ export const GetScriptLogsArgsSchema = z.object({
 			"Maximum number of log entries to return. Default: 50, Max: 200.",
 		),
 });
+export type GetScriptLogsArgs = z.infer<typeof GetScriptLogsArgsSchema>;
 
-export const InspectRecordArgsSchema = z.object({
-	recordType: z
-		.string()
-		.trim()
-		.min(1, "recordType is required")
-		.toLowerCase()
-		.describe(
-			"Record type (e.g. salesorder, invoice, customer, item, customrecord_xxx).",
-		),
-	recordId: z
-		.string()
-		.trim()
-		.min(1, "recordId is required")
-		.describe(
-			"Record internal numeric ID (e.g. '12345') or document number / tranid (e.g. 'SO1002').",
-		),
-	format: z
-		.enum(["markdown", "compact_json"])
-		.optional()
-		.default("markdown")
-		.describe(
-			"Output format: 'markdown' for human-readable structured tables (default), or 'compact_json' for clean, noise-free, machine-readable JSON.",
-		),
-	linesMode: z
-		.enum(["all", "summary", "none"])
-		.optional()
-		.default("all")
-		.describe(
-			"Line items / sublists detail mode: 'all' (inspect detailed line item rows without omission, default), 'summary' (row counts & 1st-row sample keys), or 'none' (omit sublists entirely).",
-		),
-	maxLines: z
-		.number()
-		.int()
-		.positive()
-		.optional()
-		.describe(
-			"Optional maximum number of line item rows to include per sublist when linesMode is 'all'. If omitted, all line items are returned without truncation.",
-		),
-	lineFields: z
-		.array(z.string().trim())
-		.optional()
-		.describe(
-			"Optional array of specific line item field names to project (e.g. ['item', 'quantity', 'rate', 'amount']). If omitted, all populated line fields are returned.",
-		),
-	includeLines: z
-		.boolean()
-		.optional()
-		.default(true)
-		.describe(
-			"Whether to include line item details (default: true). Set false as shortcut for linesMode='none'.",
-		),
-	nonEmptyOnly: z
-		.boolean()
-		.optional()
-		.default(true)
-		.describe(
-			"Whether to filter out null/empty fields to keep output compact and clean (default: true).",
-		),
-});
-
-export const GetRecordDefinitionArgsSchema = z.object({
-	recordType: z
-		.string()
-		.trim()
-		.min(1, "recordType is required")
-		.toLowerCase()
-		.describe(
-			"Record type name (e.g. salesorder, customer, item, invoice, vendor).",
-		),
-	keyword: z
-		.string()
-		.trim()
-		.optional()
-		.describe("Optional keyword to filter field names, labels, or help text."),
-});
-
-export const GetQueryTemplateArgsSchema = z.object({
-	templateId: z
-		.string()
-		.trim()
-		.optional()
-		.describe(
-			"Specific template ID (e.g. 'transaction_lines', 'transaction_lineage_downstream', 'multi_location_stock', 'script_error_logs', 'system_notes_standalone', 'gl_impact_lines').",
-		),
-	category: z
-		.enum([
-			"transactions",
-			"inventory",
-			"system_debug",
-			"accounting",
-			"relationships",
-		])
-		.optional()
-		.describe("Filter templates by domain category."),
-	search: z
-		.string()
-		.trim()
-		.optional()
-		.describe(
-			"Search keyword across template names, descriptions, and SQL patterns.",
-		),
-});
-
+/**
+ * 5. netsuite_get_system_notes
+ * Single authoritative tool for record-level audit trail (SystemNote), preventing Pitfall 11 timeouts.
+ */
 export const GetSystemNotesArgsSchema = z.object({
-	recordId: z
-		.string()
-		.trim()
-		.min(1, "recordId is required")
-		.describe("Record internal ID or document number (tranid)."),
 	recordType: z
 		.string()
 		.trim()
 		.toLowerCase()
 		.optional()
 		.describe(
-			"Optional record type (e.g. salesorder, invoice, customer). Helps resolve tranid.",
+			"Optional record type (e.g. 'salesorder', 'customer', 'invoice').",
+		),
+	recordId: z
+		.string()
+		.trim()
+		.min(1, "recordId is required")
+		.describe(
+			"Numeric internal ID (e.g. '12345') or document number (tranid).",
 		),
 	limit: z
 		.number()
 		.int()
 		.optional()
-		.transform((v) => (v !== undefined ? Math.min(Math.max(v, 1), 100) : 30))
+		.transform((v) => (v !== undefined ? Math.min(Math.max(v, 1), 100) : 50))
 		.describe(
-			"Maximum number of system notes to return. Default: 30, Max: 100.",
+			"Maximum number of audit trail entries to return. Default: 50, Max: 100.",
 		),
 });
+export type GetSystemNotesArgs = z.infer<typeof GetSystemNotesArgsSchema>;
 
-export const SuitecloudUploadArgsSchema = z.object({
+/**
+ * 6. netsuite_deploy_script
+ * Single authoritative tool for uploading SuiteScript files to NetSuite FileCabinet.
+ */
+export const DeployScriptArgsSchema = z.object({
 	paths: z
-		.union([
-			z.string().trim().min(1, "paths is required"),
-			z.array(z.string().trim().min(1)).min(1, "paths array cannot be empty"),
-		])
-		.describe(
-			"File Cabinet path, local file path, directory, or array of paths to upload (e.g. '/SuiteScripts/my_script.js' or ['/SuiteScripts/a.js', '/SuiteScripts/b.js']).",
-		),
+		.union([z.string().trim().min(1), z.array(z.string().trim().min(1))])
+		.describe("Relative or absolute path(s) to the local file(s) to upload."),
 	projectPath: z
 		.string()
 		.trim()
 		.optional()
 		.describe(
-			"Optional path to the SDF project root directory. Automatically detected from active account and workspace if omitted.",
+			"Optional SDF project root path containing src/FileCabinet structure.",
 		),
 	authId: z
 		.string()
 		.trim()
 		.optional()
-		.describe(
-			"Optional SuiteCloud authentication ID (e.g. '9260916_SB1-Adm-Sand'). Automatically verified and matched to active account if omitted.",
-		),
+		.describe("Optional SDF CLI authId to use for deployment."),
 	dryRun: z
 		.boolean()
 		.optional()
 		.default(false)
 		.describe(
-			"Optional dry-run flag. If true, inspects local files, validates syntax, and returns execution preview without uploading.",
+			"If true, inspects local files and validates syntax without executing upload.",
 		),
 	skipValidation: z
 		.boolean()
 		.optional()
 		.default(false)
-		.describe(
-			"Optional. If true, skips pre-flight SuiteScript syntax and JSDoc annotation validation.",
-		),
+		.describe("If true, skips pre-flight SuiteScript syntax validation."),
 	allowProduction: z
 		.boolean()
 		.optional()
 		.default(false)
 		.describe(
-			"Explicit user authorization flag required when uploading to a Production account. Set to true once user authorizes.",
+			"Explicit user authorization required if uploading to a Production account.",
 		),
 });
+export type DeployScriptArgs = z.infer<typeof DeployScriptArgsSchema>;
 
-export const GetErrorSummaryArgsSchema = z.object({
-	days: z
-		.number()
-		.int()
-		.min(1)
-		.max(90)
+/**
+ * 7. netsuite_status
+ * Single authoritative tool for environment, authentication, and diagnostic health.
+ */
+export const StatusArgsSchema = z.object({
+	includeErrors: z
+		.boolean()
 		.optional()
-		.default(7)
-		.describe("Number of days in the past to analyze (default: 7, max: 90)."),
-	tool: z
-		.string()
-		.trim()
-		.optional()
+		.default(false)
 		.describe(
-			"Optional: Filter errors by specific tool name (e.g. 'ns_runCustomSuiteQL').",
+			"Whether to include recent error summary and self-healing recommendations.",
 		),
-	category: z
-		.enum([
-			"ARGUMENT_VALIDATION",
-			"SUITEQL_SYNTAX",
-			"PERMISSION_DENIED",
-			"RECORD_NOT_FOUND",
-			"PRODUCTION_WRITE_BLOCKED",
-			"NETWORK_OR_TIMEOUT",
-			"NETSUITE_API_ERROR",
-			"SYSTEM_EXCEPTION",
-		])
+	includeDiagnostics: z
+		.boolean()
 		.optional()
-		.describe("Optional: Filter errors by category."),
+		.default(false)
+		.describe("Alias for includeErrors."),
 });
+export type StatusArgs = z.infer<typeof StatusArgsSchema>;
 
-export const NetsuiteSchemaArgsSchema = z.object({
-	recordType: z
-		.string()
-		.trim()
-		.toLowerCase()
-		.optional()
+/**
+ * 8. netsuite_auth
+ * Single authoritative tool for managing OAuth 2.0 PKCE session and cache.
+ */
+export const AuthArgsSchema = z.object({
+	action: z
+		.enum(["login", "logout", "refresh_cache"])
 		.describe(
-			"NetSuite record type or table name (e.g. 'salesorder', 'customer', 'item', 'customrecord_xxx'). If omitted with keyword, searches all SuiteQL tables.",
-		),
-	source: z
-		.enum(["auto", "offline", "live_rest", "live_sql"])
-		.optional()
-		.default("auto")
-		.describe(
-			"Schema source: 'auto' (default: standard types use offline, custom records use live_rest, missing recordType searches live_sql catalog), 'offline' (fast 0ms standard field definitions), 'live_rest' (custom fields and tenant-specific schema), or 'live_sql' (SuiteQL table columns & data types).",
-		),
-	keyword: z
-		.string()
-		.trim()
-		.optional()
-		.describe(
-			"Optional search keyword to filter field names, labels, or table names.",
+			"Authentication action: 'login' (browser PKCE auth), 'logout' (revoke session), or 'refresh_cache' (clear Redis cache).",
 		),
 });
+export type AuthArgs = z.infer<typeof AuthArgsSchema>;
 
 // ---------------------------------------------------------------------------
-// Static Tool Schema Definitions (local tools)
+// 8 Authoritative Tool Definitions for MCP Server Registration
 // ---------------------------------------------------------------------------
 
-export const AUTH_TOOL = {
-	name: "netsuite_authenticate",
-	description:
-		"Authenticate with NetSuite using OAuth 2.0 PKCE. Required before using any NetSuite tools. If NETSUITE_ACCOUNT_ID and NETSUITE_CLIENT_ID environment variables are set, they will be used automatically.",
+export const RUN_SUITEQL_TOOL = {
+	name: "netsuite_run_suiteql",
+	description: `Execute read-only Oracle NetSuite SuiteQL queries and return tabular results.
+MANDATORY OFFICIAL SYNTAX RULES:
+1. PROJECTION: NEVER use 'SELECT *'. Always specify explicit column names.
+2. PAGINATION: Oracle-standard ONLY. Use 'FETCH FIRST N ROWS ONLY' or 'WHERE ROWNUM <= N'. NEVER use MySQL/Postgres 'LIMIT' or 'OFFSET'.
+3. TRANSACTION LINES: When querying 'transactionline', MUST filter 'tl.mainline = 'T'' (header summary) or 'tl.mainline = 'F'' (item lines) to prevent duplicate sums.
+4. LINEAGE: 'createdfrom' exists ONLY on 'transactionline', NEVER on 'transaction'.
+5. ITEMS: 'item' table has 'itemtype' and 'subtype', NEVER 'recordtype'.
+6. AUDIT: NEVER JOIN 'systemnote' directly (causes 45s+ timeouts). Use 'netsuite_get_system_notes'.
+7. UNKNOWN SCHEMA: If not 100% sure of column names, MUST call 'netsuite_get_metadata' first before writing SQL.`,
 	inputSchema: {
 		type: "object" as const,
 		properties: {
-			accountId: {
+			sqlQuery: {
 				type: "string",
 				description:
-					"NetSuite Account ID (e.g. 1234567 or 1234567_SB1). Falls back to NETSUITE_ACCOUNT_ID env var.",
+					"The SuiteQL query string to execute. Follows Oracle NetSuite dialect rules above. Supports multiple statements separated by ';'.",
 			},
-			clientId: {
-				type: "string",
-				description:
-					"OAuth 2.0 Client ID from NetSuite integration record. Falls back to NETSUITE_CLIENT_ID env var.",
+			limit: {
+				type: "number",
+				description: "Optional safe row limit (default: 100).",
 			},
 		},
-		required: [],
+		required: ["sqlQuery"],
 	},
 };
 
-export const LOGOUT_TOOL = {
-	name: "netsuite_logout",
-	description: "Clear NetSuite authentication session and logout.",
-	inputSchema: { type: "object" as const, properties: {} },
-};
-
-const RECORD_LINK_TOOL = {
-	name: "netsuite_get_record_link",
+export const GET_METADATA_TOOL = {
+	name: "netsuite_get_metadata",
 	description:
-		"Generate a direct NetSuite UI browser link to view a specific record. Supports both numeric internal ID (e.g. 12345) and document number tranid (e.g. 'SO1002').",
+		"Inspect NetSuite database table schema, valid column names, and data types for SuiteQL and records. Powered by 2ms Redis cache and authoritative 272 records catalog.",
 	inputSchema: {
 		type: "object" as const,
 		properties: {
-			recordId: {
+			table: {
 				type: "string",
-				description: "Internal ID of the NetSuite record.",
+				description:
+					"NetSuite database table name or record type ID (e.g. 'customer', 'transaction', 'transactionline', 'item', 'salesorder').",
 			},
+			keyword: {
+				type: "string",
+				description:
+					"Optional search keyword to filter column names, labels, or descriptions.",
+			},
+		},
+		required: ["table"],
+	},
+};
+
+export const GET_RECORD_TOOL = {
+	name: "netsuite_get_record",
+	description:
+		"Retrieve and inspect a NetSuite record by numeric internal ID or document number (tranid). Returns cleaned header fields, custom fields, and an active Web UI link.",
+	inputSchema: {
+		type: "object" as const,
+		properties: {
 			recordType: {
 				type: "string",
 				description:
-					"Record type (e.g. salesorder, customer, customrecord_xxx).",
+					"Record type (e.g. 'salesorder', 'customer', 'invoice', 'customrecord_xxx').",
 			},
-			accountId: {
+			id: {
 				type: "string",
 				description:
-					"Override account ID (defaults to current authenticated account).",
+					"Numeric internal ID (e.g. '12345') or document number (tranid, e.g. 'SO10023').",
 			},
-			rectype: {
-				type: "integer",
-				description: "Numeric custom record type ID. Auto-resolved if omitted.",
+			includeSublists: {
+				type: "boolean",
+				description:
+					"Whether to include line items / sublists (default false).",
 			},
-		},
-		required: ["recordId"],
-	},
-};
-
-const REFRESH_CACHE_TOOL = {
-	name: "netsuite_refresh_cache",
-	description:
-		"Force clear local cache and refresh NetSuite internal REST session cache. Can optionally clear cache for a single table/recordType.",
-	inputSchema: {
-		type: "object" as const,
-		properties: {
-			tableName: {
+			format: {
 				type: "string",
-				description:
-					"Optional: Specific NetSuite table or record type to clear from cache (e.g. customer, salesorder, customrecord_xxx).",
+				enum: ["markdown", "compact_json"],
+				description: "Output format: 'markdown' (default) or 'compact_json'.",
 			},
 		},
+		required: ["recordType", "id"],
 	},
 };
 
-export const STATUS_TOOL = {
-	name: "netsuite_status",
-	description:
-		"Show diagnostic information: authentication state, token expiry, account details, cache statistics, and environment type.",
-	inputSchema: { type: "object" as const, properties: {} },
-};
-
-const BATCH_EXECUTE_TOOL = {
-	name: "netsuite_batch_execute",
-	description:
-		"Execute multiple NetSuite tools in parallel (max 10 tasks, concurrency 5). Returns aggregated results in 1 turn.",
-	inputSchema: {
-		type: "object" as const,
-		properties: {
-			tasks: {
-				type: "array",
-				description:
-					"Array of tasks to execute in parallel (maximum 10 tasks).",
-				items: {
-					type: "object",
-					properties: {
-						toolName: {
-							type: "string",
-							description:
-								"The name of the tool to execute (e.g. 'ns_runCustomSuiteQL', 'ns_getRecord', 'ns_getRecordTypeMetadata', 'ns_getSuiteQLMetadata', 'netsuite_get_script_logs', 'netsuite_get_record_link').",
-						},
-						arguments: {
-							type: "object",
-							description: "Arguments dictionary for the specified tool.",
-						},
-					},
-					required: ["toolName"],
-				},
-			},
-		},
-		required: ["tasks"],
-	},
-};
-
-const SCRIPT_LOGS_TOOL = {
+export const SCRIPT_LOGS_TOOL = {
 	name: "netsuite_get_script_logs",
 	description:
-		"Query NetSuite Script Execution Logs (ScriptNote table) with optional filters by script, level, date, and keyword.",
+		"Query NetSuite SuiteScript execution logs (ScriptNote) with index optimization. Defaults to the last 7 days.",
 	inputSchema: {
 		type: "object" as const,
 		properties: {
@@ -464,307 +379,135 @@ const SCRIPT_LOGS_TOOL = {
 			},
 			type: {
 				type: "string",
-				description: "Filter by log level: DEBUG, AUDIT, ERROR, or EMERGENCY.",
 				enum: ["DEBUG", "AUDIT", "ERROR", "EMERGENCY"],
+				description: "Filter by log level.",
 			},
 			dateFrom: {
 				type: "string",
-				description: "Start date filter in YYYY-MM-DD format (inclusive).",
+				description: "Start date in YYYY-MM-DD format (inclusive).",
 			},
 			dateTo: {
 				type: "string",
-				description: "End date filter in YYYY-MM-DD format (inclusive).",
+				description: "End date in YYYY-MM-DD format (inclusive).",
 			},
-			title: {
+			keyword: {
 				type: "string",
-				description: "Filter by log title keyword (LIKE fuzzy match).",
-			},
-			detail: {
-				type: "string",
-				description: "Filter by log detail/message keyword (LIKE fuzzy match).",
+				description: "Filter by log title or detail keyword.",
 			},
 			deploymentId: {
 				type: "string",
-				description:
-					"Filter by deployment Script ID (e.g. customdeploy_my_ue). Matches against ScriptDeployment.scriptid.",
+				description: "Filter by deployment Script ID.",
 			},
 			limit: {
-				type: "integer",
-				description:
-					"Maximum number of log entries to return. Default: 50, Max: 200.",
-			},
-		},
-		required: [],
-	},
-};
-
-const INSPECT_RECORD_TOOL = {
-	name: "netsuite_inspect_record",
-	description:
-		"Inspect NetSuite record details, populated fields, and sublists by internal ID or tranid.",
-	inputSchema: {
-		type: "object" as const,
-		properties: {
-			recordType: {
-				type: "string",
-				description:
-					"Record type (e.g. salesorder, invoice, customer, item, purchaseorder, customrecord_xxx).",
-			},
-			recordId: {
-				type: "string",
-				description:
-					"Record internal numeric ID (e.g. '12345') or document number / tranid (e.g. 'SO1002').",
-			},
-			format: {
-				type: "string",
-				enum: ["markdown", "compact_json"],
-				description:
-					"Output format: 'markdown' for formatted Markdown tables (default), or 'compact_json' for clean, machine-readable JSON without null/empty noise.",
-			},
-			linesMode: {
-				type: "string",
-				enum: ["all", "summary", "none"],
-				description:
-					"Line items / sublists detail mode: 'all' (inspect detailed line item rows without omission, default), 'summary' (row counts & 1st-row sample keys), or 'none' (omit sublists entirely).",
-			},
-			maxLines: {
-				type: "integer",
-				description:
-					"Optional maximum number of line item rows to include per sublist when linesMode is 'all'. If omitted, all line items are returned without truncation.",
-			},
-			lineFields: {
-				type: "array",
-				items: { type: "string" },
-				description:
-					"Optional array of specific line item field names to project (e.g. ['item', 'quantity', 'rate', 'amount']).",
-			},
-			includeLines: {
-				type: "boolean",
-				description:
-					"Whether to include line item details (default: true). Set false as shortcut for linesMode='none'.",
-			},
-			nonEmptyOnly: {
-				type: "boolean",
-				description:
-					"Whether to filter out null/empty fields to keep output compact and clean (default: true).",
-			},
-		},
-		required: ["recordType", "recordId"],
-	},
-};
-
-const GET_QUERY_TEMPLATE_TOOL = {
-	name: "netsuite_get_query_template",
-	description:
-		"Retrieve curated SuiteQL query templates by category or search keyword.",
-	inputSchema: {
-		type: "object" as const,
-		properties: {
-			templateId: {
-				type: "string",
-				description:
-					"Specific template ID (e.g. 'transaction_lines', 'transaction_lineage_downstream', 'multi_location_stock', 'script_error_logs', 'system_notes_standalone', 'gl_impact_lines').",
-			},
-			category: {
-				type: "string",
-				enum: [
-					"transactions",
-					"inventory",
-					"system_debug",
-					"accounting",
-					"relationships",
-				],
-				description: "Filter templates by domain category.",
-			},
-			search: {
-				type: "string",
-				description:
-					"Search keyword across template names, descriptions, and SQL patterns.",
+				type: "number",
+				description: "Max log entries to return (default: 50, max: 200).",
 			},
 		},
 	},
 };
 
-const GET_SYSTEM_NOTES_TOOL = {
+export const SYSTEM_NOTES_TOOL = {
 	name: "netsuite_get_system_notes",
 	description:
-		"Investigate audit trail and field modification history for a specific record. Returns timestamped change events, modifier user, and old vs new values. Supports numeric internal ID (e.g. 12345) and document number tranid (e.g. 'SO1002').",
+		"Query system audit trail and field change history (SystemNote) for a specific record. Standalone indexed query preventing SAFE Pitfall 11 timeouts.",
 	inputSchema: {
 		type: "object" as const,
 		properties: {
-			recordId: {
-				type: "string",
-				description: "Record internal ID or document number (tranid).",
-			},
 			recordType: {
 				type: "string",
-				description:
-					"Optional record type (e.g. salesorder, invoice, customer).",
+				description: "Optional record type (e.g. 'salesorder', 'customer').",
+			},
+			recordId: {
+				type: "string",
+				description: "Numeric internal ID or document number (tranid).",
 			},
 			limit: {
-				type: "integer",
-				description:
-					"Maximum number of system notes to return. Default: 30, Max: 100.",
+				type: "number",
+				description: "Max audit entries to return (default: 50).",
 			},
 		},
 		required: ["recordId"],
 	},
 };
 
-const SUITECLOUD_UPLOAD_TOOL = {
-	name: "netsuite_suitecloud_upload",
+export const DEPLOY_SCRIPT_TOOL = {
+	name: "netsuite_deploy_script",
 	description:
-		"Upload script or asset files to NetSuite File Cabinet using SuiteCloud CLI ('suitecloud file:upload'). " +
-		"Supports single files, multiple paths, arrays, and directories. Auto-detects SDF project & matches Auth ID. " +
-		"Before calling, prompt user with an interactive confirmation card containing the file's absolute path.",
+		"Upload SuiteScript files to NetSuite FileCabinet via SuiteCloud CLI. Includes syntax pre-flight check and production write barrier.",
 	inputSchema: {
 		type: "object" as const,
 		properties: {
 			paths: {
-				anyOf: [
-					{
-						type: "string",
-						description:
-							"File Cabinet path, local file path, directory, or space/comma-separated list of paths (e.g. '/SuiteScripts/my_script.js').",
-					},
-					{
-						type: "array",
-						items: { type: "string" },
-						description:
-							"Array of File Cabinet paths or local file paths (e.g. ['/SuiteScripts/a.js', '/SuiteScripts/b.js']).",
-					},
+				oneOf: [
+					{ type: "string" },
+					{ type: "array", items: { type: "string" } },
 				],
-				description:
-					"File Cabinet path, local path, directory, or array of paths to upload.",
+				description: "File path or array of file paths to upload.",
 			},
 			projectPath: {
 				type: "string",
-				description:
-					"Optional SDF project root path. Automatically detected from active account workspace, environment, or file paths if omitted.",
-			},
-			authId: {
-				type: "string",
-				description:
-					"Optional SuiteCloud authentication ID (e.g. '9260916_SB1-Adm-Sand'). Automatically verified and matched to active account if omitted.",
+				description: "Optional SDF project root path.",
 			},
 			dryRun: {
 				type: "boolean",
-				description:
-					"Optional. If true, inspects local files, validates syntax, and returns execution preview without uploading.",
+				description: "Validate files without uploading.",
 			},
 			skipValidation: {
 				type: "boolean",
-				description:
-					"Optional. If true, skips pre-flight SuiteScript syntax and JSDoc annotation validation.",
+				description: "Skip pre-flight syntax validation.",
 			},
 			allowProduction: {
 				type: "boolean",
 				description:
-					"Explicit user authorization required if uploading to a Production account.",
+					"Explicit confirmation required if deploying to a production account.",
 			},
 		},
 		required: ["paths"],
 	},
 };
 
-const GET_ERROR_SUMMARY_TOOL = {
-	name: "netsuite_get_error_summary",
+export const STATUS_TOOL = {
+	name: "netsuite_status",
 	description:
-		"Analyze and summarize historical NetSuite MCP tool execution errors from structured logs. " +
-		"Provides breakdown by tool and category, high-frequency error patterns, and actionable recommendations " +
-		"for optimizing tool schemas, SuiteQL queries, prompt guidance, and NetSuite permissions.",
+		"Check NetSuite connection status, active account environment (Sandbox vs. Production), OAuth token lifespan, and recent error diagnostics.",
 	inputSchema: {
 		type: "object" as const,
 		properties: {
-			days: {
-				type: "number",
+			includeErrors: {
+				type: "boolean",
 				description:
-					"Number of days of error logs to analyze (default: 7, max: 90).",
-			},
-			tool: {
-				type: "string",
-				description:
-					"Optional tool name filter (e.g. 'ns_runCustomSuiteQL', 'ns_getRecord').",
-			},
-			category: {
-				type: "string",
-				enum: [
-					"ARGUMENT_VALIDATION",
-					"SUITEQL_SYNTAX",
-					"PERMISSION_DENIED",
-					"RECORD_NOT_FOUND",
-					"PRODUCTION_WRITE_BLOCKED",
-					"NETWORK_OR_TIMEOUT",
-					"NETSUITE_API_ERROR",
-					"SYSTEM_EXCEPTION",
-				],
-				description: "Optional error category filter.",
+					"Whether to include recent error summary and self-healing advice.",
 			},
 		},
 	},
 };
 
-const NETSUITE_SCHEMA_TOOL = {
-	name: "netsuite_schema",
+export const AUTH_TOOL = {
+	name: "netsuite_auth",
 	description:
-		"Inspect NetSuite record and table schema across standard fields, custom fields, and SuiteQL database columns.",
+		"Manage NetSuite OAuth 2.0 PKCE authentication session and cache.",
 	inputSchema: {
 		type: "object" as const,
 		properties: {
-			recordType: {
+			action: {
 				type: "string",
+				enum: ["login", "logout", "refresh_cache"],
 				description:
-					"NetSuite record type or table name (e.g. 'salesorder', 'customer', 'item', 'customrecord_xxx'). If omitted with keyword, searches all SuiteQL tables.",
-			},
-			source: {
-				type: "string",
-				enum: ["auto", "offline", "live_rest", "live_sql"],
-				description:
-					"Schema source: 'auto' (default: standard types use offline, custom records use live_rest, missing recordType searches live_sql catalog), 'offline' (standard field definitions), 'live_rest' (custom fields and tenant-specific schema), or 'live_sql' (SuiteQL table columns & data types).",
-			},
-			keyword: {
-				type: "string",
-				description:
-					"Optional search keyword to filter field names, labels, or table names.",
+					"Action: 'login' (browser auth), 'logout' (revoke session), or 'refresh_cache' (clear Redis cache).",
 			},
 		},
+		required: ["action"],
 	},
 };
 
-const GET_SKILL_TOOL = {
-	name: "netsuite_get_skill",
-	description:
-		"Read official Oracle NetSuite SuiteCloud Agent Skills and engineering standards on-demand (e.g. SAFE Guide, SuiteQL patterns, SuiteScript upgrade, records reference).",
-	inputSchema: {
-		type: "object" as const,
-		properties: {
-			skillName: {
-				type: "string",
-				description:
-					"Name of the skill to read (e.g. 'netsuite-sdf-safe-guide', 'netsuite-ai-connector-instructions', 'netsuite-suitescript-records-reference', 'netsuite-suitescript-upgrade'). If omitted, lists all available skills.",
-			},
-			section: {
-				type: "string",
-				description:
-					"Optional section heading keyword to retrieve specific section guidance.",
-			},
-		},
-	},
-};
-
-/** All locally-handled tools (excluding AUTH_TOOL which has special routing). */
+/** All 8 Authoritative Tools exposed by NetSuite MCP Server. */
 export const LOCAL_TOOLS = [
-	RECORD_LINK_TOOL,
-	REFRESH_CACHE_TOOL,
-	LOGOUT_TOOL,
-	STATUS_TOOL,
-	BATCH_EXECUTE_TOOL,
+	RUN_SUITEQL_TOOL,
+	GET_METADATA_TOOL,
+	GET_RECORD_TOOL,
 	SCRIPT_LOGS_TOOL,
-	INSPECT_RECORD_TOOL,
-	GET_QUERY_TEMPLATE_TOOL,
-	GET_SYSTEM_NOTES_TOOL,
-	SUITECLOUD_UPLOAD_TOOL,
-	GET_ERROR_SUMMARY_TOOL,
-	NETSUITE_SCHEMA_TOOL,
-	GET_SKILL_TOOL,
+	SYSTEM_NOTES_TOOL,
+	DEPLOY_SCRIPT_TOOL,
+	STATUS_TOOL,
+	AUTH_TOOL,
 ];

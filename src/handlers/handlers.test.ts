@@ -116,24 +116,22 @@ describe("MCP Handler Wires", () => {
 			expect(registeredHandlers.has("tools/call")).toBe(true);
 		});
 
-		it("should list all tools when in Sandbox environment", async () => {
+		it("should list the 8 authoritative tools", async () => {
 			mockOAuthManager.getAccountId.mockResolvedValue("9260916-sb1");
 			const listFn = registeredHandlers.get("tools/list");
 
 			const result = await listFn?.();
 			const names = result.tools.map((t: any) => t.name);
 
-			expect(names).toContain("ns_createRecord");
-			expect(names).toContain("ns_updateRecord");
-			expect(names).toContain("ns_getRecord");
-			expect(names).toContain("netsuite_get_record_link");
-			expect(names).toContain("netsuite_inspect_record");
-
-			// Ensure netsuite_logout is not duplicated in tools list
-			const logoutCount = names.filter(
-				(n: string) => n === "netsuite_logout",
-			).length;
-			expect(logoutCount).toBe(1);
+			expect(names).toContain("netsuite_run_suiteql");
+			expect(names).toContain("netsuite_get_metadata");
+			expect(names).toContain("netsuite_get_record");
+			expect(names).toContain("netsuite_get_script_logs");
+			expect(names).toContain("netsuite_get_system_notes");
+			expect(names).toContain("netsuite_deploy_script");
+			expect(names).toContain("netsuite_status");
+			expect(names).toContain("netsuite_auth");
+			expect(names.length).toBe(8);
 		});
 
 		it("should attach standard MCP annotations to tools", async () => {
@@ -142,101 +140,77 @@ describe("MCP Handler Wires", () => {
 
 			const result = await listFn?.();
 			const getRecordTool = result.tools.find(
-				(t: any) => t.name === "ns_getRecord",
+				(t: any) => t.name === "netsuite_get_record",
 			);
-			const createRecordTool = result.tools.find(
-				(t: any) => t.name === "ns_createRecord",
+			const deployTool = result.tools.find(
+				(t: any) => t.name === "netsuite_deploy_script",
 			);
 
 			expect(getRecordTool?.annotations).toEqual({
 				readOnlyHint: true,
 				idempotentHint: true,
 			});
-			expect(createRecordTool?.annotations).toEqual({
+			expect(deployTool?.annotations).toEqual({
 				readOnlyHint: false,
 				destructiveHint: true,
 			});
 		});
 
-		it("should filter out write tools when in Production environment", async () => {
+		it("should include environment suffix in tool descriptions", async () => {
 			mockOAuthManager.getAccountId.mockResolvedValue("123456");
 			const listFn = registeredHandlers.get("tools/list");
 
 			const result = await listFn?.();
-			const names = result.tools.map((t: any) => t.name);
-
-			expect(names).not.toContain("ns_createRecord");
-			expect(names).not.toContain("ns_updateRecord");
-			expect(names).toContain("ns_getRecord");
+			const runSqlTool = result.tools.find(
+				(t: any) => t.name === "netsuite_run_suiteql",
+			);
+			expect(runSqlTool?.description).toContain("123456");
 		});
 
-		it("should filter out pruned/useless interactive tools from tools/list", async () => {
-			mockOAuthManager.getAccountId.mockResolvedValue("9260916-sb1");
-			mockMCPTools.fetchTools.mockResolvedValueOnce([
-				{ name: "ns_getRecord", description: "Get a record" },
-				{ name: "ns_prompt_library_app", description: "Interactive app" },
-				{ name: "ns_selector_app", description: "Interactive app" },
-				{ name: "ns_report_filters_app", description: "Interactive app" },
-				{
-					name: "ns_getAccountingContexts",
-					description: "Accounting contexts",
-				},
-				{ name: "ns_getNexusIds", description: "Nexus IDs" },
-			]);
-			const listFn = registeredHandlers.get("tools/list");
-			const result = await listFn?.();
-			const names = result.tools.map((t: any) => t.name);
-
-			expect(names).toContain("ns_getRecord");
-			expect(names).not.toContain("ns_prompt_library_app");
-			expect(names).not.toContain("ns_selector_app");
-			expect(names).not.toContain("ns_report_filters_app");
-			expect(names).not.toContain("ns_getAccountingContexts");
-			expect(names).not.toContain("ns_getNexusIds");
-		});
-
-		it("should block interactive _app tools on tools/call with informative guidance", async () => {
+		it("should reject unknown tools on tools/call", async () => {
 			const callFn = registeredHandlers.get("tools/call");
 			const res = await callFn?.({
 				params: {
-					name: "ns_selector_app",
+					name: "ns_unknown_tool",
 					arguments: { recordType: "customer" },
 				},
 			});
 
 			expect(res.isError).toBe(true);
-			expect(res.content[0].text).toContain("⛔ [Interactive App Unsupported]");
+			expect(res.content[0].text).toContain("Unknown tool: 'ns_unknown_tool'");
 		});
 
-		it("should enforce Dual-Gate Defense on tools/call for write operations in Production", async () => {
+		it("should require allowProduction for code deploy in Production", async () => {
 			mockOAuthManager.getAccountId.mockResolvedValue("123456"); // Production
 			const callFn = registeredHandlers.get("tools/call");
 
+			const dummy = path.join(testRoot, "dummy.js");
+			await fs.writeFile(dummy, "console.log(1);");
+
 			const res = await callFn?.({
 				params: {
-					name: "ns_createRecord",
-					arguments: { recordType: "customer" },
+					name: "netsuite_deploy_script",
+					arguments: { paths: dummy, projectPath: testRoot },
 				},
 			});
 
 			expect(res.isError).toBe(true);
-			expect(res.content[0].text).toContain(
-				"⛔ [Production Safety Violation] Operation 'ns_createRecord' is strictly blocked in Production environment",
-			);
+			expect(res.content[0].text).toContain("生产环境安全拦截");
 		});
 
-		it("should return unauthenticated toolset when session is invalid", async () => {
+		it("should require authentication for protected tools when session is invalid", async () => {
 			mockOAuthManager.hasValidSession.mockResolvedValue(false);
-			const listFn = registeredHandlers.get("tools/list");
+			const callFn = registeredHandlers.get("tools/call");
 
-			const result = await listFn?.();
-			const names = result.tools.map((t: any) => t.name);
+			const res = await callFn?.({
+				params: {
+					name: "netsuite_get_record",
+					arguments: { recordType: "customer", id: "101" },
+				},
+			});
 
-			expect(names).toEqual([
-				"netsuite_authenticate",
-				"netsuite_logout",
-				"netsuite_status",
-			]);
+			expect(res.isError).toBe(true);
+			expect(res.content[0].text).toContain("Not authenticated");
 		});
 
 		it("should delegate tool execution to mcpTools.executeTool", async () => {
@@ -244,7 +218,7 @@ describe("MCP Handler Wires", () => {
 
 			const res = await callFn?.({
 				params: {
-					name: "ns_getRecord",
+					name: "netsuite_get_record",
 					arguments: { recordType: "customer", id: "101" },
 				},
 			});
@@ -252,37 +226,36 @@ describe("MCP Handler Wires", () => {
 			expect(mockMCPTools.executeTool).toHaveBeenCalledWith("ns_getRecord", {
 				recordType: "customer",
 				recordId: "101",
-				id: "101",
 			});
 			expect(res.content[0].text).toContain("Acme Corp");
 		});
 
-		it("should normalize table_name / tableName to recordType in ns_getSuiteQLMetadata", async () => {
+		it("should normalize table_name / tableName to recordType in netsuite_get_metadata", async () => {
 			const callFn = registeredHandlers.get("tools/call");
 
 			await callFn?.({
 				params: {
-					name: "ns_getSuiteQLMetadata",
-					arguments: { table_name: "item" },
+					name: "netsuite_get_metadata",
+					arguments: { table_name: "customrecord_special" },
 				},
 			});
 
 			expect(mockMCPTools.executeTool).toHaveBeenCalledWith(
 				"ns_getSuiteQLMetadata",
 				expect.objectContaining({
-					recordType: "item",
+					recordType: "customrecord_special",
 				}),
 			);
 		});
 
-		it("should resolve custom record string rectype in ns_runCustomSuiteQL", async () => {
+		it("should resolve custom record string rectype in netsuite_run_suiteql", async () => {
 			const callFn = registeredHandlers.get("tools/call");
 
 			await callFn?.({
 				params: {
-					name: "ns_runCustomSuiteQL",
+					name: "netsuite_run_suiteql",
 					arguments: {
-						sql: "SELECT * FROM customrecord_etissl_carrier",
+						sqlQuery: "SELECT id FROM customrecord_etissl_carrier",
 						customRecordMappings: [
 							{
 								rectype: "customrecord_etissl_carrier",
@@ -296,10 +269,10 @@ describe("MCP Handler Wires", () => {
 			expect(mockMCPTools.executeTool).toHaveBeenCalledWith(
 				"ns_runCustomSuiteQL",
 				{
-					sql: "SELECT * FROM customrecord_etissl_carrier",
+					sqlQuery: "SELECT id FROM customrecord_etissl_carrier",
 					customRecordMappings: [
 						{
-							rectype: "customrecord_etissl_carrier",
+							rectype: 54,
 							scriptId: "customrecord_etissl_carrier",
 						},
 					],
@@ -318,7 +291,7 @@ describe("MCP Handler Wires", () => {
 
 			const res = await callFn?.({
 				params: {
-					name: "ns_getRecord",
+					name: "netsuite_get_record",
 					arguments: { recordType: "customer", id: "101" },
 				},
 			});
@@ -343,7 +316,7 @@ describe("MCP Handler Wires", () => {
 
 			const res = await callFn?.({
 				params: {
-					name: "ns_runCustomSuiteQL",
+					name: "netsuite_run_suiteql",
 					arguments: { sqlQuery: "SELECT id FROM customer" },
 				},
 			});
@@ -361,9 +334,9 @@ describe("MCP Handler Wires", () => {
 
 			const res = await callFn?.({
 				params: {
-					name: "ns_runCustomSuiteQL",
+					name: "netsuite_run_suiteql",
 					arguments: {
-						sql: "SELECT * FROM customrecord_unknown",
+						sqlQuery: "SELECT id FROM customrecord_unknown",
 						customRecordMappings: [
 							{
 								rectype: "customrecord_unknown",
@@ -378,62 +351,34 @@ describe("MCP Handler Wires", () => {
 			expect(res.content[0].text).toContain("Could not resolve rectype ID");
 		});
 
-		it("should enhance tool descriptions and input schemas for ns_runCustomSuiteQL and ns_getSuiteQLMetadata", async () => {
+		it("should provide rich tool descriptions and input schemas for netsuite_run_suiteql and netsuite_get_metadata", async () => {
 			mockOAuthManager.getAccountId.mockResolvedValue("9260916-sb1");
-			mockMCPTools.fetchTools.mockResolvedValueOnce([
-				{
-					name: "ns_runCustomSuiteQL",
-					description: "Run SuiteQL queries",
-					inputSchema: {
-						type: "object",
-						properties: {
-							sqlQuery: { type: "string" },
-						},
-					},
-				},
-				{
-					name: "ns_getSuiteQLMetadata",
-					description: "Get metadata",
-					inputSchema: {
-						type: "object",
-						properties: {
-							recordType: { type: "string" },
-						},
-					},
-				},
-			]);
-
 			const listFn = registeredHandlers.get("tools/list");
 			const result = await listFn?.();
 			const suiteqlTool = result.tools.find(
-				(t: any) => t.name === "ns_runCustomSuiteQL",
+				(t: any) => t.name === "netsuite_run_suiteql",
 			);
 			const metaTool = result.tools.find(
-				(t: any) => t.name === "ns_getSuiteQLMetadata",
+				(t: any) => t.name === "netsuite_get_metadata",
 			);
 
-			expect(suiteqlTool.description).toContain(
-				"Execute NetSuite SuiteQL queries",
-			);
+			expect(suiteqlTool.description).toContain("SuiteQL queries");
 			expect(suiteqlTool.inputSchema.properties.sqlQuery.description).toContain(
-				"Single statement or multiple statements",
+				"The SuiteQL query string to execute",
 			);
 
 			expect(metaTool.description).toContain(
 				"Inspect NetSuite database table schema",
 			);
 			expect(metaTool.inputSchema.properties.keyword).toBeDefined();
-			expect(metaTool.inputSchema.properties.keyword.description).toContain(
-				"search keyword",
-			);
 		});
 
-		it("should return fast table catalog discovery when ns_getSuiteQLMetadata has no recordType", async () => {
+		it("should return fast table catalog discovery when netsuite_get_metadata has no table", async () => {
 			const callFn = registeredHandlers.get("tools/call");
 
 			const res = await callFn?.({
 				params: {
-					name: "ns_getSuiteQLMetadata",
+					name: "netsuite_get_metadata",
 					arguments: {},
 				},
 			});
@@ -449,12 +394,12 @@ describe("MCP Handler Wires", () => {
 			expect(res.content[0].text).toContain("`transaction`");
 		});
 
-		it("should return filtered table catalog when ns_getSuiteQLMetadata is called with keyword", async () => {
+		it("should return filtered table catalog when netsuite_get_metadata is called with keyword", async () => {
 			const callFn = registeredHandlers.get("tools/call");
 
 			const res = await callFn?.({
 				params: {
-					name: "ns_getSuiteQLMetadata",
+					name: "netsuite_get_metadata",
 					arguments: { keyword: "inventory" },
 				},
 			});
@@ -480,9 +425,10 @@ describe("MCP Handler Wires", () => {
 
 			const res = await callFn?.({
 				params: {
-					name: "ns_runCustomSuiteQL",
+					name: "netsuite_run_suiteql",
 					arguments: {
-						sqlQuery: "SELECT id, createdfrom FROM transaction WHERE id = 1",
+						sqlQuery:
+							"SELECT id, createdfrom FROM transactionline WHERE id = 1 AND mainline = 'F'",
 					},
 				},
 			});
@@ -495,13 +441,13 @@ describe("MCP Handler Wires", () => {
 			expect(res.content[0].text).toContain("transactionline");
 		});
 
-		it("should handle local authentication tool call", async () => {
+		it("should handle local authentication tool call via netsuite_auth", async () => {
 			const callFn = registeredHandlers.get("tools/call");
 
 			const res = await callFn?.({
 				params: {
-					name: "netsuite_authenticate",
-					arguments: {},
+					name: "netsuite_auth",
+					arguments: { action: "login" },
 				},
 			});
 
@@ -509,13 +455,13 @@ describe("MCP Handler Wires", () => {
 			expect(res.content[0].text).toContain("Authentication process initiated");
 		});
 
-		it("should handle local logout tool call", async () => {
+		it("should handle local logout tool call via netsuite_auth", async () => {
 			const callFn = registeredHandlers.get("tools/call");
 
 			const res = await callFn?.({
 				params: {
-					name: "netsuite_logout",
-					arguments: {},
+					name: "netsuite_auth",
+					arguments: { action: "logout" },
 				},
 			});
 
@@ -534,171 +480,6 @@ describe("MCP Handler Wires", () => {
 			});
 
 			expect(res.content[0].text).toContain("netsuite-mcp");
-		});
-
-		describe("netsuite_batch_execute tool", () => {
-			it("should execute multiple tools in parallel and return partial results", async () => {
-				const callFn = registeredHandlers.get("tools/call");
-
-				mockMCPTools.executeTool
-					.mockResolvedValueOnce({ id: "1", name: "Cust 1" })
-					.mockRejectedValueOnce(new Error("Record not found"));
-
-				const res = await callFn?.({
-					params: {
-						name: "netsuite_batch_execute",
-						arguments: {
-							tasks: [
-								{
-									toolName: "ns_getRecord",
-									arguments: { recordType: "customer", id: "1" },
-								},
-								{
-									toolName: "ns_getRecord",
-									arguments: { recordType: "customer", id: "99" },
-								},
-							],
-						},
-					},
-				});
-
-				const parsed = JSON.parse(res.content[0].text);
-				expect(parsed.totalTasks).toBe(2);
-				expect(parsed.successfulTasks).toBe(1);
-				expect(parsed.failedTasks).toBe(1);
-				expect(parsed.individualResults[0].success).toBe(true);
-				expect(parsed.individualResults[1].success).toBe(false);
-			});
-
-			it("should capture permission errors in batch tasks and format with hard-stop banner", async () => {
-				const callFn = registeredHandlers.get("tools/call");
-
-				mockMCPTools.executeTool.mockResolvedValueOnce({
-					success: false,
-					error: "INSUFFICIENT_PERMISSION: Permission Violation: Access Denied",
-				});
-
-				const res = await callFn?.({
-					params: {
-						name: "netsuite_batch_execute",
-						arguments: {
-							tasks: [
-								{
-									toolName: "ns_getRecord",
-									arguments: { recordType: "invoice", id: "555" },
-								},
-							],
-						},
-					},
-				});
-
-				const parsed = JSON.parse(res.content[0].text);
-				expect(parsed.totalTasks).toBe(1);
-				expect(parsed.successfulTasks).toBe(0);
-				expect(parsed.failedTasks).toBe(1);
-				expect(parsed.individualResults[0].success).toBe(false);
-				expect(parsed.individualResults[0].error).toContain(
-					"NetSuite Permission Error",
-				);
-				expect(parsed.individualResults[0].error).toContain(
-					"PERMISSION DENIED — HARD STOP REQUIRED",
-				);
-			});
-
-			it("should execute parallel SuiteQL queries via batch", async () => {
-				const callFn = registeredHandlers.get("tools/call");
-				mockMCPTools.executeTool
-					.mockResolvedValueOnce({ data: [{ id: 1 }] })
-					.mockResolvedValueOnce({ data: [{ id: 2 }] });
-
-				const res = await callFn?.({
-					params: {
-						name: "netsuite_batch_execute",
-						arguments: {
-							tasks: [
-								{
-									toolName: "ns_runCustomSuiteQL",
-									arguments: { sqlQuery: "SELECT id FROM customer" },
-								},
-								{
-									toolName: "ns_runCustomSuiteQL",
-									arguments: { sqlQuery: "SELECT id FROM transaction" },
-								},
-							],
-						},
-					},
-				});
-
-				const parsed = JSON.parse(res.content[0].text);
-				expect(parsed.totalTasks).toBe(2);
-				expect(parsed.successfulTasks).toBe(2);
-			});
-
-			it("should execute local tools like netsuite_get_record_link within batch", async () => {
-				const callFn = registeredHandlers.get("tools/call");
-
-				const res = await callFn?.({
-					params: {
-						name: "netsuite_batch_execute",
-						arguments: {
-							tasks: [
-								{
-									toolName: "netsuite_get_record_link",
-									arguments: { recordType: "customer", recordId: "101" },
-								},
-							],
-						},
-					},
-				});
-
-				const parsed = JSON.parse(res.content[0].text);
-				expect(parsed.totalTasks).toBe(1);
-				expect(parsed.successfulTasks).toBe(1);
-				expect(parsed.individualResults[0].result).toContain("123456_SB1");
-			});
-
-			it("should fail only write tasks in production", async () => {
-				mockOAuthManager.getAccountId.mockResolvedValue("123456");
-				const callFn = registeredHandlers.get("tools/call");
-
-				const res = await callFn?.({
-					params: {
-						name: "netsuite_batch_execute",
-						arguments: {
-							tasks: [
-								{
-									toolName: "ns_createRecord",
-									arguments: { recordType: "customer" },
-								},
-							],
-						},
-					},
-				});
-
-				const parsed = JSON.parse(res.content[0].text);
-				expect(parsed.individualResults[0].success).toBe(false);
-				expect(parsed.individualResults[0].error).toContain(
-					"disabled in production",
-				);
-			});
-
-			it("should reject if tasks exceeds 10", async () => {
-				const callFn = registeredHandlers.get("tools/call");
-				const tasks = Array.from({ length: 11 }, () => ({
-					toolName: "ns_getRecord",
-					arguments: {},
-				}));
-
-				const res = await callFn?.({
-					params: {
-						name: "netsuite_batch_execute",
-						arguments: { tasks },
-					},
-				});
-
-				expect(res.isError).toBe(true);
-				expect(res.content[0].text).toContain("maximum limit of 10");
-			});
 		});
 
 		describe("netsuite_get_script_logs tool", () => {
@@ -811,7 +592,7 @@ describe("MCP Handler Wires", () => {
 				});
 
 				expect(res.isError).toBe(true);
-				expect(res.content[0].text).toContain("Invalid log type");
+				expect(res.content[0].text).toContain("Invalid option");
 			});
 
 			it("should cap limit at 200", async () => {
@@ -874,24 +655,24 @@ describe("MCP Handler Wires", () => {
 		});
 
 		describe("Developer Tools Wiring", () => {
-			it("should handle netsuite_schema with source: 'offline' for standard record definitions", async () => {
+			it("should handle netsuite_get_metadata with source: 'offline' for standard record definitions", async () => {
 				const callFn = registeredHandlers.get("tools/call");
 				const res = await callFn?.({
 					params: {
-						name: "netsuite_schema",
-						arguments: { recordType: "salesorder", source: "offline" },
+						name: "netsuite_get_metadata",
+						arguments: { table: "salesorder", source: "offline" },
 					},
 				});
 
 				expect(res.content[0].text).toContain("Official Records Definition");
 			});
 
-			it("should handle netsuite_schema tool with standard recordType in auto mode", async () => {
+			it("should handle netsuite_get_metadata tool with standard table in auto mode", async () => {
 				const callFn = registeredHandlers.get("tools/call");
 				const res = await callFn?.({
 					params: {
-						name: "netsuite_schema",
-						arguments: { recordType: "salesorder" },
+						name: "netsuite_get_metadata",
+						arguments: { table: "salesorder" },
 					},
 				});
 
@@ -899,11 +680,11 @@ describe("MCP Handler Wires", () => {
 				expect(res.content[0].text).toContain("salesorder");
 			});
 
-			it("should handle netsuite_schema table catalog discovery when recordType is omitted", async () => {
+			it("should handle netsuite_get_metadata table catalog discovery when table is omitted", async () => {
 				const callFn = registeredHandlers.get("tools/call");
 				const res = await callFn?.({
 					params: {
-						name: "netsuite_schema",
+						name: "netsuite_get_metadata",
 						arguments: { keyword: "transaction" },
 					},
 				});
@@ -912,41 +693,12 @@ describe("MCP Handler Wires", () => {
 				expect(res.content[0].text).toContain("transaction");
 			});
 
-			it("should list available skills when skillName is omitted in netsuite_get_skill", async () => {
+			it("should handle netsuite_get_metadata with explicit offline source", async () => {
 				const callFn = registeredHandlers.get("tools/call");
 				const res = await callFn?.({
 					params: {
-						name: "netsuite_get_skill",
-						arguments: {},
-					},
-				});
-
-				expect(res.content[0].text).toContain(
-					"Oracle NetSuite Available Agent Skills Library",
-				);
-			});
-
-			it("should retrieve specific skill documentation and filter section in netsuite_get_skill", async () => {
-				const callFn = registeredHandlers.get("tools/call");
-				const res = await callFn?.({
-					params: {
-						name: "netsuite_get_skill",
-						arguments: {
-							skillName: "netsuite-ai-connector-instructions",
-							section: "OUTPUT FORMATTING",
-						},
-					},
-				});
-
-				expect(res.content[0].text).toContain("OUTPUT FORMATTING");
-			});
-
-			it("should handle netsuite_schema with explicit offline source", async () => {
-				const callFn = registeredHandlers.get("tools/call");
-				const res = await callFn?.({
-					params: {
-						name: "netsuite_schema",
-						arguments: { recordType: "customer", source: "offline" },
+						name: "netsuite_get_metadata",
+						arguments: { table: "customer", source: "offline" },
 					},
 				});
 
@@ -954,35 +706,7 @@ describe("MCP Handler Wires", () => {
 				expect(res.content[0].text).toContain("customer");
 			});
 
-			it("should handle netsuite_get_query_template with templateId", async () => {
-				const callFn = registeredHandlers.get("tools/call");
-				const res = await callFn?.({
-					params: {
-						name: "netsuite_get_query_template",
-						arguments: { templateId: "transaction_lines" },
-					},
-				});
-
-				expect(res.content[0].text).toContain(
-					"SuiteQL Template: Transaction Line Items",
-				);
-				expect(res.content[0].text).toContain("tl.mainline = 'F'");
-			});
-
-			it("should handle netsuite_get_query_template list and search", async () => {
-				const callFn = registeredHandlers.get("tools/call");
-				const res = await callFn?.({
-					params: {
-						name: "netsuite_get_query_template",
-						arguments: { category: "transactions" },
-					},
-				});
-
-				expect(res.content[0].text).toContain("Curated SuiteQL Templates");
-				expect(res.content[0].text).toContain("transaction_lines");
-			});
-
-			it("should handle netsuite_inspect_record successfully with full line details by default", async () => {
+			it("should handle netsuite_get_record successfully with full line details by default", async () => {
 				const callFn = registeredHandlers.get("tools/call");
 				mockMCPTools.executeTool.mockResolvedValueOnce({
 					id: "12345",
@@ -994,8 +718,8 @@ describe("MCP Handler Wires", () => {
 
 				const res = await callFn?.({
 					params: {
-						name: "netsuite_inspect_record",
-						arguments: { recordType: "salesorder", recordId: "12345" },
+						name: "netsuite_get_record",
+						arguments: { recordType: "salesorder", id: "12345" },
 					},
 				});
 
@@ -1023,8 +747,8 @@ describe("MCP Handler Wires", () => {
 
 				const res = await callFn?.({
 					params: {
-						name: "netsuite_inspect_record",
-						arguments: { recordType: "salesorder", recordId: "12345" },
+						name: "netsuite_get_record",
+						arguments: { recordType: "salesorder", id: "12345" },
 					},
 				});
 
@@ -1033,24 +757,23 @@ describe("MCP Handler Wires", () => {
 				expect(text).toContain("| `custbody_active_flag` | true |");
 				expect(text).toContain("| `tranid` | SO1002 |");
 				// False flags are compacted into inline summaries
-				expect(text).toContain("Unchecked / False Flags (2)");
+				expect(text).toContain("Unchecked / False Flags");
 				expect(text).toContain("`isInactive`, `shipComplete`");
 				expect(text).toContain(
 					"`custbody_unchecked_1`, `custbody_unchecked_2`",
 				);
 			});
 
-			it("should normalize id to recordId for netsuite_inspect_record and ns_getRecord", async () => {
+			it("should normalize id to recordId for netsuite_get_record", async () => {
 				const callFn = registeredHandlers.get("tools/call");
 				mockMCPTools.executeTool.mockResolvedValueOnce({
 					id: "99887",
 					tranid: "SO1003",
 				});
 
-				// Test netsuite_inspect_record with id instead of recordId
 				const res = await callFn?.({
 					params: {
-						name: "netsuite_inspect_record",
+						name: "netsuite_get_record",
 						arguments: { recordType: "salesorder", id: "99887" },
 					},
 				});
@@ -1062,8 +785,11 @@ describe("MCP Handler Wires", () => {
 				expect(res.content[0].text).toContain("NetSuite Record Inspection");
 			});
 
-			it("should normalize type, tranid, and nested Arguments for netsuite_inspect_record", async () => {
+			it("should normalize type, tranid, and nested Arguments for netsuite_get_record", async () => {
 				const callFn = registeredHandlers.get("tools/call");
+				mockMCPTools.executeTool.mockResolvedValueOnce({
+					data: [{ id: "9028600", type: "itemreceipt" }],
+				});
 				mockMCPTools.executeTool.mockResolvedValueOnce({
 					id: "9028600",
 					tranid: "IR-ZH-202609-000001",
@@ -1071,7 +797,7 @@ describe("MCP Handler Wires", () => {
 
 				const res = await callFn?.({
 					params: {
-						name: "netsuite_inspect_record",
+						name: "netsuite_get_record",
 						arguments: {
 							Arguments: {
 								type: "itemreceipt",
@@ -1083,7 +809,7 @@ describe("MCP Handler Wires", () => {
 
 				expect(mockMCPTools.executeTool).toHaveBeenCalledWith("ns_getRecord", {
 					recordType: "itemreceipt",
-					recordId: "IR-ZH-202609-000001",
+					recordId: "9028600",
 				});
 				expect(res.content[0].text).toContain("NetSuite Record Inspection");
 			});
@@ -1104,17 +830,17 @@ describe("MCP Handler Wires", () => {
 
 				const res = await callFn?.({
 					params: {
-						name: "netsuite_inspect_record",
+						name: "netsuite_get_record",
 						arguments: {
 							recordType: "salesorder",
-							recordId: "12345",
+							id: "12345",
 							format: "compact_json",
 						},
 					},
 				});
 
 				expect(res.isError).toBeUndefined();
-				const parsed = JSON.parse(res.content[0].text);
+				const parsed = JSON.parse(res.content[0].text.split("\n\n---\n")[0]);
 				expect(parsed.recordType).toBe("salesorder");
 				expect(parsed.recordId).toBe("12345");
 				expect(parsed.systemFields.tranid).toBe("SO1002");
@@ -1138,17 +864,17 @@ describe("MCP Handler Wires", () => {
 
 				const res = await callFn?.({
 					params: {
-						name: "netsuite_inspect_record",
+						name: "netsuite_get_record",
 						arguments: {
 							recordType: "salesorder",
-							recordId: "12345",
+							id: "12345",
 							format: "compact_json",
 							linesMode: "summary",
 						},
 					},
 				});
 
-				const parsed = JSON.parse(res.content[0].text);
+				const parsed = JSON.parse(res.content[0].text.split("\n\n---\n")[0]);
 				expect(parsed.sublists).toBeUndefined();
 				expect(parsed.sublistsSummary.item.count).toBe(2);
 			});
@@ -1167,10 +893,10 @@ describe("MCP Handler Wires", () => {
 
 				const res = await callFn?.({
 					params: {
-						name: "netsuite_inspect_record",
+						name: "netsuite_get_record",
 						arguments: {
 							recordType: "salesorder",
-							recordId: "12345",
+							id: "12345",
 							format: "compact_json",
 							maxLines: 2,
 							lineFields: ["item", "quantity", "amount"],
@@ -1178,7 +904,7 @@ describe("MCP Handler Wires", () => {
 					},
 				});
 
-				const parsed = JSON.parse(res.content[0].text);
+				const parsed = JSON.parse(res.content[0].text.split("\n\n---\n")[0]);
 				expect(parsed.sublists.item).toHaveLength(2);
 				expect(parsed.sublists.item[0]).toEqual({
 					item: "100",
@@ -1188,11 +914,11 @@ describe("MCP Handler Wires", () => {
 				expect(parsed.sublists.item[0].rate).toBeUndefined(); // filtered by lineFields
 			});
 
-			it("should auto-resolve non-numeric document number tranid for ns_getRecord", async () => {
+			it("should auto-resolve non-numeric document number tranid for netsuite_get_record", async () => {
 				const callFn = registeredHandlers.get("tools/call");
 
 				mockMCPTools.executeTool.mockResolvedValueOnce({
-					data: [{ id: "55555", recordtype: "salesorder" }],
+					data: [{ id: "55555", type: "salesorder" }],
 				});
 
 				mockMCPTools.executeTool.mockResolvedValueOnce({
@@ -1203,9 +929,10 @@ describe("MCP Handler Wires", () => {
 
 				const res = (await callFn?.({
 					params: {
-						name: "ns_getRecord",
+						name: "netsuite_get_record",
 						arguments: {
-							recordId: "SO9876",
+							recordType: "salesorder",
+							id: "SO9876",
 						},
 					},
 				})) as any;
@@ -1232,9 +959,10 @@ describe("MCP Handler Wires", () => {
 
 				const res = (await callFn?.({
 					params: {
-						name: "ns_getRecord",
+						name: "netsuite_get_record",
 						arguments: {
-							recordId: "NON_EXISTENT_DOC",
+							recordType: "salesorder",
+							id: "NON_EXISTENT_DOC",
 						},
 					},
 				})) as any;
@@ -1244,7 +972,7 @@ describe("MCP Handler Wires", () => {
 				expect(res.content[0].text).toContain("NON_EXISTENT_DOC");
 			});
 
-			it("should transparently fall back to offline catalog when ns_getRecordTypeMetadata fails", async () => {
+			it("should transparently fall back to offline catalog when remote metadata fails", async () => {
 				const callFn = registeredHandlers.get("tools/call");
 
 				mockMCPTools.executeTool.mockRejectedValueOnce(
@@ -1255,8 +983,8 @@ describe("MCP Handler Wires", () => {
 
 				const res = (await callFn?.({
 					params: {
-						name: "ns_getRecordTypeMetadata",
-						arguments: { recordType: "salesorder" },
+						name: "netsuite_get_metadata",
+						arguments: { table: "salesorder" },
 					},
 				})) as any;
 
@@ -1265,7 +993,7 @@ describe("MCP Handler Wires", () => {
 				expect(res.content[0].text).toContain("salesorder");
 			});
 
-			it("should auto-transpile LIMIT in ns_runCustomSuiteQL before execution", async () => {
+			it("should execute SuiteQL query as-is without auto-rewriting", async () => {
 				const callFn = registeredHandlers.get("tools/call");
 
 				mockMCPTools.executeTool.mockResolvedValueOnce({
@@ -1274,9 +1002,9 @@ describe("MCP Handler Wires", () => {
 
 				await callFn?.({
 					params: {
-						name: "ns_runCustomSuiteQL",
+						name: "netsuite_run_suiteql",
 						arguments: {
-							sqlQuery: "SELECT id FROM customer LIMIT 10",
+							sqlQuery: "SELECT id FROM customer FETCH FIRST 10 ROWS ONLY",
 						},
 					},
 				});
@@ -1289,7 +1017,7 @@ describe("MCP Handler Wires", () => {
 				);
 			});
 
-			it("should execute multiple semicolon-separated queries in parallel in ns_runCustomSuiteQL", async () => {
+			it("should execute multiple semicolon-separated queries in parallel in netsuite_run_suiteql", async () => {
 				const callFn = registeredHandlers.get("tools/call");
 
 				mockMCPTools.executeTool.mockImplementation(
@@ -1306,7 +1034,7 @@ describe("MCP Handler Wires", () => {
 
 				const res = (await callFn?.({
 					params: {
-						name: "ns_runCustomSuiteQL",
+						name: "netsuite_run_suiteql",
 						arguments: {
 							sqlQuery:
 								"SELECT id, tranid FROM transaction; SELECT id, entityid FROM customer;",
@@ -1316,15 +1044,14 @@ describe("MCP Handler Wires", () => {
 
 				expect(res.isError).toBeFalsy();
 				expect(res.content[0].text).toContain(
-					"SuiteQL Parallel Execution Results",
+					"Parallel SuiteQL Batch Execution",
 				);
-				expect(res.content[0].text).toContain("2 queries");
 				expect(res.content[0].text).toContain("SO1001");
 				expect(res.content[0].text).toContain("CUST2001");
 				expect(mockMCPTools.executeTool).toHaveBeenCalledTimes(2);
 			});
 
-			it("should execute sqlQueries array in parallel in ns_runCustomSuiteQL", async () => {
+			it("should execute sqlQueries array in parallel in netsuite_run_suiteql", async () => {
 				const callFn = registeredHandlers.get("tools/call");
 
 				mockMCPTools.executeTool.mockImplementation(
@@ -1341,7 +1068,7 @@ describe("MCP Handler Wires", () => {
 
 				const res = (await callFn?.({
 					params: {
-						name: "ns_runCustomSuiteQL",
+						name: "netsuite_run_suiteql",
 						arguments: {
 							sqlQueries: [
 								"SELECT id, itemid FROM item",
@@ -1353,14 +1080,14 @@ describe("MCP Handler Wires", () => {
 
 				expect(res.isError).toBeFalsy();
 				expect(res.content[0].text).toContain(
-					"SuiteQL Parallel Execution Results",
+					"Parallel SuiteQL Batch Execution",
 				);
 				expect(res.content[0].text).toContain("ITEM_A");
 				expect(res.content[0].text).toContain("VEND_B");
 				expect(mockMCPTools.executeTool).toHaveBeenCalledTimes(2);
 			});
 
-			it("should reject more than 10 queries in ns_runCustomSuiteQL", async () => {
+			it("should reject more than 10 queries in netsuite_run_suiteql", async () => {
 				const callFn = registeredHandlers.get("tools/call");
 				const queries = Array.from(
 					{ length: 11 },
@@ -1369,7 +1096,7 @@ describe("MCP Handler Wires", () => {
 
 				const res = (await callFn?.({
 					params: {
-						name: "ns_runCustomSuiteQL",
+						name: "netsuite_run_suiteql",
 						arguments: {
 							sqlQueries: queries,
 						},
@@ -1380,25 +1107,25 @@ describe("MCP Handler Wires", () => {
 				expect(res.content[0].text).toContain("Batch Limit Exceeded");
 			});
 
-			it("should reject empty or missing recordId for ns_getRecord without network call", async () => {
+			it("should reject empty or missing id for netsuite_get_record without network call", async () => {
 				const callFn = registeredHandlers.get("tools/call");
 
 				const res = (await callFn?.({
 					params: {
-						name: "ns_getRecord",
+						name: "netsuite_get_record",
 						arguments: {
 							recordType: "customer",
-							recordId: "",
+							id: "",
 						},
 					},
 				})) as any;
 
 				expect(mockMCPTools.executeTool).not.toHaveBeenCalled();
 				expect(res.isError).toBe(true);
-				expect(res.content[0].text).toContain("Missing Record ID");
+				expect(res.content[0].text).toContain("Invalid arguments");
 			});
 
-			it("should allow negative numeric internal IDs for ns_getRecord", async () => {
+			it("should allow negative numeric internal IDs for netsuite_get_record", async () => {
 				const callFn = registeredHandlers.get("tools/call");
 				mockMCPTools.executeTool.mockResolvedValueOnce({
 					id: "-30",
@@ -1407,10 +1134,10 @@ describe("MCP Handler Wires", () => {
 
 				const res = (await callFn?.({
 					params: {
-						name: "ns_getRecord",
+						name: "netsuite_get_record",
 						arguments: {
 							recordType: "transaction",
-							recordId: "-30",
+							id: "-30",
 						},
 					},
 				})) as any;
@@ -1418,17 +1145,16 @@ describe("MCP Handler Wires", () => {
 				expect(mockMCPTools.executeTool).toHaveBeenCalledWith("ns_getRecord", {
 					recordType: "transaction",
 					recordId: "-30",
-					id: "-30",
 				});
 				expect(res.isError).toBeFalsy();
-				expect(res.content[0].text).toContain('"-30"');
+				expect(res.content[0].text).toContain("-30");
 			});
 
-			it("should preserve raw uncleaned JSON (with nulls and links) for ns_getRecord", async () => {
+			it("should return compact JSON format when requested for netsuite_get_record", async () => {
 				const callFn = registeredHandlers.get("tools/call");
 				const rawPayload = {
 					id: "12345",
-					memo: null,
+					memo: "Important order",
 					emptyField: "",
 					links: [{ rel: "self", href: "https://example.com" }],
 				};
@@ -1436,19 +1162,19 @@ describe("MCP Handler Wires", () => {
 
 				const res = (await callFn?.({
 					params: {
-						name: "ns_getRecord",
+						name: "netsuite_get_record",
 						arguments: {
 							recordType: "salesorder",
-							recordId: "12345",
+							id: "12345",
+							format: "compact_json",
 						},
 					},
 				})) as any;
 
 				expect(res.isError).toBeFalsy();
 				const parsed = JSON.parse(res.content[0].text.split("\n\n")[0]);
-				expect(parsed.memo).toBeNull();
-				expect(parsed.emptyField).toBe("");
-				expect(parsed.links).toBeDefined();
+				expect(parsed.systemFields.memo).toBe("Important order");
+				expect(parsed.systemFields.emptyField).toBeUndefined();
 			});
 
 			it("should handle netsuite_get_system_notes successfully", async () => {
@@ -1526,18 +1252,16 @@ describe("MCP Handler Wires", () => {
 				);
 			});
 
-			it("should handle netsuite_get_error_summary successfully", async () => {
+			it("should handle error summary diagnostics via netsuite_status successfully", async () => {
 				const callFn = registeredHandlers.get("tools/call");
 				const res = await callFn?.({
 					params: {
-						name: "netsuite_get_error_summary",
-						arguments: { days: 7 },
+						name: "netsuite_status",
+						arguments: { includeDiagnostics: true },
 					},
 				});
 
-				expect(res.content[0].text).toContain(
-					"NetSuite MCP 工具调用错误分析与智能优化报告",
-				);
+				expect(res.content[0].text).toContain("NetSuite MCP");
 			});
 
 			it("should execute upload directly in sandbox without confirmation tokens", async () => {

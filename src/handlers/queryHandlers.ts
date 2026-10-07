@@ -1,15 +1,15 @@
 import type { CallToolResult } from "@modelcontextprotocol/server";
 import type { NetSuiteMCPTools } from "../mcp/tools.js";
 import { unwrapMcpContent } from "../utils/metadata.js";
-import { suiteqlTemplateService } from "../utils/suiteqlTemplates.js";
-import {
-	GetQueryTemplateArgsSchema,
-	GetScriptLogsArgsSchema,
-} from "./toolSchemas.js";
+import { GetScriptLogsArgsSchema } from "./toolSchemas.js";
 import { textResult } from "./types.js";
 
 type ToolResponse = CallToolResult;
 
+/**
+ * netsuite_get_script_logs
+ * Query NetSuite SuiteScript execution logs (ScriptNote) with index optimization.
+ */
 export async function handleGetScriptLogs(
 	args: Record<string, unknown>,
 	mcpTools: NetSuiteMCPTools,
@@ -23,13 +23,12 @@ export async function handleGetScriptLogs(
 		type: logType,
 		dateFrom,
 		dateTo,
-		title,
-		detail,
+		keyword,
 		deploymentId,
 		limit,
 	} = parsed.data;
 
-	// Build SELECT with Script info joined for complete visibility (explicit second-level timestamp formatting)
+	// Build SELECT with Script info joined for complete visibility
 	let sql = `SELECT TO_CHAR(sn.date, 'YYYY-MM-DD HH24:MI:SS') AS date, sn.type, sn.title, sn.detail, s.scriptid AS scriptScriptId, s.name AS scriptName FROM ScriptNote AS sn LEFT JOIN Script AS s ON sn.scripttype = s.id`;
 
 	// Build WHERE clauses with OWASP input validation & sanitization
@@ -84,16 +83,21 @@ export async function handleGetScriptLogs(
 		if (!/^\d{4}-\d{2}-\d{2}$/.test(dateTo)) {
 			return textResult("❌ Invalid dateTo format. Expected YYYY-MM-DD.", true);
 		}
-		// Include the full day of dateTo (up to 23:59:59) by checking < dateTo + 1
 		conditions.push(`sn.date < TO_DATE('${dateTo}', 'YYYY-MM-DD') + 1`);
 	}
-	if (title) {
-		const escapedTitle = title.slice(0, 100).replace(/'/g, "''");
+	if (args.title && typeof args.title === "string") {
+		const escapedTitle = args.title.slice(0, 100).replace(/'/g, "''");
 		conditions.push(`UPPER(sn.title) LIKE UPPER('%${escapedTitle}%')`);
 	}
-	if (detail) {
-		const escapedDetail = detail.slice(0, 200).replace(/'/g, "''");
+	if (args.detail && typeof args.detail === "string") {
+		const escapedDetail = args.detail.slice(0, 100).replace(/'/g, "''");
 		conditions.push(`UPPER(sn.detail) LIKE UPPER('%${escapedDetail}%')`);
+	}
+	if (keyword) {
+		const escapedKeyword = keyword.slice(0, 100).replace(/'/g, "''");
+		conditions.push(
+			`(UPPER(sn.title) LIKE UPPER('%${escapedKeyword}%') OR UPPER(sn.detail) LIKE UPPER('%${escapedKeyword}%'))`,
+		);
 	}
 
 	if (conditions.length > 0) {
@@ -107,7 +111,6 @@ export async function handleGetScriptLogs(
 			sqlQuery: sql,
 		});
 
-		// Check if SuiteQL returned a NetSuite-level error JSON payload
 		const parsedResult = unwrapMcpContent(result) as Record<
 			string,
 			unknown
@@ -125,7 +128,7 @@ export async function handleGetScriptLogs(
 					errorMsg.includes("Record 'Script' was not found")
 				) {
 					return textResult(
-						`❌ NetSuite Error: ${errorMsg}\n\n💡 Tip: Accessing script execution logs (ScriptNote table) requires the current NetSuite role to have the 'SuiteScript' (ADMI_CUSTOMSCRIPT) permission with at least 'View' level under Permissions > Setup.`,
+						`❌ NetSuite Error: ${errorMsg}\n\n💡 Tip: Accessing script execution logs requires the role to have 'SuiteScript' (ADMI_CUSTOMSCRIPT) permission.`,
 						true,
 					);
 				}
@@ -134,14 +137,13 @@ export async function handleGetScriptLogs(
 		}
 
 		const data = mcpTools.extractDataArray(result);
-
-		// If errors exist, add structured diagnostic summary inside JSON payload
 		const errors = data.filter(
 			(d) =>
 				typeof d === "object" &&
 				d !== null &&
 				(d.type === "ERROR" || d.type === "EMERGENCY"),
 		);
+
 		let diagnosticSummary: Record<string, unknown> | undefined;
 		const latest = errors[0] as Record<string, unknown> | undefined;
 		if (latest) {
@@ -170,52 +172,4 @@ export async function handleGetScriptLogs(
 		const msg = err instanceof Error ? err.message : String(err);
 		return textResult(`❌ Failed to query script logs: ${msg}`, true);
 	}
-}
-
-export async function handleGetQueryTemplate(
-	args: Record<string, unknown>,
-): Promise<ToolResponse> {
-	const parsed = GetQueryTemplateArgsSchema.safeParse(args);
-	if (!parsed.success) {
-		return textResult(
-			`❌ Invalid arguments: ${parsed.error.issues[0]?.message}`,
-			true,
-		);
-	}
-	const { templateId, category, search } = parsed.data;
-
-	if (templateId) {
-		const tmpl = suiteqlTemplateService.getTemplate(templateId);
-		if (!tmpl) {
-			return textResult(`❌ Template '${templateId}' not found.`, true);
-		}
-
-		let md = `## 💎 SuiteQL Template: ${tmpl.name} (\`${tmpl.id}\`)\n\n`;
-		md += `**Category**: \`${tmpl.category}\`  \n`;
-		md += `**Source**: ${tmpl.officialSource}  \n\n`;
-		md += `> ${tmpl.description}\n\n`;
-		md += `### 📝 SQL Template\n\`\`\`sql\n${tmpl.sqlTemplate}\n\`\`\`\n\n`;
-		md += `### ⚙️ Parameters\n| Parameter | Description |\n|---|---|\n`;
-		for (const [param, desc] of Object.entries(tmpl.params)) {
-			md += `| \`${param}\` | ${desc} |\n`;
-		}
-		md += `\n### 🛡️ SAFE Best Practices\n`;
-		for (const bp of tmpl.bestPractices) {
-			md += `- ${bp}\n`;
-		}
-		return textResult(md);
-	}
-
-	let templates = suiteqlTemplateService.listTemplates(category);
-	if (search) {
-		templates = suiteqlTemplateService.searchTemplates(search);
-	}
-
-	let md = `## 📚 Curated SuiteQL Templates (${templates.length} available)\n\n`;
-	md += `| ID | Name | Category | Description |\n|---|---|---|---|\n`;
-	for (const t of templates) {
-		md += `| \`${t.id}\` | ${t.name} | \`${t.category}\` | ${t.description.slice(0, 70)}... |\n`;
-	}
-	md += `\n💡 Call with \`{ templateId: '...' }\` to retrieve full SQL and parameter guidance.`;
-	return textResult(md);
 }

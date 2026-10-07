@@ -19,7 +19,6 @@ import {
 	maskStringLiterals,
 	SuiteQLValidationError,
 	splitSuiteQLStatements,
-	transpileSuiteQLDialect,
 	unmaskStringLiterals,
 	validateSuiteQL,
 } from "./suiteqlGuard.js";
@@ -87,55 +86,40 @@ describe("SuiteQL, Search & Query Utilities", () => {
 			});
 		});
 
-		describe("transpileSuiteQLDialect", () => {
-			it("should transpile standalone LIMIT to FETCH FIRST ROWS ONLY", () => {
-				const { transpiledSql, changed } = transpileSuiteQLDialect(
+		describe("strict dialect guard (zero implicit transpilation)", () => {
+			it("should reject standalone LIMIT with FETCH FIRST guidance", () => {
+				const res = validateSuiteQL(
 					"SELECT id, tranid FROM transaction WHERE type = 'SalesOrd' LIMIT 10",
 				);
-				expect(changed).toBe(true);
-				expect(transpiledSql).toBe(
-					"SELECT id, tranid FROM transaction WHERE type = 'SalesOrd' FETCH FIRST 10 ROWS ONLY",
-				);
+				expect(res.valid).toBe(false);
+				expect(res.reason).toContain("LIMIT/OFFSET");
+				expect(res.reason).toContain("FETCH FIRST");
 			});
 
-			it("should transpile LIMIT offset, count (MySQL format) to OFFSET ROWS FETCH NEXT ROWS ONLY", () => {
-				const { transpiledSql, changed } = transpileSuiteQLDialect(
-					"SELECT id FROM customer LIMIT 20, 10;",
-				);
-				expect(changed).toBe(true);
-				expect(transpiledSql).toBe(
-					"SELECT id FROM customer OFFSET 20 ROWS FETCH NEXT 10 ROWS ONLY;",
-				);
+			it("should reject LIMIT offset, count (MySQL format)", () => {
+				const res = validateSuiteQL("SELECT id FROM customer LIMIT 20, 10;");
+				expect(res.valid).toBe(false);
+				expect(res.reason).toContain("LIMIT");
 			});
 
-			it("should transpile LIMIT count OFFSET offset to OFFSET ROWS FETCH NEXT ROWS ONLY", () => {
-				const { transpiledSql, changed } = transpileSuiteQLDialect(
-					"SELECT id FROM item LIMIT 50 OFFSET 100",
-				);
-				expect(changed).toBe(true);
-				expect(transpiledSql).toBe(
-					"SELECT id FROM item OFFSET 100 ROWS FETCH NEXT 50 ROWS ONLY",
-				);
+			it("should reject LIMIT count OFFSET offset", () => {
+				const res = validateSuiteQL("SELECT id FROM item LIMIT 50 OFFSET 100");
+				expect(res.valid).toBe(false);
+				expect(res.reason).toContain("LIMIT");
 			});
 
-			it("should ignore LIMIT inside string literals", () => {
-				const { transpiledSql, changed } = transpileSuiteQLDialect(
-					"SELECT id FROM customer WHERE memo = 'credit LIMIT 50' LIMIT 5",
+			it("should ignore LIMIT inside string literals and allow query", () => {
+				const res = validateSuiteQL(
+					"SELECT id, memo FROM customer WHERE memo = 'credit LIMIT 50' FETCH FIRST 5 ROWS ONLY",
 				);
-				expect(changed).toBe(true);
-				expect(transpiledSql).toBe(
-					"SELECT id FROM customer WHERE memo = 'credit LIMIT 50' FETCH FIRST 5 ROWS ONLY",
-				);
+				expect(res.valid).toBe(true);
 			});
 
-			it("should return changed=false when no dialect transpilation needed", () => {
-				const { transpiledSql, changed } = transpileSuiteQLDialect(
-					"SELECT id FROM customer FETCH FIRST 10 ROWS ONLY",
+			it("should accept valid Oracle SuiteQL FETCH FIRST ROWS ONLY syntax", () => {
+				const res = validateSuiteQL(
+					"SELECT id, companyname FROM customer FETCH FIRST 10 ROWS ONLY",
 				);
-				expect(changed).toBe(false);
-				expect(transpiledSql).toBe(
-					"SELECT id FROM customer FETCH FIRST 10 ROWS ONLY",
-				);
+				expect(res.valid).toBe(true);
 			});
 		});
 

@@ -5,11 +5,7 @@ import {
 	recordToolError,
 } from "../telemetry/toolErrorLogger.js";
 import { normalizeStandardArgs } from "../utils/args.js";
-import {
-	cleanRecordPayload,
-	formatMetadataToCompactMarkdown,
-	formatSuiteQLToCompactMarkdown,
-} from "../utils/contextSlimmer.js";
+import { formatSuiteQLToCompactMarkdown } from "../utils/contextSlimmer.js";
 import { buildEnvSuffix, isSandboxAccount } from "../utils/environment.js";
 import {
 	isPermissionError,
@@ -17,95 +13,44 @@ import {
 } from "../utils/errors.js";
 import { createLogger } from "../utils/logger.js";
 import {
-	formatTableCatalogMarkdown,
-	searchSuiteQLCatalog,
-	unwrapMcpContent,
-} from "../utils/metadata.js";
-import {
-	type RecordFieldMeta,
-	recordsReferenceService,
-} from "../utils/recordsReference.js";
-import {
 	formatSuiteQLErrorResponse,
 	splitSuiteQLStatements,
-	transpileSuiteQLDialect,
 } from "../utils/suiteqlGuard.js";
-import { handleGetErrorSummary, handleStatus } from "./authHandlers.js";
-import { handleBatchExecute } from "./batchHandler.js";
+import { handleAuth, handleStatus } from "./authHandlers.js";
 import { handleSuitecloudUpload } from "./deployHandlers.js";
-import { hydrateMetadataIfNeeded } from "./metadataHydrator.js";
+import { handleGetScriptLogs } from "./queryHandlers.js";
 import {
-	handleGetQueryTemplate,
-	handleGetScriptLogs,
-} from "./queryHandlers.js";
-import {
-	appendRecordLink,
-	handleGetRecordLink,
+	handleGetMetadata,
+	handleGetRecord,
 	handleGetSystemNotes,
-	handleInspectRecord,
-	handleNetsuiteSchema,
-	resolveNaturalKeyToInternalId,
 } from "./recordHandlers.js";
-import { handleGetSkill } from "./skillHandler.js";
-import {
-	AUTH_TOOL,
-	LOCAL_TOOLS,
-	LOGOUT_TOOL,
-	STATUS_TOOL,
-} from "./toolSchemas.js";
+import { LOCAL_TOOLS } from "./toolSchemas.js";
 import { type ToolHandlerDeps, textResult } from "./types.js";
 
 export type { ToolHandlerDeps };
 export { textResult };
 
 // ---------------------------------------------------------------------------
-// Tool description & annotation enhancement helpers
+// Tool Annotations & Description Helpers
 // ---------------------------------------------------------------------------
+
+const READ_ONLY_TOOLS = new Set([
+	"netsuite_run_suiteql",
+	"netsuite_get_metadata",
+	"netsuite_get_record",
+	"netsuite_get_script_logs",
+	"netsuite_get_system_notes",
+	"netsuite_status",
+]);
+
+const DESTRUCTIVE_TOOLS = new Set(["netsuite_deploy_script"]);
+
+const IDEMPOTENT_TOOLS = new Set([...READ_ONLY_TOOLS, "netsuite_auth"]);
 
 /**
  * Generate standard MCP tool annotations.
- * - readOnlyHint: Indicates tool produces no side effects or data mutations.
- * - destructiveHint: Indicates tool mutates or deletes data.
- * - idempotentHint: Indicates calling repeatedly with identical arguments produces identical results.
  */
-function getToolAnnotations(name: string): Record<string, boolean> {
-	const READ_ONLY_TOOLS = new Set([
-		"ns_runCustomSuiteQL",
-		"ns_getRecord",
-		"ns_getRecordTypeMetadata",
-		"ns_getSuiteQLMetadata",
-		"ns_runReport",
-		"ns_listAllReports",
-		"ns_listSavedSearches",
-		"ns_runSavedSearch",
-		"ns_getSubsidiaries",
-		"ns_getAccountingBooks",
-		"ns_getAccountingContexts",
-		"ns_getNexusIds",
-		"netsuite_status",
-		"netsuite_get_record_link",
-		"netsuite_get_script_logs",
-		"netsuite_inspect_record",
-		"netsuite_schema",
-		"netsuite_get_query_template",
-		"netsuite_get_system_notes",
-		"netsuite_get_error_summary",
-		"netsuite_get_skill",
-	]);
-
-	const DESTRUCTIVE_TOOLS = new Set([
-		"ns_createRecord",
-		"ns_updateRecord",
-		"netsuite_suitecloud_upload",
-		"netsuite_logout",
-	]);
-
-	const IDEMPOTENT_TOOLS = new Set([
-		...READ_ONLY_TOOLS,
-		"netsuite_refresh_cache",
-		"netsuite_logout",
-	]);
-
+export function getToolAnnotations(name: string): Record<string, boolean> {
 	const isReadOnly = READ_ONLY_TOOLS.has(name);
 	const isDestructive = DESTRUCTIVE_TOOLS.has(name);
 	const isIdempotent = IDEMPOTENT_TOOLS.has(name);
@@ -117,7 +62,7 @@ function getToolAnnotations(name: string): Record<string, boolean> {
 	};
 }
 
-/** Append suffix to a tool's description string and attach MCP annotations. */
+/** Append environment suffix and attach standard MCP annotations. */
 function enhanceDescription(
 	tool: Record<string, unknown>,
 	suffix: string,
@@ -132,94 +77,10 @@ function enhanceDescription(
 	};
 }
 
-/**
- * Enhance fetched NetSuite tool descriptions with precise boundaries and parameter-level guidance.
- */
-function enhanceToolDescriptions(
-	tools: Array<Record<string, unknown>>,
-): Array<Record<string, unknown>> {
-	return tools.map((t) => {
-		const toolName = (t.name as string) || "";
-		const annotations = getToolAnnotations(toolName);
-		const enhanced: Record<string, unknown> = { ...t, annotations };
-
-		if (t.name === "ns_runCustomSuiteQL") {
-			enhanced.description =
-				"Execute NetSuite SuiteQL queries and return tabular results. Supports single queries or multiple parallel queries separated by ';' or in 'sqlQueries'.";
-			if (enhanced.inputSchema && typeof enhanced.inputSchema === "object") {
-				const schema = { ...(enhanced.inputSchema as Record<string, unknown>) };
-				if (schema.properties && typeof schema.properties === "object") {
-					const props = { ...(schema.properties as Record<string, unknown>) };
-					if (props.sqlQuery && typeof props.sqlQuery === "object") {
-						props.sqlQuery = {
-							...(props.sqlQuery as Record<string, unknown>),
-							description:
-								"The SuiteQL query string to execute. Single statement or multiple statements separated by ';' to execute in parallel.",
-						};
-					}
-					props.sqlQueries = {
-						type: "array",
-						items: { type: "string" },
-						description:
-							"Optional array of SuiteQL query strings to execute concurrently in parallel (max 10).",
-					};
-					schema.properties = props;
-				}
-				enhanced.inputSchema = schema;
-			}
-			return enhanced;
-		}
-
-		if (t.name === "ns_getRecord") {
-			enhanced.description =
-				"Retrieve NetSuite record JSON by internal numeric ID or document number (tranid). Returns cleaned payload with empty fields pruned.";
-			return enhanced;
-		}
-
-		if (t.name === "ns_getSuiteQLMetadata") {
-			enhanced.description =
-				"Inspect NetSuite database table schema, column names, and data types for SuiteQL.";
-			if (enhanced.inputSchema && typeof enhanced.inputSchema === "object") {
-				const schema = { ...(enhanced.inputSchema as Record<string, unknown>) };
-				const props = {
-					...((schema.properties as Record<string, unknown>) || {}),
-				};
-				props.keyword = {
-					type: "string",
-					description:
-						"Optional search keyword to discover available NetSuite SuiteQL tables across business domains.",
-				};
-				schema.properties = props;
-				enhanced.inputSchema = schema;
-			}
-			return enhanced;
-		}
-
-		if (t.name === "ns_getRecordTypeMetadata") {
-			enhanced.description =
-				"Fetch record type field metadata, tenant custom fields (custbody_*, custcol_*), and standard field definitions.";
-			return enhanced;
-		}
-
-		return enhanced;
-	});
-}
-
-/**
- * Interactive web-browser app tools to prune in headless agent environments.
- */
-const PRUNED_TOOLS = new Set([
-	"ns_prompt_library_app",
-	"ns_selector_app",
-	"ns_report_filters_app",
-	"ns_getAccountingContexts",
-	"ns_getNexusIds",
-]);
-
 const telemetryLogger = createLogger("telemetry");
 
 // ---------------------------------------------------------------------------
-// Handler Registration
+// Handler Registration (8 Authoritative Tools)
 // ---------------------------------------------------------------------------
 
 export function registerToolHandlers(deps: ToolHandlerDeps): void {
@@ -243,75 +104,11 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
 		}
 		const envSuffix = buildEnvSuffix(accountId ?? null);
 
-		// Unauthenticated: only expose authentication, logout and status
-		if (!isAuthenticated) {
-			return {
-				tools: [AUTH_TOOL, LOGOUT_TOOL, STATUS_TOOL].map((t) =>
-					enhanceDescription(
-						t as unknown as Record<string, unknown>,
-						envSuffix,
-					),
-				) as unknown as Tool[],
-			};
-		}
-
-		// Authenticated: fetch remote tools + merge local tools
-		const listStartTime = Date.now();
-		let remoteTools: unknown[] = [];
-		try {
-			remoteTools = await mcpTools.fetchTools();
-		} catch (error: unknown) {
-			const message = error instanceof Error ? error.message : String(error);
-			recordToolError({
-				tool: "tools/list",
-				accountId,
-				environment: accountId
-					? isSandboxAccount(accountId)
-						? "Sandbox"
-						: "Production"
-					: "Unknown",
-				durationMs: Date.now() - listStartTime,
-				category: "NETWORK_OR_TIMEOUT",
-				errorMessage: `Failed to fetch tools from NetSuite API: ${message}`,
-				parameters: {},
-			});
-			return {
-				tools: [...LOCAL_TOOLS].map((t) =>
-					enhanceDescription(
-						t as unknown as Record<string, unknown>,
-						envSuffix,
-					),
-				) as unknown as Tool[],
-			};
-		}
-
-		const isSandbox = accountId ? isSandboxAccount(accountId) : false;
-
-		const filteredRemote = (remoteTools as Array<Record<string, unknown>>)
-			.filter((t) => typeof t.name === "string" && !PRUNED_TOOLS.has(t.name))
-			.filter(
-				(t) =>
-					!LOCAL_TOOLS.some((local) => local.name === t.name) &&
-					t.name !== "netsuite_authenticate",
-			)
-			.filter((t) => {
-				if (
-					!isSandbox &&
-					(t.name === "ns_createRecord" || t.name === "ns_updateRecord")
-				) {
-					return false;
-				}
-				return true;
-			});
-
-		const enhancedRemote = enhanceToolDescriptions(filteredRemote);
-
-		const allTools = [...LOCAL_TOOLS, ...enhancedRemote].map((t) =>
-			enhanceDescription(t as unknown as Record<string, unknown>, envSuffix),
-		);
-
+		// Expose exactly the 8 Authoritative Tools, perfectly annotated
 		return {
-			tools: allTools as unknown as Tool[],
+			tools: LOCAL_TOOLS.map((t) =>
+				enhanceDescription(t as unknown as Record<string, unknown>, envSuffix),
+			) as unknown as Tool[],
 		};
 	});
 
@@ -350,7 +147,7 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
 			res: CallToolResult,
 			errorStack?: string,
 		): Promise<CallToolResult> => {
-			if (res.isError && name !== "netsuite_get_error_summary") {
+			if (res.isError) {
 				let currentAccountId: string | undefined;
 				let currentEnv: "Sandbox" | "Production" | "Unknown" = "Unknown";
 				try {
@@ -408,186 +205,83 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
 
 		try {
 			const result = await (async (): Promise<CallToolResult> => {
-				// --- Tools that do NOT require authentication ---
-				if (name === "netsuite_authenticate") {
-					return await handleAuthentication(safeArgs);
-				}
-				if (name === "netsuite_logout") {
-					return await handleLogout();
-				}
-				if (name === "netsuite_status") {
-					return await handleStatus(oauthManager);
-				}
-				if (name === "netsuite_get_error_summary") {
-					return await handleGetErrorSummary(safeArgs);
+				// 1. netsuite_auth — Login, Logout & Cache Refresh
+				if (name === "netsuite_auth" || name === "netsuite_authenticate") {
+					return await handleAuth(
+						safeArgs,
+						handleAuthentication,
+						handleLogout,
+						handleCacheRefresh,
+					);
 				}
 
-				// --- All remaining tools require authentication ---
+				// 2. netsuite_status — Comprehensive diagnostic health dashboard
+				if (name === "netsuite_status") {
+					return await handleStatus(oauthManager, safeArgs);
+				}
+
+				// All other tools require an authenticated NetSuite session
 				const isAuthenticated = await oauthManager.hasValidSession();
 				if (!isAuthenticated) {
 					return textResult(
-						"❌ Not authenticated. Please use the netsuite_authenticate tool first.",
+						"❌ Not authenticated. Please use the 'netsuite_auth' tool to log in first.",
 						true,
 					);
 				}
 
-				// --- Local tools (authenticated) ---
-				if (name === "netsuite_refresh_cache") {
-					return await handleCacheRefresh(safeArgs);
-				}
-				if (name === "netsuite_get_record_link") {
-					return await handleGetRecordLink(
-						safeArgs,
-						oauthManager,
-						resolveCustomRecordRectype,
-					);
-				}
-				if (name === "netsuite_batch_execute") {
-					return await handleBatchExecute(safeArgs, deps, reportProgress);
-				}
-				if (name === "netsuite_get_script_logs") {
-					return await handleGetScriptLogs(safeArgs, mcpTools);
-				}
-				if (name === "netsuite_inspect_record") {
-					return await handleInspectRecord(safeArgs, mcpTools);
-				}
-				if (name === "netsuite_schema") {
-					return await handleNetsuiteSchema(safeArgs, mcpTools);
-				}
-				if (name === "netsuite_get_query_template") {
-					return await handleGetQueryTemplate(safeArgs);
-				}
-				if (name === "netsuite_get_system_notes") {
-					return await handleGetSystemNotes(safeArgs, mcpTools);
-				}
-				if (name === "netsuite_suitecloud_upload") {
-					return await handleSuitecloudUpload(
-						safeArgs,
-						oauthManager,
-						deps.projectRoot,
-					);
-				}
-				if (name === "netsuite_get_skill") {
-					return await handleGetSkill(safeArgs, deps.projectRoot);
-				}
-
-				// --- Fast metadata discovery for ns_getSuiteQLMetadata without recordType ---
-				if (name === "ns_getSuiteQLMetadata") {
-					const recordTypeRaw = safeArgs.recordType || safeArgs.tableName;
-					if (!recordTypeRaw) {
-						const keywordRaw = safeArgs.keyword || safeArgs.search;
-						const keyword =
-							typeof keywordRaw === "string" ? keywordRaw.trim() : undefined;
-						const entries = searchSuiteQLCatalog(keyword);
-						return textResult(formatTableCatalogMarkdown(entries, keyword));
-					}
-				}
-
-				// --- Defense for interactive _app tools in headless/coding environment ---
-				if (
-					name === "ns_prompt_library_app" ||
-					name === "ns_selector_app" ||
-					name === "ns_report_filters_app"
-				) {
-					return textResult(
-						`⛔ [Interactive App Unsupported] The tool '${name}' is an interactive UI widget designed strictly for NetSuite web browser environments. It is not supported in headless agent environments to prevent task hanging. Please use 'ns_runCustomSuiteQL' or 'netsuite_inspect_record' instead.`,
-						true,
-					);
-				}
-
-				// --- Dual-Gate Defense: Strictly block write operations in production ---
-				if (name === "ns_createRecord" || name === "ns_updateRecord") {
-					const accountId =
-						(await oauthManager.getAccountId()) ||
-						process.env.NETSUITE_ACCOUNT_ID;
-					if (!accountId || !isSandboxAccount(accountId)) {
-						return textResult(
-							`⛔ [Production Safety Violation] Operation '${name}' is strictly blocked in Production environment (${accountId || "unknown"}). ` +
-								`Record create and update operations are only permitted in Sandbox / Test environments (accounts containing '_SB' or 'TSTDRV').`,
-							true,
-						);
-					}
-				}
-
-				// --- Explicit validation for ns_getRecord: numeric internal ID or auto-resolve natural key ---
-				if (name === "ns_getRecord") {
-					const rawRecordId = String(
-						safeArgs.recordId ?? safeArgs.id ?? "",
-					).trim();
-					if (!rawRecordId) {
-						return textResult(
-							`❌ [Missing Record ID] 'ns_getRecord' requires a numeric internal ID (e.g., '12345') or document number (tranid).\n` +
-								`👉 Immediate Action: Provide a valid ID, or use 'ns_runCustomSuiteQL' to query records.`,
-							true,
-						);
-					}
-					if (!/^-?\d+$/.test(rawRecordId)) {
-						const recType = safeArgs.recordType
-							? String(safeArgs.recordType).toLowerCase()
-							: undefined;
-						const resolved = await resolveNaturalKeyToInternalId(
-							recType,
-							rawRecordId,
-							mcpTools,
-						);
-						if (resolved?.id) {
-							safeArgs.recordId = resolved.id;
-							safeArgs.id = resolved.id;
-							if (resolved.recordType && !safeArgs.recordType) {
-								safeArgs.recordType = resolved.recordType;
-							}
-						} else {
-							return textResult(
-								`❌ [Record Not Found] Could not find any record with document number/name '${rawRecordId}'.\n` +
-									`👉 Please check the document number or use 'ns_runCustomSuiteQL' to search across records.`,
-								true,
-							);
-						}
-					}
-				}
-
-				// --- Auto-transpile MySQL/Postgres dialects and parallel execution in ns_runCustomSuiteQL ---
-				if (name === "ns_runCustomSuiteQL") {
-					let queriesToRun: string[] = [];
-
-					if (
-						Array.isArray(safeArgs.sqlQueries) &&
-						safeArgs.sqlQueries.length > 0
-					) {
+				// 3. netsuite_run_suiteql — Single authoritative SuiteQL execution tool
+				if (name === "netsuite_run_suiteql" || name === "ns_runCustomSuiteQL") {
+					const rawQuery = (safeArgs.sqlQuery ||
+						safeArgs.query ||
+						safeArgs.sql ||
+						"") as string;
+					let queriesToRun = splitSuiteQLStatements(rawQuery);
+					if (queriesToRun.length === 0 && Array.isArray(safeArgs.sqlQueries)) {
 						queriesToRun = (safeArgs.sqlQueries as unknown[])
 							.filter(
 								(q): q is string =>
 									typeof q === "string" && q.trim().length > 0,
 							)
 							.map((q) => q.trim());
-					} else if (
-						Array.isArray(safeArgs.queries) &&
-						safeArgs.queries.length > 0
-					) {
-						queriesToRun = (safeArgs.queries as unknown[])
-							.filter(
-								(q): q is string =>
-									typeof q === "string" && q.trim().length > 0,
-							)
-							.map((q) => q.trim());
-					} else {
-						const rawQuery = (safeArgs.sqlQuery ||
-							safeArgs.query ||
-							safeArgs.sql ||
-							"") as string;
-						queriesToRun = splitSuiteQLStatements(rawQuery);
 					}
 
-					if (queriesToRun.length > 10) {
+					if (queriesToRun.length === 0) {
 						return textResult(
-							`❌ [Batch Limit Exceeded] A maximum of 10 queries can be executed in parallel (received ${queriesToRun.length}). Please split into smaller batches.`,
+							"❌ 'sqlQuery' parameter is required and cannot be empty.",
 							true,
 						);
 					}
 
-					// Parallel execution branch when 2 or more queries are present
+					if (queriesToRun.length > 10) {
+						return textResult(
+							`❌ [Batch Limit Exceeded] A maximum of 10 queries can be executed in parallel (received ${queriesToRun.length}).`,
+							true,
+						);
+					}
+
+					// Custom record rectype resolution if provided
+					if (Array.isArray(safeArgs.customRecordMappings)) {
+						for (const mapping of safeArgs.customRecordMappings as Array<{
+							rectype: unknown;
+							scriptId?: string;
+						}>) {
+							if (mapping && typeof mapping.rectype === "string") {
+								const resolvedId = await resolveCustomRecordRectype(
+									mapping.rectype,
+								);
+								if (resolvedId !== null && resolvedId !== undefined) {
+									mapping.rectype = resolvedId;
+								} else {
+									throw new Error(
+										`Could not resolve rectype ID for custom record: ${mapping.rectype}`,
+									);
+								}
+							}
+						}
+					}
+
+					// Parallel multi-query execution
 					if (queriesToRun.length > 1) {
-						const parallelStartTime = Date.now();
 						await reportProgress(
 							1,
 							queriesToRun.length + 1,
@@ -596,12 +290,10 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
 
 						const parallelResults = await Promise.all(
 							queriesToRun.map(async (queryStr, index) => {
-								const queryStart = Date.now();
 								try {
-									const { transpiledSql } = transpileSuiteQLDialect(queryStr);
 									const queryRes = await mcpTools.executeTool(
 										"ns_runCustomSuiteQL",
-										{ sqlQuery: transpiledSql },
+										{ sqlQuery: queryStr },
 									);
 									const formatted = formatSuiteQLToCompactMarkdown(queryRes);
 									return {
@@ -609,7 +301,6 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
 										query: queryStr,
 										success: true,
 										formatted,
-										durationMs: Date.now() - queryStart,
 									};
 								} catch (err: unknown) {
 									const errorMsg =
@@ -619,315 +310,154 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
 										query: queryStr,
 										success: false,
 										error: formatSuiteQLErrorResponse(errorMsg, queryStr),
-										durationMs: Date.now() - queryStart,
 									};
 								}
 							}),
 						);
 
-						const totalDurationMs = Date.now() - parallelStartTime;
-						const successCount = parallelResults.filter(
-							(r) => r.success,
-						).length;
-						const failCount = parallelResults.length - successCount;
-
-						let combinedMarkdown = `## 📊 SuiteQL Parallel Execution Results (${parallelResults.length} queries, ${successCount} succeeded${failCount > 0 ? `, ${failCount} failed` : ""}, total ${totalDurationMs}ms)\n\n`;
-
+						let combinedMarkdown = `## 📊 Parallel SuiteQL Batch Execution (${queriesToRun.length} Queries)\n\n`;
+						let failCount = 0;
 						for (const res of parallelResults) {
-							combinedMarkdown += `### 🔹 Query ${res.index}: \`${res.query}\` (${res.durationMs}ms)\n\n`;
+							combinedMarkdown += `### 🔹 Query #${res.index}\n\`\`\`sql\n${res.query}\n\`\`\`\n\n`;
 							if (res.success) {
 								combinedMarkdown += `${res.formatted}\n\n`;
 							} else {
+								failCount++;
 								combinedMarkdown += `${res.error}\n\n`;
 							}
 						}
-
 						return textResult(
 							combinedMarkdown.trim(),
 							failCount === parallelResults.length,
 						);
 					}
 
-					// Single query fallback: assign single statement and transpile
-					if (queriesToRun.length === 1 && queriesToRun[0]) {
-						if (safeArgs.sqlQuery !== undefined) {
-							safeArgs.sqlQuery = queriesToRun[0];
-						} else if (safeArgs.sql !== undefined) {
-							safeArgs.sql = queriesToRun[0];
-						} else if (safeArgs.query !== undefined) {
-							safeArgs.query = queriesToRun[0];
-						} else {
-							safeArgs.sqlQuery = queriesToRun[0];
-						}
-					}
-					const rawQuery = (safeArgs.sqlQuery ||
-						safeArgs.query ||
-						safeArgs.sql ||
-						"") as string;
-					const { transpiledSql, changed } = transpileSuiteQLDialect(rawQuery);
-					if (changed) {
-						if (safeArgs.sqlQuery !== undefined) {
-							safeArgs.sqlQuery = transpiledSql;
-						} else if (safeArgs.sql !== undefined) {
-							safeArgs.sql = transpiledSql;
-						} else if (safeArgs.query !== undefined) {
-							safeArgs.query = transpiledSql;
-						} else {
-							safeArgs.sqlQuery = transpiledSql;
-						}
-					}
-				}
-
-				// --- Proxy to NetSuite MCP API ---
-				let result: unknown;
-				let executeError: unknown = null;
-
-				if (name === "ns_runCustomSuiteQL") {
+					// Single query execution (faithful execution, no auto-rewriting)
 					await reportProgress(
 						1,
-						3,
-						"Validating & optimizing SuiteQL query...",
+						2,
+						"Executing SuiteQL query against NetSuite...",
 					);
+					const queryParams: Record<string, unknown> = {
+						sqlQuery: queriesToRun[0],
+					};
+					if (safeArgs.customRecordMappings) {
+						queryParams.customRecordMappings = safeArgs.customRecordMappings;
+					}
+					const queryRes = await mcpTools.executeTool(
+						"ns_runCustomSuiteQL",
+						queryParams,
+					);
+					return textResult(formatSuiteQLToCompactMarkdown(queryRes));
 				}
 
-				try {
-					if (name === "ns_runCustomSuiteQL") {
-						await reportProgress(
-							2,
-							3,
-							"Executing SuiteQL query against NetSuite...",
-						);
-					}
-					result = await mcpTools.executeTool(name, safeArgs);
-					if (name === "ns_runCustomSuiteQL") {
-						await reportProgress(
-							3,
-							3,
-							"Formatting & slimming response payload...",
-						);
-					}
-				} catch (err: unknown) {
-					if (
-						name === "ns_getRecordTypeMetadata" ||
-						name === "ns_getSuiteQLMetadata"
-					) {
-						executeError = err;
-					} else {
-						throw err;
-					}
-				}
-
+				// 4. netsuite_get_metadata — Single authoritative table & schema reconnaissance
 				if (
+					name === "netsuite_get_metadata" ||
+					name === "ns_getSuiteQLMetadata" ||
 					name === "ns_getRecordTypeMetadata" ||
-					name === "ns_getSuiteQLMetadata"
+					name === "netsuite_schema"
 				) {
-					const recordTypeRaw = safeArgs.recordType || safeArgs.tableName;
-					const hydratedResult = await hydrateMetadataIfNeeded(
-						name,
-						recordTypeRaw,
-						result ?? null,
+					const tableParam =
+						safeArgs.table ||
+						safeArgs.recordType ||
+						safeArgs.tableName ||
+						safeArgs.table_name ||
+						"";
+					return await handleGetMetadata(
+						{ ...safeArgs, table: tableParam },
 						mcpTools,
-						resolveCustomRecordRectype,
 					);
-
-					if (hydratedResult) {
-						const parsed = unwrapMcpContent(hydratedResult) as Record<
-							string,
-							unknown
-						> | null;
-
-						if (
-							parsed &&
-							typeof parsed === "object" &&
-							parsed.success === false
-						) {
-							const errorMsg =
-								parsed.error || parsed.message || JSON.stringify(parsed);
-							if (isPermissionError(String(errorMsg))) {
-								return textResult(
-									`❌ NetSuite Permission Error: ${errorMsg}\n\n${PERMISSION_HARD_STOP_ADVICE.trim()}`,
-									true,
-								);
-							}
-							if (name === "ns_getSuiteQLMetadata") {
-								return textResult(
-									formatSuiteQLErrorResponse(String(errorMsg)),
-									true,
-								);
-							}
-							if (name === "ns_getRecordTypeMetadata") {
-								const recType = String(
-									safeArgs.recordType || safeArgs.tableName || "",
-								)
-									.toLowerCase()
-									.trim();
-								const offlineDef =
-									recordsReferenceService.getRecordDefinition(recType);
-								if (offlineDef?.found && offlineDef.fields.length > 0) {
-									const rows = offlineDef.fields
-										.map(
-											(f: RecordFieldMeta) =>
-												`| \`${f.internalId}\` | ${f.type} | ${f.label} | ${f.required ? "Yes" : "No"} |`,
-										)
-										.join("\n");
-									const md =
-										`### NetSuite Record Metadata: \`${recType}\` (Offline Catalog)\n\n` +
-										`*Note: Retrieved from authoritative offline standard record definitions because remote REST endpoint returned error.*\n\n` +
-										`| Field ID | Type | Label | Required |\n| :--- | :--- | :--- | :--- |\n` +
-										rows;
-									return textResult(md);
-								}
-							}
-							return textResult(`❌ NetSuite Error: ${errorMsg}`, true);
-						}
-
-						const compactMarkdown =
-							formatMetadataToCompactMarkdown(hydratedResult);
-						return textResult(compactMarkdown);
-					}
-
-					if (executeError) {
-						const errMsg =
-							executeError instanceof Error
-								? executeError.message
-								: String(executeError);
-						if (name === "ns_getSuiteQLMetadata") {
-							return textResult(formatSuiteQLErrorResponse(errMsg), true);
-						}
-						if (name === "ns_getRecordTypeMetadata") {
-							const recType = String(
-								safeArgs.recordType || safeArgs.tableName || "",
-							)
-								.toLowerCase()
-								.trim();
-							const offlineDef =
-								recordsReferenceService.getRecordDefinition(recType);
-							if (offlineDef?.found && offlineDef.fields.length > 0) {
-								const rows = offlineDef.fields
-									.map(
-										(f: RecordFieldMeta) =>
-											`| \`${f.internalId}\` | ${f.type} | ${f.label} | ${f.required ? "Yes" : "No"} |`,
-									)
-									.join("\n");
-								const md =
-									`### NetSuite Record Metadata: \`${recType}\` (Offline Catalog)\n\n` +
-									`*Note: Retrieved from authoritative offline standard record definitions because remote REST endpoint returned error.*\n\n` +
-									`| Field ID | Type | Label | Required |\n| :--- | :--- | :--- | :--- |\n` +
-									rows;
-								return textResult(md);
-							}
-						}
-						throw executeError;
-					}
-
-					const compactMarkdown = formatMetadataToCompactMarkdown(result);
-					return textResult(compactMarkdown);
 				}
 
-				// Check if the record tool call returned a NetSuite-level error
-				const parsedRecordResult = unwrapMcpContent(result) as Record<
-					string,
-					unknown
-				> | null;
-
+				// 5. netsuite_get_record — Single authoritative record fetch & inspection
 				if (
-					parsedRecordResult &&
-					typeof parsedRecordResult === "object" &&
-					parsedRecordResult.success === false
-				) {
-					const errorMsg = String(
-						parsedRecordResult.error ||
-							parsedRecordResult.message ||
-							JSON.stringify(parsedRecordResult),
-					);
-					if (isPermissionError(errorMsg)) {
-						return textResult(
-							`❌ NetSuite Permission Error: ${errorMsg}\n\n${PERMISSION_HARD_STOP_ADVICE.trim()}`,
-							true,
-						);
-					}
-					if (name === "ns_runCustomSuiteQL") {
-						const sqlQuery = (safeArgs.sqlQuery ||
-							safeArgs.query ||
-							safeArgs.sql ||
-							"") as string;
-						return textResult(
-							formatSuiteQLErrorResponse(errorMsg, sqlQuery),
-							true,
-						);
-					}
-					const guidance =
-						"\n\n💡 [Self-Healing Action]: Call `ns_getRecordTypeMetadata` to check schema constraints and valid field IDs.";
-					return textResult(`❌ NetSuite Error: ${errorMsg}${guidance}`, true);
-				}
-
-				if (name === "ns_runCustomSuiteQL") {
-					return textResult(formatSuiteQLToCompactMarkdown(result));
-				}
-
-				if (name === "ns_createRecord" || name === "ns_updateRecord") {
-					result = cleanRecordPayload(result);
-				}
-
-				let responseText =
-					typeof result === "string" ? result : JSON.stringify(result, null, 2);
-
-				// Auto-append UI deep link for record operations
-				if (
+					name === "netsuite_get_record" ||
 					name === "ns_getRecord" ||
-					name === "ns_createRecord" ||
-					name === "ns_updateRecord"
+					name === "netsuite_inspect_record"
 				) {
-					responseText = await appendRecordLink(
-						responseText,
-						safeArgs,
-						result,
+					const recordTypeParam = (safeArgs.recordType ||
+						safeArgs.type ||
+						"") as string;
+					const idParam = (safeArgs.id ||
+						safeArgs.recordId ||
+						safeArgs.tranid ||
+						"") as string;
+					return await handleGetRecord(
+						{ ...safeArgs, recordType: recordTypeParam, id: idParam },
+						mcpTools,
 						oauthManager,
 						resolveCustomRecordRectype,
 					);
 				}
 
-				return textResult(responseText);
+				// 6. netsuite_get_script_logs — SuiteScript logs debugging
+				if (name === "netsuite_get_script_logs") {
+					return await handleGetScriptLogs(safeArgs, mcpTools);
+				}
+
+				// 7. netsuite_get_system_notes — Standalone audit trail (Pitfall 11)
+				if (name === "netsuite_get_system_notes") {
+					return await handleGetSystemNotes(safeArgs, mcpTools);
+				}
+
+				// 8. netsuite_deploy_script — SuiteCloud deployment with syntax pre-flight
+				if (
+					name === "netsuite_deploy_script" ||
+					name === "netsuite_suitecloud_upload"
+				) {
+					return await handleSuitecloudUpload(
+						safeArgs,
+						oauthManager,
+						deps.projectRoot,
+					);
+				}
+
+				// Unknown tool rejection
+				return textResult(
+					`❌ Unknown tool: '${name}'. Available tools: ${LOCAL_TOOLS.map((t) => t.name).join(", ")}`,
+					true,
+				);
 			})();
 
 			return await recordErrorIfPresent(result);
 		} catch (error: unknown) {
-			// Let McpError propagate directly to the MCP SDK
 			if (error instanceof ProtocolError) {
 				throw error;
 			}
-			// All other errors: return as tool-level error response
 			const message = error instanceof Error ? error.message : String(error);
 			const stack = error instanceof Error ? error.stack : undefined;
-			let guidance = "";
-			let finalRes: CallToolResult;
+
 			if (isPermissionError(message)) {
-				// DO NOT attach self-healing guidance on permission errors
-				if (!message.includes("PERMISSION DENIED — HARD STOP REQUIRED")) {
-					guidance = `\n\n${PERMISSION_HARD_STOP_ADVICE.trim()}`;
-				}
-				finalRes = textResult(`❌ Error: ${message}${guidance}`, true);
-			} else if (name === "ns_runCustomSuiteQL") {
+				const guidance = message.includes(
+					"PERMISSION DENIED — HARD STOP REQUIRED",
+				)
+					? ""
+					: `\n\n${PERMISSION_HARD_STOP_ADVICE.trim()}`;
+				return await recordErrorIfPresent(
+					textResult(
+						`❌ NetSuite Permission Error: ${message}${guidance}`,
+						true,
+					),
+					stack,
+				);
+			}
+
+			if (name === "netsuite_run_suiteql" || name === "ns_runCustomSuiteQL") {
 				const sqlQuery = (safeArgs.sqlQuery ||
 					safeArgs.query ||
 					safeArgs.sql ||
 					"") as string;
-				finalRes = textResult(
-					formatSuiteQLErrorResponse(message, sqlQuery),
-					true,
+				return await recordErrorIfPresent(
+					textResult(formatSuiteQLErrorResponse(message, sqlQuery), true),
+					stack,
 				);
-			} else if (
-				name === "ns_getRecord" ||
-				name === "ns_createRecord" ||
-				name === "ns_updateRecord"
-			) {
-				guidance =
-					"\n\n💡 [Self-Healing Action]: Call `ns_getRecordTypeMetadata` to check schema constraints and valid field IDs.";
-				finalRes = textResult(`❌ Error: ${message}${guidance}`, true);
-			} else {
-				finalRes = textResult(`❌ Error: ${message}`, true);
 			}
-			return await recordErrorIfPresent(finalRes, stack);
+
+			return await recordErrorIfPresent(
+				textResult(`❌ Error: ${message}`, true),
+				stack,
+			);
 		}
 	});
 }

@@ -50,20 +50,15 @@ const configPath = path.join(
 
 const WRITE_TOOLS_TABLE_SANDBOX = `| Tool | Permissions & Behavior |
 |:---|:---|
-| \`ns_createRecord\` | Create a new record (**Sandbox only**) |
-| \`ns_updateRecord\` | Update an existing record (**Sandbox only**) |
-| \`netsuite_suitecloud_upload\` | Deploy code via SuiteCloud CLI (simplified card confirmation) |`;
+| \`netsuite_deploy_script\` | Deploy SuiteScript code via SuiteCloud CLI (simplified card confirmation) |`;
 
-const WRITE_TOOLS_TABLE_PRODUCTION = `> 🔒 **Production Safety Guard**: Mutation tools (\`ns_createRecord\`, \`ns_updateRecord\`) are strictly blocked in Production. Code deployment requires interactive card confirmation.`;
+const WRITE_TOOLS_TABLE_PRODUCTION = `> 🔒 **Production Safety Guard**: Code deployment to Production requires explicit confirmation.`;
 
 const WRITE_OPS_SECTION_SANDBOX = `### Simplified File Upload & Code Deployment (✅ Sandbox Enabled)
-1. **Record Mutations**: Inspect schema via \`ns_getRecordTypeMetadata\` ➔ Build valid JSON ➔ Execute \`ns_createRecord\` or \`ns_updateRecord\`.
-2. **File Upload Card Protocol**: When deploying code, display an interactive confirmation card (\`ask_question\`) showing only the file's absolute path, with choices "接受" and "拒绝". Call \`netsuite_suitecloud_upload\` directly upon acceptance.`;
+- **File Upload Card Protocol**: When deploying code, display an interactive confirmation card (\`ask_question\`) showing only the file's absolute path, with choices "接受" and "拒绝". Call \`netsuite_deploy_script\` directly upon acceptance.`;
 
 const WRITE_OPS_SECTION_PRODUCTION = `### Simplified File Upload & Code Deployment (🔒 Production Read-Only)
-> [!WARNING]
-> Record mutations are strictly prohibited in Production.
-- **File Upload Card Protocol**: When uploading code to Production, display an interactive confirmation card (\`ask_question\`) showing only the file's absolute path, with choices "接受" and "拒绝". Call \`netsuite_suitecloud_upload\` with \`allowProduction: true\` directly upon acceptance.`;
+- **File Upload Card Protocol**: When uploading code to Production, display an interactive confirmation card (\`ask_question\`) showing only the file's absolute path, with choices "接受" and "拒绝". Call \`netsuite_deploy_script\` with \`allowProduction: true\` directly upon acceptance.`;
 
 // ---------------------------------------------------------------------------
 // Helper: Variable Interpolator
@@ -234,7 +229,7 @@ export function runSync({ dryRun = false, shouldPush = false } = {}) {
 
 						if (hasChanges) {
 							execSync(
-								'git commit -m "docs(agents): 同步官方工具优先标准、SuiteQL方言自愈转译与自然键自愈规约"',
+								'git commit -m "docs(agents): 同步8大权威工具、严格SuiteQL标准与自然键自愈规约"',
 								{ cwd: projectPath, stdio: "pipe" },
 							);
 							const currentBranch = execSync("git rev-parse --abbrev-ref HEAD", {

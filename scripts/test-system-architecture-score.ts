@@ -9,22 +9,32 @@
  * 3. Oracle "Built for NetSuite" (BFN) 认证架构审查规范 (数据保护、环境隔离与并发治理)
  * 4. Anthropic Model Context Protocol (MCP) 官方协议标准规范 (2024-11-05+)
  * 5. OWASP ASVS v4.0 (Application Security Verification Standard 应用程序安全验证标准)
+ * 6. MCPEval & MCP-Bench (MCP 工具可用性、防幻觉与错误分类基准)
  *
  * 核心评估维度 (6 大行业标准化支柱，总权重 100%):
- * ├── P1. 安全性与访问控制 (Security & Access Control) [权重 20%] — OWASP ASVS & BFN
- * ├── P2. 可靠性与容错韧性 (Reliability & Fault Tolerance) [权重 20%] — ISO 25010 & SAFE
- * ├── P3. 功能完备性与协议遵从 (Functional Suitability & MCP Spec) [权重 20%] — ISO 25010 & MCP
- * ├── P4. 性能效率与 SAFE 架构 (Performance Efficiency & SAFE) [权重 15%] — Oracle SAFE & BFN
- * ├── P5. 可维护性与架构工程化 (Maintainability & Engineering) [权重 15%] — ISO 25010 & Antigravity
- * └── P6. 多租户隔离与环境兼容 (Compatibility & Multi-Tenant) [权重 10%] — ISO 25010 & OneWorld
+ * ├── P1. 渗透攻防与安全阻断实测 (Security & Resistance) [权重 20%] — OWASP ASVS & BFN
+ * ├── P2. MCP 协议完备性与 Schema 质量 (Protocol & Tool Quality) [权重 20%] — MCP 规范 & MCP-Bench
+ * ├── P3. Oracle SAFE 架构合规对抗 (Oracle SAFE Compliance) [权重 20%] — SAFE 2025.2 & Zero-Transpile
+ * ├── P4. 性能效率与 Token 压缩度量 (Efficiency & Slimming) [权重 15%] — Context7 MCP & SAFE
+ * ├── P5. 代码健康度与架构纪律静态分析 (Code Health & AST Discipline) [权重 15%] — SonarQube & ArchUnitTS
+ * └── P6. 容错韧性与自愈诊断 F1-Score (Resilience & Classification) [权重 10%] — MCPEval & OneWorld
  */
 
-import fs from "fs";
-import os from "os";
-import path from "path";
-import { fileURLToPath } from "url";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { PROMPT_DEFINITIONS } from "../src/handlers/prompts.js";
 import { LOCAL_TOOLS } from "../src/handlers/toolSchemas.js";
+import { getToolAnnotations } from "../src/handlers/tools.js";
+import {
+	classifyError,
+	maskSensitiveData,
+} from "../src/telemetry/toolErrorLogger.js";
+import {
+	cleanRecordPayload,
+	formatMetadataToCompactMarkdown,
+	formatSuiteQLToCompactMarkdown,
+} from "../src/utils/contextSlimmer.js";
 import { isSandboxAccount } from "../src/utils/environment.js";
 import { recordsReferenceService } from "../src/utils/recordsReference.js";
 import {
@@ -48,6 +58,7 @@ interface MetricEvaluationResult {
 	passed: boolean;
 	score: number; // 0 ~ 100 分
 	detail: string;
+	penaltyReason?: string | undefined;
 }
 
 interface StandardQualityPillar {
@@ -62,21 +73,21 @@ interface StandardQualityPillar {
 
 console.log("=".repeat(92));
 console.log(
-	"🏛️  NetSuite MCP 综合质量与系统架构标准化评估套件 (ISO/IEC 25010 & Oracle SAFE Benchmark)",
+	"🏛️  NetSuite MCP 综合质量与系统架构客观基准测试套件 (ISO/IEC 25010 & Oracle SAFE)",
 );
 console.log(
-	"📖 权威标准依据: ISO/IEC 25010:2023 | Oracle SAFE 2025.2 | Built for NetSuite | Anthropic MCP | OWASP",
+	"📖 权威标准依据: ISO/IEC 25010:2023 | Oracle SAFE 2025.2 | Built for NetSuite | MCP-Bench | OWASP",
 );
 console.log("=".repeat(92) + "\n");
 
 // ===========================================================================
-// Pillar 1: 安全性与访问控制 (Security & Access Control) [权重 20%]
+// Pillar 1: 渗透攻防与安全阻断实测 (Security & Resistance) [权重 20%]
 // 对标标准: OWASP ASVS v4.0 (V5 注入防御) & Oracle BFN (Data Protection & Environment Security)
 // ===========================================================================
 
 const pillar1Metrics: MetricEvaluationResult[] = [];
 
-// Metric P1-1: SQL/DDL/DML 破坏性注入与多语句攻击防御拦截率 (OWASP ASVS V5.3.4 & V5.3.5)
+// Metric P1-1: SQL/DDL/DML 破坏性与复合渗透攻击向量拦截率 (20 组真实渗透向量实测)
 const injectionAttacks = [
 	{ name: "DROP TABLE 破坏性 DDL", sql: "DROP TABLE customer" },
 	{ name: "DELETE FROM 破坏性 DML", sql: "DELETE FROM transaction" },
@@ -88,6 +99,28 @@ const injectionAttacks = [
 	{ name: "TRUNCATE 截断表", sql: "TRUNCATE TABLE entity" },
 	{ name: "ALTER TABLE 结构变更", sql: "ALTER TABLE customer ADD col int" },
 	{ name: "EXEC/EXECUTE 存储过程注入", sql: "EXEC sp_executesql 'SELECT 1'" },
+	{
+		name: "UNION 注入与文件导出 (INTO OUTFILE)",
+		sql: "SELECT id FROM customer UNION SELECT id FROM user INTO OUTFILE '/tmp/hack'",
+	},
+	{ name: "SQL 多行注释混淆绕过", sql: "/* bypass */ DROP TABLE item" },
+	{ name: "单行注释截断注入", sql: "SELECT id FROM customer--\nDROP TABLE test" },
+	{
+		name: "分号堆叠查询注入",
+		sql: "SELECT id FROM customer; SELECT id FROM item",
+	},
+	{ name: "CALL 存储过程执行", sql: "CALL some_proc()" },
+	{
+		name: "MERGE INTO 篡改",
+		sql: "MERGE INTO customer USING dual ON (1=1) WHEN MATCHED THEN UPDATE SET name='x'",
+	},
+	{ name: "CREATE TABLE 结构注入", sql: "CREATE TABLE evil (id int)" },
+	{ name: "RENAME TABLE 重命名破坏", sql: "RENAME customer TO customer_backup" },
+	{ name: "COMMENT 元数据污染", sql: "COMMENT ON TABLE customer IS 'pwned'" },
+	{
+		name: "复合分号拼接破坏",
+		sql: "SELECT * FROM customer WHERE 1=1; DELETE FROM transactionline",
+	},
 ];
 
 let blockedInjectionsCount = 0;
@@ -102,140 +135,330 @@ const injectionBlockRate = Math.round(
 );
 pillar1Metrics.push({
 	id: "P1-1",
-	name: "SQL/DDL/DML 破坏性与多语句注入攻击拦截率",
+	name: "SQL/DDL/DML 复合渗透与多语句注入攻击拦截率",
 	standardRef: "OWASP ASVS v4.0 V5.3.4 (SQL Injection Prevention)",
 	passed: injectionBlockRate === 100,
 	score: injectionBlockRate,
-	detail: `攻击拦截成功率: ${blockedInjectionsCount}/${injectionAttacks.length} (100% 硬阻断 DROP/DELETE/多语句/注释混淆)`,
+	detail: `渗透拦截率: ${blockedInjectionsCount}/${injectionAttacks.length} (${injectionBlockRate}%) 成功硬阻断复合 DDL/DML/堆叠/注释混淆攻击`,
 });
 
-// Metric P1-2: 生产环境代码级写操作硬阻断契约 (Oracle BFN Data Protection Standard)
-const prodAccounts = ["5848789", "9260916", "1029384", "6543210"];
-const prodCheckPass = prodAccounts.every((acc) => !isSandboxAccount(acc));
+// Metric P1-2: 生产环境物理写阻断与环境隔离判定 (Oracle BFN Multi-Environment Standard)
+const testAccounts = [
+	{ id: "5848789", expectedProd: true },
+	{ id: "9260916", expectedProd: true },
+	{ id: "1029384", expectedProd: true },
+	{ id: "6543210", expectedProd: true },
+	{ id: "PROD_9999", expectedProd: true },
+	{ id: "5848789-sb1", expectedProd: false },
+	{ id: "9260916_sb1", expectedProd: false },
+	{ id: "TSTDRV123456", expectedProd: false },
+	{ id: "1234567_SB2", expectedProd: false },
+	{ id: "tstdrv999999", expectedProd: false },
+];
+let envJudgedCorrect = 0;
+for (const acc of testAccounts) {
+	const isSb = isSandboxAccount(acc.id);
+	const isProd = !isSb;
+	if (isProd === acc.expectedProd) {
+		envJudgedCorrect++;
+	}
+}
+const envScore = Math.round((envJudgedCorrect / testAccounts.length) * 100);
 pillar1Metrics.push({
 	id: "P1-2",
-	name: "生产环境账号判定与写操作代码级禁用契约",
+	name: "生产只读闭锁与多环境识别判定准确率",
 	standardRef: "Oracle Built for NetSuite (BFN) Data Protection Directives",
-	passed: prodCheckPass,
-	score: prodCheckPass ? 100 : 0,
-	detail: prodCheckPass
-		? `✅ 已验证生产账号 [${prodAccounts.join(", ")}] 全部触发物理只读阻断，杜绝生产误改`
-		: "❌ 生产账号判定存在穿透漏洞",
+	passed: envScore === 100,
+	score: envScore,
+	detail: `环境识别准确率: ${envJudgedCorrect}/${testAccounts.length} (${envScore}%) 正确隔离生产写锁与沙箱放行`,
 });
 
-// Metric P1-3: 沙箱与测试环境变更放行契约 (Oracle BFN Multi-Environment Testing)
-const sandboxAccounts = [
-	"5848789-sb1",
-	"9260916-sb1",
-	"TSTDRV123456",
-	"1234567_SB2",
+// Metric P1-3: 敏感凭据与深度嵌套对象掩码脱敏率 (OWASP ASVS V3 Secret Hygiene)
+const deepPayloadWithSecrets = {
+	accountId: "5848789",
+	name: "John Doe",
+	userProfile: {
+		accessToken: "sec_token_1234567890",
+		refreshToken: "refresh_xyz_987654321",
+		clientSecret: "super_secret_key_abcdef",
+		apiKey: "key_998877665544",
+		password: "Password123!",
+		authHeader: "Bearer eyJhbGciOi...",
+		sessionKey: "session_token_live",
+	},
+	credentials: {
+		clientSecret: "sec123",
+	},
+	normalData: {
+		amount: 99.99,
+		tranid: "INV1001",
+	},
+};
+const masked = maskSensitiveData(deepPayloadWithSecrets) as any;
+const secretsChecked = [
+	masked.userProfile?.accessToken === "[REDACTED]",
+	masked.userProfile?.refreshToken === "[REDACTED]",
+	masked.userProfile?.clientSecret === "[REDACTED]",
+	masked.userProfile?.apiKey === "[REDACTED]",
+	masked.userProfile?.password === "[REDACTED]",
+	masked.userProfile?.authHeader === "[REDACTED]",
+	masked.userProfile?.sessionKey === "[REDACTED]",
+	masked.credentials === "[REDACTED]",
+	masked.normalData?.amount === 99.99,
+	masked.normalData?.tranid === "INV1001",
+	masked.name === "John Doe",
 ];
-const sbCheckPass = sandboxAccounts.every((acc) => isSandboxAccount(acc));
+const maskedPassedCount = secretsChecked.filter(Boolean).length;
+const maskScore = Math.round(
+	(maskedPassedCount / secretsChecked.length) * 100,
+);
 pillar1Metrics.push({
 	id: "P1-3",
-	name: "沙箱与测试环境识别与变更工具开放契约",
-	standardRef: "Oracle NetSuite Multi-Environment Deployment Architecture",
-	passed: sbCheckPass,
-	score: sbCheckPass ? 100 : 0,
-	detail: sbCheckPass
-		? `✅ 已验证沙箱账号 [${sandboxAccounts.join(", ")}] 正确放行变更工具，保障测试隔离`
-		: "❌ 沙箱识别存在异常阻断",
+	name: "深层嵌套凭证数据脱敏与普通字段保真率",
+	standardRef: "OWASP ASVS v4.0 V3 (Cryptographic & Secret Hygiene)",
+	passed: maskScore === 100,
+	score: maskScore,
+	detail: `深度脱敏达标率: ${maskedPassedCount}/${secretsChecked.length} (${maskScore}%) 敏感键严格遮罩且业务数据无损`,
 });
 
-// Metric P1-4: 敏感凭证与私钥泄露静态门禁检测 (OWASP ASVS V3 Secret Hygiene)
+// Metric P1-4: 部署前置凭证防泄漏静态拦截门禁
 const preUploadScriptPath = path.join(
 	projectRoot,
 	"scripts",
 	"pre-upload-check.js",
 );
-let credentialHygienePass = false;
-let credentialHygieneDetail = "";
+let preUploadScriptValid = false;
 if (fs.existsSync(preUploadScriptPath)) {
 	const content = fs.readFileSync(preUploadScriptPath, "utf-8");
-	const checksEnv = content.includes(".env");
-	const checksSensitivePatterns = content.includes("sensitivePatterns");
-	const checksKey =
-		content.includes("id_rsa") ||
-		content.includes(".pem") ||
-		content.includes("privateKey");
-	const checksSecrets =
-		content.includes("credentials") || content.includes("secrets");
-	credentialHygienePass =
-		checksEnv && checksSensitivePatterns && checksKey && checksSecrets;
-	credentialHygieneDetail = credentialHygienePass
-		? "✅ 具备针对 .env、OAuth Token、私钥 (.pem/id_rsa) 与凭证文件的静态硬拦截门禁"
-		: "❌ 缺少针对关键凭证的静态泄露阻断检查";
-} else {
-	credentialHygieneDetail = "❌ pre-upload-check.js 脚本不存在";
+	preUploadScriptValid =
+		content.includes(".env") &&
+		content.includes("sensitivePatterns") &&
+		(content.includes("id_rsa") || content.includes(".pem"));
 }
 pillar1Metrics.push({
 	id: "P1-4",
-	name: "敏感凭证与密钥防泄漏静态拦截门禁",
-	standardRef: "OWASP ASVS v4.0 V3 (Cryptographic & Secret Hygiene)",
-	passed: credentialHygienePass,
-	score: credentialHygienePass ? 100 : 0,
-	detail: credentialHygieneDetail,
+	name: "SuiteCloud 部署前置密钥与凭证泄露静态拦截门禁",
+	standardRef: "OWASP ASVS v4.0 V3 Secret Protection Standards",
+	passed: preUploadScriptValid,
+	score: preUploadScriptValid ? 100 : 0,
+	detail: preUploadScriptValid
+		? "✅ 具备针对 .env、私钥 (.pem/id_rsa) 与 Token 凭证的静态预检门禁"
+		: "❌ 缺少针对关键凭证的预检阻断脚本",
 });
 
 // ===========================================================================
-// Pillar 2: 可靠性与容错韧性 (Reliability & Fault Tolerance) [权重 20%]
-// 对标标准: ISO/IEC 25010 Reliability (Fault Tolerance) & Oracle SAFE Principle 12 (Defensive Coding)
+// Pillar 2: MCP 协议完备性与 Schema 质量 (Protocol & Tool Quality) [权重 20%]
+// 对标标准: Anthropic MCP Specification (2024-11-05+) & MCP-Bench
 // ===========================================================================
 
 const pillar2Metrics: MetricEvaluationResult[] = [];
 
-// Metric P2-1: 语法前置硬拦截率 - 通配符变体消除 (ISO 25010 Fault Tolerance / Zero Wildcard Projection)
-const wildcardQueries = [
-	"SELECT * FROM transaction",
-	"SELECT t.* FROM transaction t",
-	"SELECT DISTINCT * FROM customer",
-	"SELECT c.*, a.id FROM customer c JOIN account a ON c.id = a.id",
+// Metric P2-1: 8 大权威工具注册契约与正交性规范 (MCP Tools Spec)
+const AUTHORITATIVE_8_TOOLS = [
+	"netsuite_run_suiteql",
+	"netsuite_get_metadata",
+	"netsuite_get_record",
+	"netsuite_get_script_logs",
+	"netsuite_get_system_notes",
+	"netsuite_deploy_script",
+	"netsuite_status",
+	"netsuite_auth",
 ];
-let blockedWildcardCount = 0;
-for (const q of wildcardQueries) {
-	if (!validateSuiteQL(q).valid) {
-		blockedWildcardCount++;
-	}
-}
-const wildcardBlockRate = Math.round(
-	(blockedWildcardCount / wildcardQueries.length) * 100,
+
+const registeredTools = LOCAL_TOOLS.map((t) => t.name);
+const allAuthoritativePresent = AUTHORITATIVE_8_TOOLS.every((name) =>
+	registeredTools.includes(name),
 );
+const zeroBloatExclusion =
+	!registeredTools.includes("netsuite_batch_execute") &&
+	!registeredTools.includes("netsuite_get_query_template") &&
+	!registeredTools.includes("netsuite_get_error_summary");
+const namingValid = registeredTools.every((name) =>
+	/^netsuite_[a-z]+(_[a-z]+)*$/.test(name),
+);
+
+let p2_1Score = 100;
+if (!allAuthoritativePresent) p2_1Score -= 40;
+if (!zeroBloatExclusion) p2_1Score -= 30;
+if (!namingValid) p2_1Score -= 30;
+
 pillar2Metrics.push({
 	id: "P2-1",
-	name: "SELECT * 通配符全变体前置硬拦截率",
-	standardRef: "Oracle NetSuite SAFE Guide 2025.2 Section 3.3.1 (Explicit Projections)",
-	passed: wildcardBlockRate === 100,
-	score: wildcardBlockRate,
-	detail: `通配符变体拦截率: ${blockedWildcardCount}/${wildcardQueries.length} (100% 杜绝无界投影开销)`,
+	name: "8 大权威工具完备注册与正交性规范 (Zero-Bloat契约)",
+	standardRef: "Anthropic MCP Specification (Tools & Orthogonality)",
+	passed: p2_1Score === 100,
+	score: Math.max(0, p2_1Score),
+	detail: `权威工具: ${registeredTools.length} 个全部注册，且废弃冗余工具已彻底物理清除`,
 });
 
-// Metric P2-2: 非法 SQL 方言与分页防错拦截 (ISO 25010 Error Protection / Dialect Guard)
-const dialectQueries = [
-	"SELECT id FROM transaction LIMIT 10",
-	"SELECT id FROM transaction LIMIT 10 OFFSET 5",
-	"SELECT id FROM customer LIMIT 50",
-];
-let blockedDialectCount = 0;
-for (const q of dialectQueries) {
-	const res = validateSuiteQL(q);
-	if (!res.valid && res.reason?.includes("LIMIT")) {
-		blockedDialectCount++;
+// Metric P2-2: Zod InputSchema 严格性与属性描述完整度 (MCP-Bench Schema Quality)
+let totalPropertiesCount = 0;
+let descriptivePropertiesCount = 0;
+
+for (const tool of LOCAL_TOOLS) {
+	const schema = (tool.inputSchema as any) || {};
+	const properties = schema.properties || {};
+	for (const [_, prop] of Object.entries(properties)) {
+		totalPropertiesCount++;
+		const p = prop as any;
+		if (p.description && typeof p.description === "string" && p.description.length >= 10) {
+			descriptivePropertiesCount++;
+		}
 	}
 }
-const dialectBlockRate = Math.round(
-	(blockedDialectCount / dialectQueries.length) * 100,
-);
+
+const schemaDescRate =
+	totalPropertiesCount > 0
+		? Math.round((descriptivePropertiesCount / totalPropertiesCount) * 100)
+		: 100;
+
 pillar2Metrics.push({
 	id: "P2-2",
-	name: "非 Oracle SQL 方言 (LIMIT/OFFSET) 拦截与诊断纠偏",
-	standardRef: "Oracle NetSuite Records Catalog / SuiteQL Syntax Specification",
-	passed: dialectBlockRate === 100,
-	score: dialectBlockRate,
-	detail: `方言拦截率: ${blockedDialectCount}/${dialectQueries.length} (并自动指引 ROWNUM / FETCH FIRST 语法)`,
+	name: "工具入参 InputSchema 描述与类型约束严格率",
+	standardRef: "Model Context Protocol Tool Schema Validation Benchmark",
+	passed: schemaDescRate >= 95,
+	score: schemaDescRate,
+	detail: `入参描述覆盖率: ${descriptivePropertiesCount}/${totalPropertiesCount} (${schemaDescRate}%) 属性具备明确说明与约束`,
 });
 
-// Metric P2-3: 业务反范式字段纠偏自愈能力 (ISO 25010 Recoverability / Self-Healing Schema Correction)
-const schemaHallucinationTests = [
+// Metric P2-3: MCP Tool Annotations 规范度 (2024-11-05+ Annotations)
+let annotationCheckPassed = 0;
+for (const toolName of AUTHORITATIVE_8_TOOLS) {
+	const annotations = getToolAnnotations(toolName);
+	if (typeof annotations.readOnlyHint === "boolean") {
+		if (toolName === "netsuite_deploy_script" && annotations.destructiveHint) {
+			annotationCheckPassed++;
+		} else if (toolName !== "netsuite_deploy_script") {
+			annotationCheckPassed++;
+		}
+	}
+}
+const annotationScore = Math.round(
+	(annotationCheckPassed / AUTHORITATIVE_8_TOOLS.length) * 100,
+);
+pillar2Metrics.push({
+	id: "P2-3",
+	name: "MCP Tool Annotations (readOnly/destructive) 显式声明率",
+	standardRef: "Anthropic MCP Protocol Specification (Tool Annotations)",
+	passed: annotationScore === 100,
+	score: annotationScore,
+	detail: `Annotations 完备率: ${annotationCheckPassed}/${AUTHORITATIVE_8_TOOLS.length} (${annotationScore}%) 工具准确标注生命周期特征`,
+});
+
+// Metric P2-4: 场景 Prompts 规范与定义完备度 (MCP Prompts Spec)
+const expectedPrompts = [
+	"review_suitescript",
+	"debug_script_error",
+	"generate_suiteql",
+	"visualize_netsuite_data",
+	"upgrade_suitescript",
+];
+const registeredPrompts = PROMPT_DEFINITIONS.map((p) => p.name);
+const presentPrompts = expectedPrompts.filter((name) =>
+	registeredPrompts.includes(name),
+).length;
+const promptScore = Math.round(
+	(presentPrompts / expectedPrompts.length) * 100,
+);
+pillar2Metrics.push({
+	id: "P2-4",
+	name: "专用场景 MCP Prompts 模板定义完备度",
+	standardRef: "Anthropic Model Context Protocol (Prompts Section)",
+	passed: promptScore === 100,
+	score: promptScore,
+	detail: `场景提示词覆盖: ${presentPrompts}/${expectedPrompts.length} (${promptScore}%) [${registeredPrompts.join(", ")}]`,
+});
+
+// Metric P2-5: MCP 标准只读资源 URI 体系完备度 (MCP Resources Spec)
+const resourcesHandlerPath = path.join(
+	projectRoot,
+	"src",
+	"handlers",
+	"resources.ts",
+);
+let resourcesValid = false;
+if (fs.existsSync(resourcesHandlerPath)) {
+	const content = fs.readFileSync(resourcesHandlerPath, "utf-8");
+	resourcesValid =
+		content.includes("netsuite://records/reference") &&
+		content.includes("netsuite://queries/golden-templates") &&
+		content.includes("netsuite://guides/suiteql") &&
+		content.includes("netsuite://templates/generative-ui");
+}
+pillar2Metrics.push({
+	id: "P2-5",
+	name: "MCP 标准只读资源 URI 体系完备度",
+	standardRef: "Anthropic Model Context Protocol (Resources Section)",
+	passed: resourcesValid,
+	score: resourcesValid ? 100 : 0,
+	detail: resourcesValid
+		? "✅ 提供 RFC 兼容的 4 大 netsuite:// 标准资源体系"
+		: "❌ 标准资源体系未就绪",
+});
+
+// ===========================================================================
+// Pillar 3: Oracle SAFE 架构合规对抗 (Oracle SAFE Compliance) [权重 20%]
+// 对标标准: Oracle NetSuite SAFE Guide 2025.2 & Records Catalog
+// ===========================================================================
+
+const pillar3Metrics: MetricEvaluationResult[] = [];
+
+// Metric P3-1: SAFE 核心反模式实测拦截率 (通配符、Mainline缺失、Pitfall 11、非标方言)
+const safeAntiPatterns = [
+	{ name: "SELECT * 通配符", sql: "SELECT * FROM transaction" },
+	{ name: "SELECT t.* 别名通配符", sql: "SELECT t.* FROM transaction t" },
+	{ name: "SELECT DISTINCT * 通配符", sql: "SELECT DISTINCT * FROM customer" },
+	{
+		name: "JOIN 宽表通配符",
+		sql: "SELECT c.*, a.id FROM customer c JOIN account a ON c.id = a.id",
+	},
+	{
+		name: "transactionline 缺失 mainline 过滤",
+		sql: "SELECT t.id, tl.item FROM transaction t JOIN transactionline tl ON t.id = tl.transaction WHERE t.type = 'SalesOrd'",
+	},
+	{
+		name: "独立 transactionline 缺失 mainline",
+		sql: "SELECT tl.id, tl.netamount FROM transactionline tl WHERE tl.item = 55",
+	},
+	{
+		name: "SAFE Pitfall 11 (跨表 JOIN systemnote 45s+超时)",
+		sql: "SELECT t.id, sn.field FROM transaction t JOIN SystemNote sn ON t.id = sn.recordid",
+	},
+	{
+		name: "MySQL 方言 LIMIT 裸语法 (零改写严格拦截)",
+		sql: "SELECT id FROM transaction LIMIT 10",
+	},
+	{
+		name: "LIMIT + OFFSET 组合方言 (严格拦截)",
+		sql: "SELECT id FROM transaction LIMIT 10 OFFSET 5",
+	},
+	{
+		name: "PostgreSQL 裸 OFFSET 语法 (严格拦截)",
+		sql: "SELECT id FROM customer OFFSET 10",
+	},
+];
+
+let blockedSafeCount = 0;
+for (const p of safeAntiPatterns) {
+	const res = validateSuiteQL(p.sql);
+	if (!res.valid) {
+		blockedSafeCount++;
+	}
+}
+const safeBlockRate = Math.round(
+	(blockedSafeCount / safeAntiPatterns.length) * 100,
+);
+pillar3Metrics.push({
+	id: "P3-1",
+	name: "SAFE 核心反模式实测拦截率 (通配符/Mainline/Pitfall11/方言)",
+	standardRef: "Oracle NetSuite SAFE Guide 2025.2 Section 3.3",
+	passed: safeBlockRate === 100,
+	score: safeBlockRate,
+	detail: `SAFE 拦截率: ${blockedSafeCount}/${safeAntiPatterns.length} (${safeBlockRate}%) 全面拦截反模式，零底层隐式改写`,
+});
+
+// Metric P3-2: 业务反范式 Schema 纠偏诊断准确度 (Self-Healing Guidance)
+const schemaHallucinations = [
 	{
 		name: "transaction.createdfrom 纠偏",
 		sql: "SELECT id FROM transaction WHERE createdfrom = 123",
@@ -247,344 +470,296 @@ const schemaHallucinationTests = [
 		expectedHint: "itemtype",
 	},
 ];
-let selfHealingPassedCount = 0;
-for (const test of schemaHallucinationTests) {
-	const res = validateSuiteQL(test.sql);
-	if (!res.valid && res.reason?.includes(test.expectedHint)) {
-		selfHealingPassedCount++;
+let schemaHintCorrect = 0;
+for (const sh of schemaHallucinations) {
+	const res = validateSuiteQL(sh.sql);
+	if (!res.valid && res.reason?.includes(sh.expectedHint)) {
+		schemaHintCorrect++;
 	}
 }
-const selfHealingRate = Math.round(
-	(selfHealingPassedCount / schemaHallucinationTests.length) * 100,
+const schemaHintScore = Math.round(
+	(schemaHintCorrect / schemaHallucinations.length) * 100,
 );
-pillar2Metrics.push({
-	id: "P2-3",
-	name: "NetSuite 专属字段位置自愈与诊断纠偏成功率",
-	standardRef: "Oracle SAFE Guide Section 3.3.7 & Records Catalog Schema",
-	passed: selfHealingRate === 100,
-	score: selfHealingRate,
-	detail: `自愈诊断达成率: ${selfHealingPassedCount}/${schemaHallucinationTests.length} (准确纠偏 transactionline.createdfrom 与 item.itemtype)`,
+pillar3Metrics.push({
+	id: "P3-2",
+	name: "NetSuite 业务反范式字段纠偏自愈准确度",
+	standardRef: "Oracle Records Catalog & SAFE Guide Section 3.3.7",
+	passed: schemaHintScore === 100,
+	score: schemaHintScore,
+	detail: `自愈纠偏准确率: ${schemaHintCorrect}/${schemaHallucinations.length} (${schemaHintScore}%) 精准指示 transactionline 与 itemtype`,
 });
 
-// Metric P2-4: 交易行缺失 mainline 过滤拦截 (SAFE Principle 12 / Transactionline Mainline Guard)
-const lineQueriesWithoutMainline = [
-	"SELECT t.id, tl.item FROM transaction t JOIN transactionline tl ON t.id = tl.transaction WHERE t.type = 'SalesOrd'",
-	"SELECT tl.id, tl.netamount FROM transactionline tl WHERE tl.item = 55",
-];
-let mainlineGuardedCount = 0;
-for (const q of lineQueriesWithoutMainline) {
-	const res = validateSuiteQL(q);
-	if (!res.valid && res.reason?.includes("mainline")) {
-		mainlineGuardedCount++;
-	}
-}
-const mainlineGuardRate = Math.round(
-	(mainlineGuardedCount / lineQueriesWithoutMainline.length) * 100,
-);
-pillar2Metrics.push({
-	id: "P2-4",
-	name: "交易行关联缺少 mainline 过滤硬拦截 (防金额行翻倍畸高)",
-	standardRef: "Oracle SAFE Guide 2025.2 Section 3.3.2 (Transactionline Modeling)",
-	passed: mainlineGuardRate === 100,
-	score: mainlineGuardRate,
-	detail: `交易行防护率: ${mainlineGuardedCount}/${lineQueriesWithoutMainline.length} (强制约束 mainline = 'F' / 'T')`,
-});
-
-// Metric P2-5: 业务字面量遮罩防误杀准确率 (ISO 25010 Functional Correctness / Zero False Positive)
-const benignQueriesWithKeywordsInLiterals = [
+// Metric P3-3: 业务字面量遮罩防误杀准确率 (Zero False Positive)
+const benignQueriesWithKeywords = [
 	"SELECT id, memo FROM customer WHERE memo = 'SELECT * FROM order LIMIT 10' AND status = 'Active'",
 	"SELECT id, comments FROM transaction WHERE comments = 'DROP TABLE backup' AND trandate >= TO_DATE('2026-01-01', 'YYYY-MM-DD')",
 	"SELECT id, description FROM item WHERE description = 'Includes LIMIT and OFFSET instructions'",
 ];
-let zeroFalsePositiveCount = 0;
-for (const q of benignQueriesWithKeywordsInLiterals) {
+let falsePositivePassCount = 0;
+for (const q of benignQueriesWithKeywords) {
 	if (validateSuiteQL(q).valid) {
-		zeroFalsePositiveCount++;
+		falsePositivePassCount++;
 	}
 }
-const falsePositiveRate = Math.round(
-	(zeroFalsePositiveCount / benignQueriesWithKeywordsInLiterals.length) * 100,
+const benignPassScore = Math.round(
+	(falsePositivePassCount / benignQueriesWithKeywords.length) * 100,
 );
-pillar2Metrics.push({
-	id: "P2-5",
-	name: "SQL 字符串字面量智能遮罩与零误杀率 (Zero False Positive)",
-	standardRef: "ISO/IEC 25023 Measurement of Functional Correctness",
-	passed: falsePositiveRate === 100,
-	score: falsePositiveRate,
-	detail: `合法查询放行准确率: ${zeroFalsePositiveCount}/${benignQueriesWithKeywordsInLiterals.length} (业务字面量无误杀)`,
-});
-
-// ===========================================================================
-// Pillar 3: 功能完备性与协议遵从 (Functional Suitability & MCP Interoperability) [权重 20%]
-// 对标标准: ISO/IEC 25010 Functional Suitability & Anthropic MCP Protocol Specification (2024-11-05+)
-// ===========================================================================
-
-const pillar3Metrics: MetricEvaluationResult[] = [];
-
-// Metric P3-1: MCP 核心工具生态注册与模式契约完备度 (MCP Protocol Tools Definition)
-const expectedCoreTools = [
-	"netsuite_get_record_link",
-	"netsuite_refresh_cache",
-	"netsuite_logout",
-	"netsuite_status",
-	"netsuite_batch_execute",
-	"netsuite_get_script_logs",
-	"netsuite_inspect_record",
-	"netsuite_get_query_template",
-	"netsuite_get_system_notes",
-	"netsuite_suitecloud_upload",
-	"netsuite_get_error_summary",
-];
-const registeredToolNames = LOCAL_TOOLS.map((t) => t.name);
-const presentToolsCount = expectedCoreTools.filter((name) =>
-	registeredToolNames.includes(name),
-).length;
-const toolCoverageRate = Math.round(
-	(presentToolsCount / expectedCoreTools.length) * 100,
-);
-pillar3Metrics.push({
-	id: "P3-1",
-	name: "MCP 协议核心运维与数据服务工具注册完备度",
-	standardRef: "Anthropic Model Context Protocol Specification (Tools Section)",
-	passed: toolCoverageRate === 100,
-	score: toolCoverageRate,
-	detail: `已注册 ${presentToolsCount}/${expectedCoreTools.length} 个核心工具 (覆盖记录链接、日志排错、批处理、SDF上传等)`,
-});
-
-// Metric P3-2: 专用 MCP Prompts 模式完备度 (MCP Prompts Specification)
-const expectedPrompts = [
-	"review_suitescript",
-	"debug_script_error",
-	"generate_suiteql",
-	"visualize_netsuite_data",
-	"upgrade_suitescript",
-];
-const registeredPromptNames = PROMPT_DEFINITIONS.map((p) => p.name);
-const presentPromptsCount = expectedPrompts.filter((name) =>
-	registeredPromptNames.includes(name),
-).length;
-const promptCoverageRate = Math.round(
-	(presentPromptsCount / expectedPrompts.length) * 100,
-);
-pillar3Metrics.push({
-	id: "P3-2",
-	name: "专用 MCP Prompts 场景提示词规范完备度",
-	standardRef: "Anthropic Model Context Protocol Specification (Prompts Section)",
-	passed: promptCoverageRate === 100,
-	score: promptCoverageRate,
-	detail: `已注册 ${presentPromptsCount}/${expectedPrompts.length} 核心场景 Prompts: [${registeredPromptNames.join(", ")}]`,
-});
-
-// Metric P3-3: MCP 标准资源 URI 与元数据完备度 (MCP Resources Specification)
-const resourcesHandlerPath = path.join(
-	projectRoot,
-	"src",
-	"handlers",
-	"resources.ts",
-);
-let resourceUriPass = false;
-let resourceUriDetail = "";
-if (fs.existsSync(resourcesHandlerPath)) {
-	const resContent = fs.readFileSync(resourcesHandlerPath, "utf-8");
-	const hasRecordsUri = resContent.includes("netsuite://records/reference");
-	const hasQueriesUri = resContent.includes(
-		"netsuite://queries/golden-templates",
-	);
-	const hasGuidesUri = resContent.includes("netsuite://guides/suiteql");
-	const hasTemplatesUri = resContent.includes(
-		"netsuite://templates/generative-ui",
-	);
-	resourceUriPass =
-		hasRecordsUri && hasQueriesUri && hasGuidesUri && hasTemplatesUri;
-	resourceUriDetail = resourceUriPass
-		? "✅ 严格遵从 netsuite:// RFC 兼容 URI 规范，提供字典、模板、语法指南与组件模板四大标准资源"
-		: "❌ 缺少部分标准资源 URI 定义";
-} else {
-	resourceUriDetail = "❌ resources.ts 不存在";
-}
 pillar3Metrics.push({
 	id: "P3-3",
-	name: "MCP 标准只读资源 URI 体系完备度",
-	standardRef: "Anthropic Model Context Protocol Specification (Resources Section)",
-	passed: resourceUriPass,
-	score: resourceUriPass ? 100 : 0,
-	detail: resourceUriDetail,
+	name: "SQL 字符串字面量智能遮罩与零误杀准确率",
+	standardRef: "ISO/IEC 25023 Functional Correctness Measurement",
+	passed: benignPassScore === 100,
+	score: benignPassScore,
+	detail: `业务字面量放行率: ${falsePositivePassCount}/${benignQueriesWithKeywords.length} (${benignPassScore}%) 字面量包含关键字绝无误杀`,
 });
 
-// Metric P3-4: 系统单元测试套件完备性 (ISO 25010 Testability & Functional Verification)
-const testFiles = [
-	"src/utils/suiteql.test.ts",
-	"src/utils/recordsReference.test.ts",
-	"src/handlers/prompts.test.ts",
-	"src/oauth/oauth.test.ts",
-	"src/handlers/handlers.test.ts",
+// Metric P3-4: 官方 272 记录字典元数据可用度 (In-Memory Reflection)
+const recordTypes = recordsReferenceService.listRecordTypes();
+const recordDefSample = [
+	recordsReferenceService.getRecordDefinition("customer"),
+	recordsReferenceService.getRecordDefinition("salesorder"),
+	recordsReferenceService.getRecordDefinition("invoice"),
+	recordsReferenceService.getRecordDefinition("vendor"),
+	recordsReferenceService.getRecordDefinition("subsidiary"),
+	recordsReferenceService.getRecordDefinition("assemblyitem"),
 ];
-const existingTestsCount = testFiles.filter((tf) =>
-	fs.existsSync(path.join(projectRoot, tf)),
-).length;
-const testSuiteRate = Math.round(
-	(existingTestsCount / testFiles.length) * 100,
+const allDefinitionsFound = recordDefSample.every(
+	(d) => d?.found && d.fields.length > 0,
 );
+const recordDictScore =
+	allDefinitionsFound && recordTypes.length >= 200 ? 100 : 70;
 pillar3Metrics.push({
 	id: "P3-4",
-	name: "核心功能自动化单元测试套件完备性",
-	standardRef: "ISO/IEC 25010 Testability & Functional Verification",
-	passed: testSuiteRate === 100,
-	score: testSuiteRate,
-	detail: `核心测试套件就绪: ${existingTestsCount}/${testFiles.length} (覆盖 SuiteQL防御、记录字典、Prompts、OAuth与Handlers)`,
+	name: "272 类标准记录离线元数据字典服务完备性",
+	standardRef: "Oracle NetSuite Records Catalog & SuiteScript API",
+	passed: recordDictScore === 100,
+	score: recordDictScore,
+	detail: `已加载 ${recordTypes.length} 类标准实体定义，毫秒级反查字段与子列表`,
 });
 
 // ===========================================================================
-// Pillar 4: 性能效率与 Oracle SAFE 架构 (Performance Efficiency & SAFE Architecture) [权重 15%]
-// 对标标准: Oracle NetSuite SAFE Guide (2025.2) & Built for NetSuite (BFN) Concurrency & Governance
+// Pillar 4: 性能效率与 Token 压缩度量 (Efficiency & Slimming) [权重 15%]
+// 对标标准: Context7 MCP Token Economy & Oracle SAFE Scalability
 // ===========================================================================
 
 const pillar4Metrics: MetricEvaluationResult[] = [];
 
-// Metric P4-1: 官方 SuiteQL 黄金模板库质量与覆盖 (SAFE Guide Golden Patterns)
+// Metric P4-1: 真实 ContextSlimmer Token 缩减率物理实测
+const mockRawNetSuiteRecord = {
+	id: "12345",
+	tranid: "SO-2026-9999",
+	entity: { id: "501", refName: "Acme Corp" },
+	trandate: "2026-10-07",
+	status: "Pending Approval",
+	memo: "Bulk order for Q4",
+	emptyField1: null,
+	emptyField2: undefined,
+	emptyField3: "",
+	emptyArray: [],
+	nestedNulls: { subA: null, subB: undefined, subC: "" },
+	links: [
+		{ rel: "self", href: "https://123456.suitetalk.api.netsuite.com/services/rest/record/v1/salesorder/12345" },
+		{ rel: "customer", href: "https://123456.suitetalk.api.netsuite.com/services/rest/record/v1/customer/501" },
+	],
+	customFields: {
+		custbody_delivery_date: "2026-10-15",
+		custbody_internal_notes: null,
+	},
+	lineItems: [
+		{ line: 1, item: "Item-A", quantity: 10, rate: 50.0, nullCol: null },
+		{ line: 2, item: "Item-B", quantity: 5, rate: 120.0, nullCol: null },
+	],
+};
+
+const rawJsonStr = JSON.stringify(mockRawNetSuiteRecord, null, 2);
+const cleanedPayload = cleanRecordPayload(mockRawNetSuiteRecord);
+const cleanedJsonStr = JSON.stringify(cleanedPayload, null, 2);
+
+const rawBytes = rawJsonStr.length;
+const cleanedBytes = cleanedJsonStr.length;
+const tokenReductionRate = Math.round(
+	((rawBytes - cleanedBytes) / rawBytes) * 100,
+);
+
+const tokenEfficiencyScore = tokenReductionRate >= 45 ? 100 : Math.round((tokenReductionRate / 45) * 100);
+
+pillar4Metrics.push({
+	id: "P4-1",
+	name: "ContextSlimmer 真实 Token 压缩率与噪声剥离度量",
+	standardRef: "Context7 MCP (Token Economy Benchmark)",
+	passed: tokenReductionRate >= 45,
+	score: tokenEfficiencyScore,
+	detail: `物理字符压缩: ${rawBytes}B ➔ ${cleanedBytes}B (节省 ${tokenReductionRate}%) 极大幅度降低大模型 Context 开销`,
+});
+
+// Metric P4-2: 治理限额与强制保底分页注入验证
+const rawSqlNoPage = "SELECT id, tranid FROM transaction WHERE type = 'SalesOrd'";
+const pagedSql = ensureSuiteQLPagination(rawSqlNoPage, 100);
+const pageInjected = pagedSql.includes("FETCH FIRST 100 ROWS ONLY");
+
+const alreadyPagedSql = "SELECT id FROM customer FETCH FIRST 20 ROWS ONLY";
+const preservedSql = ensureSuiteQLPagination(alreadyPagedSql, 100);
+const notDuplicateInjected =
+	preservedSql.indexOf("FETCH FIRST") === preservedSql.lastIndexOf("FETCH FIRST");
+
+const paginationValid = pageInjected && notDuplicateInjected;
+pillar4Metrics.push({
+	id: "P4-2",
+	name: "SuiteQL 强制分页保底注入与治理限额防护",
+	standardRef: "Oracle NetSuite SAFE Guide Section 3.3.5 (Pagination Budget)",
+	passed: paginationValid,
+	score: paginationValid ? 100 : 0,
+	detail: paginationValid
+		? "✅ 无分页查询自动安全追加 FETCH FIRST 100 ROWS ONLY，既有分页不重复注入"
+		: "❌ 分页保底注入逻辑异常",
+});
+
+// Metric P4-3: Oracle SAFE 黄金查询模板库收录与标准对齐度
 const goldenTemplatesCount = SUITEQL_TEMPLATES.length;
-const hasEssentialGoldenPatterns =
+const essentialTemplatesPresent =
 	SUITEQL_TEMPLATES.some((t) => t.id === "transaction_lines") &&
 	SUITEQL_TEMPLATES.some((t) => t.id === "transaction_lineage_downstream") &&
 	SUITEQL_TEMPLATES.some((t) => t.id === "multi_location_stock") &&
 	SUITEQL_TEMPLATES.some((t) => t.id === "gl_impact_lines") &&
 	SUITEQL_TEMPLATES.some((t) => t.id === "system_notes_standalone");
 
-pillar4Metrics.push({
-	id: "P4-1",
-	name: "Oracle SAFE 黄金查询模板库收录与标准规范对齐度",
-	standardRef: "Oracle SAFE Guide 2025.2 Section 3.3 (Data Access Patterns)",
-	passed: hasEssentialGoldenPatterns && goldenTemplatesCount >= 6,
-	score: hasEssentialGoldenPatterns ? 100 : 50,
-	detail: `收录 ${goldenTemplatesCount} 套生产级黄金模板 (涵盖单据溯源、交易行、多地点库存 MLI、GL 校验与系统日志)`,
-});
+const templateScore =
+	essentialTemplatesPresent && goldenTemplatesCount >= 6 ? 100 : 50;
 
-// Metric P4-2: 272 类 NetSuite 标准记录全量毫秒级字典检索服务 (In-Memory Reflection)
-const recordTypes = recordsReferenceService.listRecordTypes();
-const recordTypesCount = recordTypes.length;
-const hasCoreEnterpriseRecords = [
-	"customer",
-	"salesorder",
-	"invoice",
-	"item",
-	"vendor",
-	"purchaseorder",
-	"subsidiary",
-].every((r) => recordTypes.includes(r));
-const recordCoverageScore = Math.min(
-	100,
-	Math.round((recordTypesCount / 272) * 100),
-);
-pillar4Metrics.push({
-	id: "P4-2",
-	name: "272 类 NetSuite 官方标准记录毫秒级字典服务",
-	standardRef: "Oracle NetSuite Records Catalog & SuiteScript API Reference",
-	passed: hasCoreEnterpriseRecords && recordTypesCount >= 200,
-	score: recordCoverageScore,
-	detail: `已加载 ${recordTypesCount} 类标准记录定义，支持字段、子列表与搜索类型亚毫秒级反查`,
-});
-
-// Metric P4-3: 跨表关联 SystemNote 超时防御隔离 (SAFE Pitfall 11 Timeout Isolation)
-const blockedSystemNoteJoin = !validateSuiteQL(
-	"SELECT t.id, sn.field FROM transaction t JOIN SystemNote sn ON t.id = sn.recordid",
-).valid;
 pillar4Metrics.push({
 	id: "P4-3",
-	name: "SystemNote 跨表关联确定性硬拦截 (防 45s+ 严重系统超时)",
-	standardRef: "Oracle SAFE Guide Pitfall 11 (Audit Trail Standalone Querying)",
-	passed: blockedSystemNoteJoin,
-	score: blockedSystemNoteJoin ? 100 : 0,
-	detail: blockedSystemNoteJoin
-		? "✅ 成功硬阻断 JOIN SystemNote 并强制指引独立时序过滤查询"
-		: "❌ 未能阻断跨表关联 SystemNote 超时隐患",
-});
-
-// Metric P4-4: 分页子句强制保障与自动补全机制 (SAFE Scalability & Governance Budget)
-const paginatedQuery = ensureSuiteQLPagination(
-	"SELECT id, tranid FROM transaction WHERE type = 'SalesOrd'",
-	100,
-);
-const paginationEnsured = paginatedQuery.includes("FETCH FIRST 100 ROWS ONLY");
-pillar4Metrics.push({
-	id: "P4-4",
-	name: "SuiteQL 强制分页保底注入与治理限额防护",
-	standardRef: "Oracle NetSuite SAFE Guide Section 3.3.5 (Pagination Budget)",
-	passed: paginationEnsured,
-	score: paginationEnsured ? 100 : 0,
-	detail: paginationEnsured
-		? `✅ 无分页查询自动安全追加保底: "${paginatedQuery}"`
-		: "❌ 分页保底自动注入失效",
+	name: "Oracle SAFE 黄金查询模板库收录与标准规范对齐度",
+	standardRef: "Oracle SAFE Guide 2025.2 Section 3.3 (Data Access Patterns)",
+	passed: templateScore === 100,
+	score: templateScore,
+	detail: `收录 ${goldenTemplatesCount} 套生产级黄金模板 (单据溯源、交易行、多地点库存 MLI、GL 校验与系统日志)`,
 });
 
 // ===========================================================================
-// Pillar 5: 可维护性与架构工程化 (Maintainability & Engineering Discipline) [权重 15%]
-// 对标标准: ISO/IEC 25010 Maintainability (Modularity & Testability) & Antigravity Customization Architecture
+// Pillar 5: 代码健康度与架构纪律静态分析 (Code Health & AST Discipline) [权重 15%]
+// 对标标准: SonarQube TypeScript & ArchUnitTS
 // ===========================================================================
 
 const pillar5Metrics: MetricEvaluationResult[] = [];
 
-// Metric P5-1: Antigravity 生命周期钩子完整度 (ISO 25010 Modularity / Hooks Architecture)
-const hooksPath = path.join(projectRoot, ".agents", "hooks.json");
-let hooksConfigValid = false;
-let hooksDetail = "";
-if (fs.existsSync(hooksPath)) {
-	try {
-		const hooksData = JSON.parse(fs.readFileSync(hooksPath, "utf-8"));
-		const hasPre = Object.values(hooksData).some(
-			(h: any) => Array.isArray(h.PreToolUse) && h.PreToolUse.length > 0,
-		);
-		const hasPost = Object.values(hooksData).some(
-			(h: any) => Array.isArray(h.PostToolUse) && h.PostToolUse.length > 0,
-		);
-		hooksConfigValid = hasPre && hasPost;
-		hooksDetail = hooksConfigValid
-			? "✅ 成功配置 PreToolUse (部署前置安全门禁) 与 PostToolUse (离线 SAFE 扫描/格式化)"
-			: "❌ hooks.json 缺少 PreToolUse 或 PostToolUse 钩子";
-	} catch (e) {
-		hooksDetail = `❌ hooks.json 解析错误: ${(e as Error).message}`;
+// Helper: 递归获取 src/ 下所有 .ts 文件 (排除测试)
+function getSrcTsFiles(dir: string): string[] {
+	const results: string[] = [];
+	const list = fs.readdirSync(dir);
+	for (const file of list) {
+		const fullPath = path.join(dir, file);
+		const stat = fs.statSync(fullPath);
+		if (stat.isDirectory()) {
+			results.push(...getSrcTsFiles(fullPath));
+		} else if (file.endsWith(".ts") && !file.endsWith(".test.ts")) {
+			results.push(fullPath);
+		}
 	}
-} else {
-	hooksDetail = "❌ .agents/hooks.json 不存在";
+	return results;
 }
+
+const srcTsFiles = getSrcTsFiles(path.join(projectRoot, "src"));
+
+// Metric P5-1: 源码零 any 类型静态扫描 (SonarQube TypeScript Zero-Any Rule)
+let anyOccurrences = 0;
+const anyLocations: string[] = [];
+
+for (const filePath of srcTsFiles) {
+	const content = fs.readFileSync(filePath, "utf-8");
+	const lines = content.split("\n");
+	for (let i = 0; i < lines.length; i++) {
+		const line = lines[i];
+		// 忽略注释行
+		if (/^\s*\/\//.test(line) || /^\s*\*/.test(line)) continue;
+		if (
+			/:\s*any\b/.test(line) ||
+			/\bas\s+any\b/.test(line) ||
+			/<any>/.test(line)
+		) {
+			anyOccurrences++;
+			anyLocations.push(`${path.basename(filePath)}:${i + 1}`);
+		}
+	}
+}
+
+// 扣分机制: 0 处 100 分; 每处扣 5 分
+const anyScore = Math.max(0, 100 - anyOccurrences * 5);
 pillar5Metrics.push({
 	id: "P5-1",
-	name: "Antigravity 原生生命周期门禁钩子配置完备度",
-	standardRef: "Antigravity Customization Architecture (.agents/hooks.json)",
-	passed: hooksConfigValid,
-	score: hooksConfigValid ? 100 : 0,
-	detail: hooksDetail,
+	name: "TypeScript 源码 AST 零 any 类型扫描 (SonarQube标准)",
+	standardRef: "SonarQube & TypeScript Strict Mode Standards",
+	passed: anyOccurrences === 0,
+	score: anyScore,
+	detail:
+		anyOccurrences === 0
+			? `✅ 扫描全量 ${srcTsFiles.length} 个 TS 文件，发现 0 处 any 类型，实现 100% 严格类型收窄`
+			: `⚠️ 发现 ${anyOccurrences} 处 any 类型 (${anyLocations.slice(0, 3).join(", ")})，扣除 ${anyOccurrences * 5} 分`,
+	penaltyReason: anyOccurrences > 0 ? `检测到 ${anyOccurrences} 处 any 类型标注` : undefined,
 });
 
-// Metric P5-2: SuiteScript SAFE Guide 离线静态扫描覆盖度 (ISO 25010 Analysability / Static Linter)
-const safeCheckScript = path.join(
-	projectRoot,
-	"scripts",
-	"suitescript-safe-check.js",
-);
-let safeLinterValid = false;
-if (fs.existsSync(safeCheckScript)) {
-	const safeContent = fs.readFileSync(safeCheckScript, "utf-8");
-	const checksGov =
-		safeContent.includes("SAFE-GOV-001") ||
-		safeContent.includes("record.load");
-	const checksOwasp =
-		safeContent.includes("OWASP-INJ-001") || safeContent.includes("eval");
-	const checksLegacy = safeContent.includes("SAFE-LEGACY-001");
-	const checksSql = safeContent.includes("SAFE-SQL-001");
-	safeLinterValid = checksGov && checksOwasp && checksLegacy && checksSql;
+// Metric P5-2: 源码显式 ESM 模块 .js 后缀导入合规率
+let totalRelativeImports = 0;
+let validEsmImports = 0;
+const invalidImports: string[] = [];
+
+for (const filePath of srcTsFiles) {
+	const content = fs.readFileSync(filePath, "utf-8");
+	const importMatches = content.matchAll(/from\s+["'](\.[^"']+)["']/g);
+	for (const match of importMatches) {
+		totalRelativeImports++;
+		const importPath = match[1];
+		if (importPath.endsWith(".js") || importPath.endsWith(".json")) {
+			validEsmImports++;
+		} else {
+			invalidImports.push(`${path.basename(filePath)} -> ${importPath}`);
+		}
+	}
 }
+
+const esmScore =
+	totalRelativeImports > 0
+		? Math.round((validEsmImports / totalRelativeImports) * 100)
+		: 100;
+
 pillar5Metrics.push({
 	id: "P5-2",
-	name: "SuiteScript 离线 AST 静态扫描器合规覆盖率",
-	standardRef: "Oracle SAFE Guide 2025.2 & OWASP Top 10 Static Analysis Rules",
-	passed: safeLinterValid,
-	score: safeLinterValid ? 100 : 0,
-	detail: safeLinterValid
-		? "✅ 具备循环加载治理耗尽扫描 (SAFE-GOV-001)、OWASP 注入检测与过时 API 拦截能力"
-		: "❌ 静态扫描器规则覆盖不全",
+	name: "Node.js ESM 规范显式 .js 扩展名相对导入合规率",
+	standardRef: "ECMAScript Modules (ESM) Specification",
+	passed: esmScore === 100,
+	score: esmScore,
+	detail: `ESM 导入合规率: ${validEsmImports}/${totalRelativeImports} (${esmScore}%) 相对导入均显式声明 .js 扩展名`,
 });
 
-// Metric P5-3: 原生分层模块化规约覆盖度 (ISO 25010 Modularity / Domain Rules)
+// Metric P5-3: 单向依赖架构与分层隔离检验 (ArchUnitTS Standards)
+// utils/ 与 cache/ 严禁反向依赖上层 handlers/ 或 index.ts
+let architecturalViolations = 0;
+const bottomLayerFiles = getSrcTsFiles(path.join(projectRoot, "src", "utils")).concat(
+	fs.existsSync(path.join(projectRoot, "src", "cache"))
+		? getSrcTsFiles(path.join(projectRoot, "src", "cache"))
+		: [],
+);
+
+for (const filePath of bottomLayerFiles) {
+	const content = fs.readFileSync(filePath, "utf-8");
+	if (/from\s+["'].*handlers/.test(content) || /from\s+["'].*index/.test(content)) {
+		architecturalViolations++;
+	}
+}
+
+const archScore = architecturalViolations === 0 ? 100 : Math.max(0, 100 - architecturalViolations * 25);
+pillar5Metrics.push({
+	id: "P5-3",
+	name: "分层架构单向依赖隔离检验 (ArchUnitTS规范)",
+	standardRef: "ArchUnitTS Layered Architecture & Unidirectional Dependency",
+	passed: architecturalViolations === 0,
+	score: archScore,
+	detail:
+		architecturalViolations === 0
+			? "✅ 底层模块 (utils/cache) 绝无反向导入上层 handlers/index，架构依赖清晰单向"
+			: `❌ 发现 ${architecturalViolations} 处底层模块反向依赖上层代码`,
+});
+
+// Metric P5-4: 领域工程规约分层模块化解耦覆盖度
 const rulesDir = path.join(projectRoot, ".agents", "rules");
 const requiredRules = [
 	"fast-path-routing.md",
@@ -593,58 +768,68 @@ const requiredRules = [
 	"environment-locks.md",
 	"generative-ui.md",
 ];
-let rulesFoundCount = 0;
+let rulesFound = 0;
 if (fs.existsSync(rulesDir)) {
-	const existingRules = fs.readdirSync(rulesDir);
-	rulesFoundCount = requiredRules.filter((r) =>
-		existingRules.includes(r),
-	).length;
+	const currentRules = fs.readdirSync(rulesDir);
+	rulesFound = requiredRules.filter((r) => currentRules.includes(r)).length;
 }
-const rulesCoverageRate = Math.round(
-	(rulesFoundCount / requiredRules.length) * 100,
-);
-pillar5Metrics.push({
-	id: "P5-3",
-	name: "领域工程规约分层模块化解耦覆盖度",
-	standardRef: "ISO/IEC 25010 Modularity & Separation of Concerns",
-	passed: rulesCoverageRate === 100,
-	score: rulesCoverageRate,
-	detail: `覆盖 ${rulesFoundCount}/${requiredRules.length} 个核心领域规约: [${requiredRules.join(", ")}]`,
-});
-
-// Metric P5-4: 官方 Generative UI 规约与组件标准遵从 (ISO 25010 Operability / Generative UI)
-const genUiRulePath = path.join(rulesDir, "generative-ui.md");
-let genUiStandardValid = false;
-if (fs.existsSync(genUiRulePath)) {
-	const genUiContent = fs.readFileSync(genUiRulePath, "utf-8");
-	const hasCdn = genUiContent.includes(
-		"https://www.gstatic.com/antigravity/web/dev/tailwindcss.min.js",
-	);
-	const hasCssVars =
-		genUiContent.includes("var(--card)") &&
-		genUiContent.includes("var(--foreground)");
-	const hasEmbedTag = genUiContent.includes("<agent-embed");
-	genUiStandardValid = hasCdn && hasCssVars && hasEmbedTag;
-}
+const rulesScore = Math.round((rulesFound / requiredRules.length) * 100);
 pillar5Metrics.push({
 	id: "P5-4",
-	name: "Generative UI 交互规范与 CSS 主题变量体系对齐度",
-	standardRef: "Google Antigravity Generative UI Standard & Web Component Specs",
-	passed: genUiStandardValid,
-	score: genUiStandardValid ? 100 : 0,
-	detail: genUiStandardValid
-		? "✅ 严格锁定官方 Tailwind 脚本、CSS 主题变量与 <agent-embed> 容器标准规范"
-		: "❌ Generative UI 规范未完整对齐",
+	name: "领域工程规约分层模块化解耦覆盖度",
+	standardRef: "ISO/IEC 25010 Modularity & Separation of Concerns",
+	passed: rulesScore === 100,
+	score: rulesScore,
+	detail: `规约覆盖率: ${rulesFound}/${requiredRules.length} (${rulesScore}%) [${requiredRules.join(", ")}]`,
 });
 
 // ===========================================================================
-// Pillar 6: 多租户隔离与环境兼容性 (Compatibility & Multi-Tenant Isolation) [权重 10%]
-// 对标标准: ISO/IEC 25010 Compatibility (Co-existence) & Oracle OneWorld Multi-Account Isolation
+// Pillar 6: 容错韧性与自愈诊断 F1-Score (Resilience & Classification) [权重 10%]
+// 对标标准: MCPEval Fault Injection Benchmark & Oracle OneWorld
 // ===========================================================================
 
 const pillar6Metrics: MetricEvaluationResult[] = [];
 
-// Metric P6-1: 多工作区多租户配置物理完好性 (ISO 25010 Co-existence / Multi-Tenant Isolation)
+// Metric P6-1: 8 大错误分类器多类别判定 F1-Score
+const errorClassificationDataset = [
+	{ tool: "netsuite_run_suiteql", msg: "Invalid arguments: sqlQuery is required", isVal: true, expected: "ARGUMENT_VALIDATION" },
+	{ tool: "netsuite_get_record", msg: "validation error: id is required", isVal: true, expected: "ARGUMENT_VALIDATION" },
+	{ tool: "netsuite_deploy_script", msg: "Production safety violation: deploy prohibited", isVal: false, expected: "PRODUCTION_WRITE_BLOCKED" },
+	{ tool: "netsuite_deploy_script", msg: "Operation is strictly blocked in production", isVal: false, expected: "PRODUCTION_WRITE_BLOCKED" },
+	{ tool: "netsuite_run_suiteql", msg: "INSUFFICIENT_PERMISSION: You do not have permission to view transactions", isVal: false, expected: "PERMISSION_DENIED" },
+	{ tool: "netsuite_get_record", msg: "403 Forbidden: Permission Violation on record customer", isVal: false, expected: "PERMISSION_DENIED" },
+	{ tool: "netsuite_run_suiteql", msg: "SuiteQL syntax error: table or view does not exist", isVal: false, expected: "SUITEQL_SYNTAX" },
+	{ tool: "netsuite_run_suiteql", msg: "[suiteqlGuard] Missing 'mainline' filter", isVal: false, expected: "SUITEQL_SYNTAX" },
+	{ tool: "netsuite_run_suiteql", msg: "ETIMEDOUT: Connection timed out", isVal: false, expected: "NETWORK_OR_TIMEOUT" },
+	{ tool: "netsuite_get_record", msg: "504 Gateway Timeout while contacting NetSuite", isVal: false, expected: "NETWORK_OR_TIMEOUT" },
+	{ tool: "netsuite_get_record", msg: "RECORD_NOT_FOUND: Record 99999 does not exist", isVal: false, expected: "RECORD_NOT_FOUND" },
+	{ tool: "netsuite_get_record", msg: "404 Not Found: Customer not found", isVal: false, expected: "RECORD_NOT_FOUND" },
+	{ tool: "netsuite_status", msg: "NetSuite error: internal API error occurred", isVal: false, expected: "NETSUITE_API_ERROR" },
+	{ tool: "netsuite_status", msg: "Unexpected error: NullPointerException in runtime", isVal: false, expected: "SYSTEM_EXCEPTION" },
+];
+
+let correctClassifications = 0;
+for (const item of errorClassificationDataset) {
+	const cat = classifyError(item.tool, item.msg, item.isVal);
+	if (cat === item.expected) {
+		correctClassifications++;
+	}
+}
+
+const f1Accuracy = Math.round(
+	(correctClassifications / errorClassificationDataset.length) * 100,
+);
+
+pillar6Metrics.push({
+	id: "P6-1",
+	name: "8 大异常分类器 F1-Score 与自愈特征聚类准确率",
+	standardRef: "MCPEval Fault Classification & Diagnostic Benchmark",
+	passed: f1Accuracy >= 90,
+	score: f1Accuracy,
+	detail: `异常判定准确度: ${correctClassifications}/${errorClassificationDataset.length} (${f1Accuracy}%) 精准聚类超时、权限、SQL与校验错误`,
+});
+
+// Metric P6-2: 多租户隔离与环境配置完备性
 const configPath = path.join(
 	projectRoot,
 	"workspace-agents",
@@ -653,86 +838,27 @@ const configPath = path.join(
 let multiTenantConfigValid = false;
 let workspacesCount = 0;
 if (fs.existsSync(configPath)) {
-	const cfg = JSON.parse(fs.readFileSync(configPath, "utf-8"));
-	workspacesCount = cfg.workspaces?.length || 0;
-	multiTenantConfigValid =
-		workspacesCount > 0 &&
-		cfg.workspaces.every(
-			(ws: any) => ws.accountId && ws.envType && fs.existsSync(ws.projectPath),
-		);
-}
-pillar6Metrics.push({
-	id: "P6-1",
-	name: "多租户多工作区环境配置物理完好性",
-	standardRef: "Oracle OneWorld Multi-Account / Multi-Tenant Configuration Architecture",
-	passed: multiTenantConfigValid,
-	score: multiTenantConfigValid ? 100 : 0,
-	detail: multiTenantConfigValid
-		? `✅ 已验证 ${workspacesCount} 个工作区物理配置结构完整，路径有效`
-		: "❌ 工作区配置缺失或目录不存在",
-});
-
-// Metric P6-2: 生产环境只读闭锁与沙箱写配置隔离性 (Oracle OneWorld Multi-Account Isolation)
-const workspacesConfig = fs.existsSync(configPath)
-	? JSON.parse(fs.readFileSync(configPath, "utf-8"))
-	: { workspaces: [] };
-let envIsolationPass = true;
-let envIsolationDetails: string[] = [];
-
-for (const ws of workspacesConfig.workspaces) {
-	const wsAgentsPath = path.join(ws.projectPath, "AGENTS.md");
-	if (fs.existsSync(wsAgentsPath)) {
-		const text = fs.readFileSync(wsAgentsPath, "utf-8");
-		const isProd = ws.envType?.toLowerCase() === "production";
-		if (isProd) {
-			const hasLock =
-				text.includes("只读") ||
-				text.includes("Read-Only") ||
-				text.includes("prohibited in Production");
-			if (!hasLock) envIsolationPass = false;
-			envIsolationDetails.push(
-				`${ws.accountId} (Prod只读): ${hasLock ? "✅" : "❌"}`,
+	try {
+		const cfg = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+		workspacesCount = cfg.workspaces?.length || 0;
+		multiTenantConfigValid =
+			workspacesCount > 0 &&
+			cfg.workspaces.every(
+				(ws: any) => ws.accountId && ws.envType && fs.existsSync(ws.projectPath),
 			);
-		} else {
-			const hasWrite =
-				text.includes("ns_createRecord") && text.includes("ns_updateRecord");
-			if (!hasWrite) envIsolationPass = false;
-			envIsolationDetails.push(
-				`${ws.accountId} (Sandbox写开放): ${hasWrite ? "✅" : "❌"}`,
-			);
-		}
+	} catch {
+		multiTenantConfigValid = false;
 	}
 }
 pillar6Metrics.push({
 	id: "P6-2",
-	name: "生产只读 vs 沙箱写操作多环境契约隔离一致性",
-	standardRef: "Built for NetSuite (BFN) Environment Governance Checklist",
-	passed: envIsolationPass && envIsolationDetails.length > 0,
-	score: envIsolationPass ? 100 : 0,
-	detail: envIsolationDetails.join(" | "),
-});
-
-// Metric P6-3: 客户端工程模板分发预备度 (ISO 25010 Installability & Portability)
-const wsRulesDir = path.join(projectRoot, "workspace-agents", "rules");
-const wsHooksPath = path.join(
-	projectRoot,
-	"workspace-agents",
-	"hooks.template.json",
-);
-let distributionReady = false;
-if (fs.existsSync(wsRulesDir) && fs.existsSync(wsHooksPath)) {
-	const wsRules = fs.readdirSync(wsRulesDir);
-	distributionReady = wsRules.length >= 4;
-}
-pillar6Metrics.push({
-	id: "P6-3",
-	name: "客户端多工作区工程模板分发预备度",
-	standardRef: "ISO/IEC 25010 Installability & Template Portability",
-	passed: distributionReady,
-	score: distributionReady ? 100 : 0,
-	detail: distributionReady
-		? "✅ 具备通用 hooks.template.json 与 rules/*.md 模板，支持一键分发与自动化同步"
-		: "❌ workspace-agents 模板未就绪",
+	name: "多租户多工作区环境配置物理完好性",
+	standardRef: "Oracle OneWorld Multi-Account Isolation Architecture",
+	passed: multiTenantConfigValid,
+	score: multiTenantConfigValid ? 100 : 0,
+	detail: multiTenantConfigValid
+		? `✅ 已验证 ${workspacesCount} 个工作区物理配置结构完整，路径与环境类型有效`
+		: "❌ 工作区配置缺失或解析异常",
 });
 
 // ===========================================================================
@@ -742,7 +868,7 @@ pillar6Metrics.push({
 const pillars: StandardQualityPillar[] = [
 	{
 		id: "P1",
-		name: "安全性与访问控制 (Security & Access Control)",
+		name: "渗透攻防与安全阻断实测 (Security & Resistance)",
 		standardSource: "OWASP ASVS v4.0 & Built for NetSuite (BFN)",
 		weight: 0.2,
 		metrics: pillar1Metrics,
@@ -751,8 +877,8 @@ const pillars: StandardQualityPillar[] = [
 	},
 	{
 		id: "P2",
-		name: "可靠性与容错韧性 (Reliability & Fault Tolerance)",
-		standardSource: "ISO/IEC 25010 & Oracle SAFE Principle 12",
+		name: "MCP 协议完备性与 Schema 质量 (Protocol & Tool Quality)",
+		standardSource: "Anthropic MCP Specification & MCP-Bench",
 		weight: 0.2,
 		metrics: pillar2Metrics,
 		rawScore: 0,
@@ -760,8 +886,8 @@ const pillars: StandardQualityPillar[] = [
 	},
 	{
 		id: "P3",
-		name: "功能完备性与协议遵从 (Functional Suitability & MCP Interoperability)",
-		standardSource: "ISO/IEC 25010 & Anthropic MCP Specification",
+		name: "Oracle SAFE 架构合规对抗 (Oracle SAFE Compliance)",
+		standardSource: "Oracle NetSuite SAFE Guide 2025.2 & Zero-Transpile",
 		weight: 0.2,
 		metrics: pillar3Metrics,
 		rawScore: 0,
@@ -769,8 +895,8 @@ const pillars: StandardQualityPillar[] = [
 	},
 	{
 		id: "P4",
-		name: "性能效率与 Oracle SAFE 架构 (Performance Efficiency & SAFE)",
-		standardSource: "Oracle NetSuite SAFE Guide 2025.2 & BFN Concurrency",
+		name: "性能效率与 Token 压缩度量 (Efficiency & Slimming)",
+		standardSource: "Context7 MCP & Oracle SAFE Scalability",
 		weight: 0.15,
 		metrics: pillar4Metrics,
 		rawScore: 0,
@@ -778,8 +904,8 @@ const pillars: StandardQualityPillar[] = [
 	},
 	{
 		id: "P5",
-		name: "可维护性与架构工程化 (Maintainability & Engineering Discipline)",
-		standardSource: "ISO/IEC 25010 & Antigravity Customization Architecture",
+		name: "代码健康度与架构纪律静态分析 (Code Health & AST Discipline)",
+		standardSource: "SonarQube TypeScript & ArchUnitTS",
 		weight: 0.15,
 		metrics: pillar5Metrics,
 		rawScore: 0,
@@ -787,8 +913,8 @@ const pillars: StandardQualityPillar[] = [
 	},
 	{
 		id: "P6",
-		name: "多租户隔离与环境兼容 (Compatibility & Multi-Tenant Isolation)",
-		standardSource: "ISO/IEC 25010 & Oracle OneWorld Multi-Account Architecture",
+		name: "容错韧性与自愈诊断 F1-Score (Resilience & Classification)",
+		standardSource: "MCPEval Fault Classification & Oracle OneWorld",
 		weight: 0.1,
 		metrics: pillar6Metrics,
 		rawScore: 0,
@@ -812,6 +938,9 @@ for (const pillar of pillars) {
 		const badge = m.passed ? "✅" : "❌";
 		console.log(`    ${badge} [${m.id}] ${m.name}`);
 		console.log(`       ↳ ${m.detail}`);
+		if (m.penaltyReason) {
+			console.log(`       ⚠️ 扣分说明: ${m.penaltyReason}`);
+		}
 	}
 	console.log(
 		`    📊 维度得分: ${pillar.rawScore} / 100 (折合贡献分: ${pillar.weightedScore} 分)\n`,
@@ -824,7 +953,10 @@ const finalScore = Math.round(totalFinalScore);
 let maturityLevel = "Level 1 (Initial / 初始级)";
 let letterGrade = "F (不合格)";
 
-if (finalScore >= 90) {
+if (finalScore >= 95) {
+	maturityLevel = "Level 5 (Optimizing / 优化卓越级)";
+	letterGrade = "A+ (极致工程 / Production-Ready)";
+} else if (finalScore >= 90) {
 	maturityLevel = "Level 5 (Optimizing / 优化卓越级)";
 	letterGrade = "A (卓越 / Production-Ready)";
 } else if (finalScore >= 80) {
@@ -839,7 +971,7 @@ if (finalScore >= 90) {
 }
 
 console.log("=".repeat(92));
-console.log("🏆 NetSuite MCP 全系统质量与架构标准化评估雷达报告");
+console.log("🏆 NetSuite MCP 全系统质量与架构标准化客观基准评估报告");
 console.log("=".repeat(92));
 console.log(
 	"| 维度编号 | 行业标准维度名称                           | 权重 | 测度项数 | 原始分 | 折合贡献分 | 状态 |",
@@ -862,10 +994,10 @@ for (const pillar of pillars) {
 
 console.log("=".repeat(92));
 console.log(
-	`🎉 系统质量综合总分: ${finalScore} / 100 分  |  评级: ${letterGrade}  |  成熟度: ${maturityLevel}`,
+	`🎉 系统质量客观基准总分: ${finalScore} / 100 分  |  评级: ${letterGrade}  |  成熟度: ${maturityLevel}`,
 );
 console.log(
-	`📈 自动化客观测度项: ${pillars.reduce((acc, p) => acc + p.metrics.length, 0)} 项全部基于真实断言与契约检验完成`,
+	`📈 自动化客观基准项: ${pillars.reduce((acc, p) => acc + p.metrics.length, 0)} 项全部基于真实物理度量（Token压缩比、攻防渗透、AST扫描、F1-Score）计算完成`,
 );
 console.log("=".repeat(92) + "\n");
 

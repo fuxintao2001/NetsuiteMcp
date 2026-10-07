@@ -9,7 +9,7 @@ import {
 	summarizeToolErrors,
 } from "../telemetry/toolErrorSummarizer.js";
 import { isSandboxAccount } from "../utils/environment.js";
-import { GetErrorSummaryArgsSchema } from "./toolSchemas.js";
+import { AuthArgsSchema, StatusArgsSchema } from "./toolSchemas.js";
 import { textResult } from "./types.js";
 
 type ToolResponse = CallToolResult;
@@ -28,11 +28,17 @@ const PKG_VERSION: string = (() => {
 })();
 
 /**
- * netsuite_status — Diagnostic tool
+ * netsuite_status — Comprehensive health, environment & error diagnostic dashboard
  */
 export async function handleStatus(
 	oauthManager: OAuthManager,
+	args: Record<string, unknown> = {},
 ): Promise<ToolResponse> {
+	const parsed = StatusArgsSchema.safeParse(args);
+	const includeErrors = parsed.success
+		? parsed.data.includeErrors || parsed.data.includeDiagnostics
+		: false;
+
 	const sessionInfo = await oauthManager.getSessionInfo();
 	const cacheStats = await cacheService.getStats();
 
@@ -64,31 +70,46 @@ export async function handleStatus(
 		status.writeOperations = sandbox ? "enabled" : "disabled";
 	}
 
-	return textResult(JSON.stringify(status, null, 2));
+	let output = JSON.stringify(status, null, 2);
+
+	if (includeErrors) {
+		try {
+			const summary = await summarizeToolErrors({ days: 7 });
+			output += `\n\n---\n${formatSummaryToMarkdown(summary)}`;
+		} catch {
+			/* non-fatal */
+		}
+	}
+
+	return textResult(output);
 }
 
 /**
- * netsuite_get_error_summary — Error aggregation tool
+ * netsuite_auth — Authoritative tool for OAuth 2.0 PKCE authentication and cache control
  */
-export async function handleGetErrorSummary(
+export async function handleAuth(
 	args: Record<string, unknown>,
+	handleAuthentication: (
+		args: Record<string, unknown>,
+	) => Promise<ToolResponse>,
+	handleLogout: () => Promise<ToolResponse>,
+	handleCacheRefresh: (args: Record<string, unknown>) => Promise<ToolResponse>,
 ): Promise<ToolResponse> {
-	const parsed = GetErrorSummaryArgsSchema.safeParse(args);
+	const parsed = AuthArgsSchema.safeParse(args);
 	if (!parsed.success) {
 		return textResult(
 			`❌ Invalid arguments: ${parsed.error.issues[0]?.message}`,
 			true,
 		);
 	}
-	try {
-		const summary = await summarizeToolErrors({
-			days: parsed.data.days,
-			tool: parsed.data.tool,
-			category: parsed.data.category,
-		});
-		return textResult(formatSummaryToMarkdown(summary));
-	} catch (error: unknown) {
-		const message = error instanceof Error ? error.message : String(error);
-		return textResult(`❌ Failed to summarize error logs: ${message}`, true);
+
+	const { action } = parsed.data;
+	switch (action) {
+		case "login":
+			return await handleAuthentication(args);
+		case "logout":
+			return await handleLogout();
+		case "refresh_cache":
+			return await handleCacheRefresh(args);
 	}
 }

@@ -3,7 +3,7 @@ import type { CallToolResult } from "@modelcontextprotocol/server";
 import type { OAuthManager } from "../oauth/manager.js";
 import { isSandboxAccount } from "../utils/environment.js";
 import { suitecloudRunnerService } from "../utils/suitecloudRunner.js";
-import { SuitecloudUploadArgsSchema } from "./toolSchemas.js";
+import { DeployScriptArgsSchema } from "./toolSchemas.js";
 import { textResult } from "./types.js";
 
 type ToolResponse = CallToolResult;
@@ -13,7 +13,7 @@ export async function handleSuitecloudUpload(
 	oauthManager: OAuthManager,
 	defaultProjectRoot: string,
 ): Promise<ToolResponse> {
-	const parsed = SuitecloudUploadArgsSchema.safeParse(args);
+	const parsed = DeployScriptArgsSchema.safeParse(args);
 	if (!parsed.success) {
 		return textResult(
 			`❌ Invalid arguments: ${parsed.error.issues[0]?.message}`,

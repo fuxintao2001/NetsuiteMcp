@@ -6,28 +6,18 @@
 
 1. **⚡ Fast-Path (Standard Core Business — Direct 1-Turn Penetration Mandate)**:
    - For queries involving standard core tables (`transaction`, `transactionline`, `customer`, `vendor`, `item`, `account`, `subsidiary`, `aggregateitemlocation`, `accountingperiod`, `transactionaccountingline`, `employee`):
-   - **STRICTLY PROHIBITED**: Calling reconnaissance or metadata sniffing tools (`ns_getSuiteQLMetadata`, `netsuite_get_record_definition`, `ns_getRecordTypeMetadata`, `netsuite_get_query_template`) prior to querying.
-   - **STRICTLY PROHIBITED**: Calling Saved Search tools (`ns_runSavedSearch`, `ns_listSavedSearches`) by default.
-   - **MANDATORY**: Construct precise SuiteQL and call **`ns_runCustomSuiteQL` directly on Turn 1**. Zero pre-flight roundtrips.
+   - **STRICTLY PROHIBITED**: Calling reconnaissance tools prior to querying standard core tables.
+   - **MANDATORY**: Construct precise Oracle NetSuite SuiteQL and call **`netsuite_run_suiteql` directly on Turn 1**. Zero pre-flight roundtrips.
 
 2. **🔍 Slow-Path (Unknown Custom Records — Reconnaissance First)**:
    - When operating on unverified custom records (`customrecord_*`), custom fields (`custbody_*`, `custcol_*`), or unlisted tables:
-   - **For SuiteQL database tables**: Call `ns_getSuiteQLMetadata` (inspect columns or search catalog).
-   - **For record fields & custom fields**: Call `ns_getRecordTypeMetadata` (live tenant schema with automatic offline fallback).
+   - **MANDATORY**: Call `netsuite_get_metadata` to inspect table columns and field data types.
 
-3. **🚫 Saved Search Non-Invocation Policy**:
-   - In the vast majority of scenarios, **DO NOT call SavedSearch tools (`ns_listSavedSearches`, `ns_runSavedSearch`)**.
-   - Data querying should always be performed via SuiteQL (`ns_runCustomSuiteQL`).
-   - Only call Saved Search tools if explicitly instructed by the user or if a complex metric is exclusively available in an existing Saved Search that cannot be replicated in SuiteQL.
-
-4. **🚀 Parallel Multi-Query Mandate (Zero Sequential Turn Delay)**:
-   - When a task requires retrieving multiple independent or correlated datasets (e.g. Transaction details + Customer info + Stock balance, or period comparisons):
+3. **🚀 Parallel Multi-Query Mandate (Zero Sequential Turn Delay)**:
+   - When a task requires retrieving multiple independent datasets (e.g. Transaction details + Customer info + Stock balance):
    - **STRICTLY PROHIBITED**: Executing queries sequentially across multiple conversation turns.
-   - **MANDATORY**: Execute concurrently within **1 single turn** using:
-     - **Option A (Semicolon syntax)**: `ns_runCustomSuiteQL({ sqlQuery: "SELECT ... FROM transaction ...; SELECT ... FROM customer ...;" })`
-     - **Option B (Query array)**: `ns_runCustomSuiteQL({ sqlQueries: ["SELECT ... FROM transaction ...", "SELECT ... FROM customer ..."] })`
-     - **Option C (Batch tool)**: `netsuite_batch_execute({ tasks: [{ toolName: "ns_runCustomSuiteQL", arguments: { sqlQuery: "..." } }, ...] })`
-   - All queries execute concurrently via the MCP server's 5-thread pool and return unified results in 1 turn.
+   - **MANDATORY**: Execute concurrently within **1 single turn** by separating queries with semicolons `;` in `netsuite_run_suiteql({ sqlQuery: "SELECT ... FROM transaction ...; SELECT ... FROM customer ...;" })`.
+   - All queries execute concurrently via the MCP server's parallel pool and return unified results in 1 turn.
 
 ---
 

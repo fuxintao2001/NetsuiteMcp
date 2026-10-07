@@ -19,7 +19,6 @@ import {
 	ensureSuiteQLPagination,
 	extractReferencedTables,
 	schemaReconnaissanceTracker,
-	transpileSuiteQLDialect,
 } from "../utils/suiteqlGuard.js";
 
 const logger = createLogger("mcp");
@@ -127,18 +126,14 @@ export class NetSuiteMCPTools {
 
 		logger.info(`Executing tool: ${toolName}`);
 
-		if (toolName === "ns_runCustomSuiteQL") {
+		if (
+			toolName === "ns_runCustomSuiteQL" ||
+			toolName === "netsuite_run_suiteql"
+		) {
 			let sqlQuery = (parameters.sqlQuery ||
 				parameters.query ||
 				parameters.sql ||
 				"") as string;
-			const { transpiledSql, changed } = transpileSuiteQLDialect(sqlQuery);
-			if (changed) {
-				logger.info(
-					`Transpiled SuiteQL dialect: '${sqlQuery}' -> '${transpiledSql}'`,
-				);
-				sqlQuery = transpiledSql;
-			}
 			assertValidSuiteQL(sqlQuery);
 			sqlQuery = ensureSuiteQLPagination(sqlQuery, 100);
 			parameters.sqlQuery = sqlQuery;
