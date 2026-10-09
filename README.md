@@ -253,20 +253,22 @@
 
 ---
 
-## 🧰 8 大权威 MCP 工具手册 (Zero-Bloat)
+## 🧰 权威 MCP 工具手册 (Zero-Bloat)
 
-本服务端遵循 **Zero-Bloat 与正交职责原则**，物理剔除过时冗余别名，统一由以下 **8 大权威工具**组成核心能力闭环：
+本服务端遵循 **Zero-Bloat 与正交职责原则**，物理剔除过时冗余别名，由以下权威工具组成核心能力闭环（生产环境 8 大核心工具，沙箱环境扩充 2 大专属记录变更工具）：
 
-| 工具名称 | 功能描述 | MCP 注解声明 |
-| :--- | :--- | :--- |
-| [`netsuite_run_suiteql`](#1-netsuite_run_suiteql) | 执行只读 SuiteQL 查询。受 AST 守卫保护，自动注入保底分页，支持多语句及并行查询。 | `readOnlyHint: true`, `idempotentHint: true` |
-| [`netsuite_get_metadata`](#2-netsuite_get_metadata) | 反查数据库表结构、字段类型、有效列名与 272 类标准实体元数据字典。 | `readOnlyHint: true`, `idempotentHint: true` |
-| [`netsuite_get_record`](#3-netsuite_get_record) | 按内部 ID 或单据编号 (tranid) 检索记录，清洗噪点，输出紧凑表格并附直达 Web UI 链接。 | `readOnlyHint: true`, `idempotentHint: true` |
-| [`netsuite_get_script_logs`](#4-netsuite_get_script_logs) | 索引优化检索 SuiteScript 脚本执行日志（ScriptNote），支持按等级、脚本与时间范围过滤。 | `readOnlyHint: true`, `idempotentHint: true` |
-| [`netsuite_get_system_notes`](#5-netsuite_get_system_notes) | 高性能单记录审计追踪（SystemNote），独立索引查询，杜绝跨表关联引发的慢查询超时。 | `readOnlyHint: true`, `idempotentHint: true` |
-| [`netsuite_deploy_script`](#6-netsuite_deploy_script) | 通过 SuiteCloud CLI 部署脚本至文件柜。包含语法预检、工程结构识别及生产写屏障。 | `destructiveHint: true` |
-| [`netsuite_status`](#7-netsuite_status) | 诊断系统健康：Token 寿命、环境分类（Prod/Sandbox）、Redis 缓存状态及错误聚合自愈。 | `readOnlyHint: true`, `idempotentHint: true` |
-| [`netsuite_auth`](#8-netsuite_auth) | 集中管理 OAuth 2.0 PKCE 会话与缓存，支持登录、注销与缓存刷新。 | `idempotentHint: true` |
+| 工具名称 | 功能描述 | MCP 注解声明 | 环境权限 |
+| :--- | :--- | :--- | :---: |
+| [`netsuite_run_suiteql`](#1-netsuite_run_suiteql) | 执行只读 SuiteQL 查询。受 AST 守卫保护，自动注入保底分页，支持多语句及并行查询。 | `readOnlyHint: true`, `idempotentHint: true` | 全环境 |
+| [`netsuite_get_metadata`](#2-netsuite_get_metadata) | 反查数据库表结构、字段类型、有效列名与 272 类标准实体元数据字典。 | `readOnlyHint: true`, `idempotentHint: true` | 全环境 |
+| [`netsuite_get_record`](#3-netsuite_get_record) | 按内部 ID 或单据编号 (tranid) 检索记录，清洗噪点，输出紧凑表格并附直达 Web UI 链接。 | `readOnlyHint: true`, `idempotentHint: true` | 全环境 |
+| [`netsuite_get_script_logs`](#4-netsuite_get_script_logs) | 索引优化检索 SuiteScript 脚本执行日志（ScriptNote），支持按等级、脚本与时间范围过滤。 | `readOnlyHint: true`, `idempotentHint: true` | 全环境 |
+| [`netsuite_get_system_notes`](#5-netsuite_get_system_notes) | 高性能单记录审计追踪（SystemNote），独立索引查询，杜绝跨表关联引发的慢查询超时。 | `readOnlyHint: true`, `idempotentHint: true` | 全环境 |
+| [`netsuite_deploy_script`](#6-netsuite_deploy_script) | 通过 SuiteCloud CLI 部署脚本至文件柜。包含语法预检、工程结构识别及生产写屏障。 | `destructiveHint: true` | 全环境（生产需确认） |
+| [`netsuite_status`](#7-netsuite_status) | 诊断系统健康：Token 寿命、环境分类（Prod/Sandbox）、Redis 缓存状态及错误聚合自愈。 | `readOnlyHint: true`, `idempotentHint: true` | 全环境 |
+| [`netsuite_auth`](#8-netsuite_auth) | 集中管理 OAuth 2.0 PKCE 会话与缓存，支持登录、注销与缓存刷新。 | `idempotentHint: true` | 全环境 |
+| [`netsuite_create_record`](#9-netsuite_create_record) | 在 NetSuite 沙箱/测试环境中创建新业务记录，清洗噪点并生成 Web UI 直达链接。 | `destructiveHint: true` | **沙箱限定**（生产物理阻断） |
+| [`netsuite_update_record`](#10-netsuite_update_record) | 在 NetSuite 沙箱/测试环境中更新业务记录，支持自然键 tranid 智能解析与 UI 直达。 | `destructiveHint: true` | **沙箱限定**（生产物理阻断） |
 
 ---
 
@@ -336,7 +338,6 @@
 
 - **输入参数**：
   - `includeErrors` (`boolean`, 可选): 是否包含最近错误诊断摘要与自愈建议。
-  - `includeDiagnostics` (`boolean`, 可选): 诊断别名。
 
 ### 8. `netsuite_auth`
 集中管理 NetSuite OAuth 2.0 PKCE 会话与本地缓存。
@@ -346,6 +347,21 @@
     - `"login"`: 唤起浏览器完成 OAuth 2.0 PKCE 授权流并持久化会话；
     - `"logout"`: 注销当前活动会话并清理本地 Token 缓存；
     - `"refresh_cache"`: 刷新本地 Redis 缓存及远程 Session 元数据。
+
+### 9. `netsuite_create_record`
+在 NetSuite 沙箱/测试环境（Sandbox / Test）中创建新记录。生产环境严格物理阻断。执行成功后自动清洗空字段噪点并生成 Web UI 直达链接。
+
+- **输入参数**：
+  - `recordType` (`string`, 必填): 记录类型 ID（如 `customer`, `salesorder`, `invoice`, `customrecord_xxx`）。
+  - `record` (`object`, 可选): 待创建记录的字段键值对，包含表头字段、自定义字段与子列表。
+
+### 10. `netsuite_update_record`
+在 NetSuite 沙箱/测试环境（Sandbox / Test）中更新现有业务记录。支持数字内部 ID 或单据编号（tranid）自然键自动解析。生产环境严格物理阻断。
+
+- **输入参数**：
+  - `recordType` (`string`, 必填): 记录类型 ID。
+  - `id` (`string`, 必填): 内部数字 ID 或单据编号（tranid，如 `SO10023`）。
+  - `record` (`object`, 可选): 待更新的字段键值对。
 
 ---
 

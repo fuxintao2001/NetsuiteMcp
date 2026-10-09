@@ -94,12 +94,14 @@ To ensure high-density reasoning without context bloat, deep domain knowledge is
 
 ## 🧰 5. Authoritative Tool Execution SOP
 
-The server exposes 8 authoritative tools with strict orthogonal boundaries (zero bloat, zero deprecated aliases):
+The server exposes 8 authoritative core tools (plus 2 sandbox mutation tools in Sandbox environments) with strict orthogonal boundaries (zero bloat, zero deprecated aliases):
 
 1. **Tool Execution Hierarchy**:
    - **SuiteQL Queries**: `netsuite_run_suiteql` (Direct 1-turn execution; supports parallel multi-query execution via semicolon `;` syntax or `sqlQueries: [...]` array).
    - **Schema Reconnaissance**: `netsuite_get_metadata` (Inspect database table columns, search table catalog, or inspect record type fields with offline fallback).
    - **Record Fetch & Inspection**: `netsuite_get_record` (Accepts numeric internal ID or document number `tranid`, automatically resolves natural keys, formats Markdown, and generates Web UI direct links).
+   - **Record Creation (Sandbox)**: `netsuite_create_record` (Create new business records in Sandbox/Test environments; physically blocked in Production).
+   - **Record Update (Sandbox)**: `netsuite_update_record` (Update existing records in Sandbox/Test environments, automatically resolving `tranid` natural keys; physically blocked in Production).
    - **Script Execution Logs**: `netsuite_get_script_logs` (Retrieve real-time execution logs and error stacks for NetSuite scripts).
    - **Audit Trail & System Notes**: `netsuite_get_system_notes` (Retrieve field-level modification history and audit trail by record ID or document number).
    - **Code Deployment**: `netsuite_deploy_script` (Deploy SuiteScript files via SuiteCloud CLI with environment safety confirmation).
@@ -112,7 +114,7 @@ The server exposes 8 authoritative tools with strict orthogonal boundaries (zero
    - Execute immediately upon acceptance; abort immediately upon rejection.
 4. **Observability & Diagnostics**:
    - Every MCP tool call automatically records structured metrics (`tool`, `durationMs`, `isError`, `payloadChars`) in the server telemetry log.
-   - When diagnosing performance or Token cost anomalies, call `netsuite_status` with `includeDiagnostics: true` to inspect aggregated invocation patterns.
+   - When diagnosing performance or Token cost anomalies, call `netsuite_status` with `includeErrors: true` to inspect aggregated invocation patterns.
 
 ---
 

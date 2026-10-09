@@ -50,14 +50,18 @@ const configPath = path.join(
 
 const WRITE_TOOLS_TABLE_SANDBOX = `| Tool | Permissions & Behavior |
 |:---|:---|
+| \`netsuite_create_record\` | Create a new record in Sandbox (cleans noise, generates Web UI link) |
+| \`netsuite_update_record\` | Update an existing record in Sandbox (resolves natural keys, generates Web UI link) |
 | \`netsuite_deploy_script\` | Deploy SuiteScript code via SuiteCloud CLI (simplified card confirmation) |`;
 
-const WRITE_TOOLS_TABLE_PRODUCTION = `> 🔒 **Production Safety Guard**: Code deployment to Production requires explicit confirmation.`;
+const WRITE_TOOLS_TABLE_PRODUCTION = `> 🔒 **Production Safety Guard**: Mutation tools (\`netsuite_create_record\`, \`netsuite_update_record\`) are strictly blocked and filtered out in Production. Code deployment to Production requires explicit confirmation.`;
 
-const WRITE_OPS_SECTION_SANDBOX = `### Simplified File Upload & Code Deployment (✅ Sandbox Enabled)
+const WRITE_OPS_SECTION_SANDBOX = `### Record Mutations & Code Deployment (✅ Sandbox Enabled)
+- **Record Mutations**: Inspect schema via \`netsuite_get_metadata\` ➔ Build valid JSON ➔ Execute \`netsuite_create_record\` or \`netsuite_update_record\`.
 - **File Upload Card Protocol**: When deploying code, display an interactive confirmation card (\`ask_question\`) showing only the file's absolute path, with choices "接受" and "拒绝". Call \`netsuite_deploy_script\` directly upon acceptance.`;
 
 const WRITE_OPS_SECTION_PRODUCTION = `### Simplified File Upload & Code Deployment (🔒 Production Read-Only)
+- **Record Mutations**: Strictly blocked. Never attempt record creation or updates in Production.
 - **File Upload Card Protocol**: When uploading code to Production, display an interactive confirmation card (\`ask_question\`) showing only the file's absolute path, with choices "接受" and "拒绝". Call \`netsuite_deploy_script\` with \`allowProduction: true\` directly upon acceptance.`;
 
 // ---------------------------------------------------------------------------

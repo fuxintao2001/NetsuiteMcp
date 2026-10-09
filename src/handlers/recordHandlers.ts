@@ -1,7 +1,11 @@
 import type { CallToolResult } from "@modelcontextprotocol/server";
 import type { NetSuiteMCPTools } from "../mcp/tools.js";
 import type { OAuthManager } from "../oauth/manager.js";
-import { formatMetadataToCompactMarkdown } from "../utils/contextSlimmer.js";
+import {
+	cleanRecordPayload,
+	formatMetadataToCompactMarkdown,
+} from "../utils/contextSlimmer.js";
+import { isSandboxAccount } from "../utils/environment.js";
 import {
 	formatTableCatalogMarkdown,
 	searchSuiteQLCatalog,
@@ -13,9 +17,11 @@ import {
 	recordsReferenceService,
 } from "../utils/recordsReference.js";
 import {
+	CreateRecordArgsSchema,
 	GetMetadataArgsSchema,
 	GetRecordArgsSchema,
 	GetSystemNotesArgsSchema,
+	UpdateRecordArgsSchema,
 } from "./toolSchemas.js";
 import { textResult } from "./types.js";
 
@@ -610,4 +616,199 @@ export async function handleGetSystemNotes(
 			true,
 		);
 	}
+}
+
+/**
+ * netsuite_create_record
+ * Authoritative tool for creating NetSuite records in Sandbox / Test environments.
+ * Dual-Gate Defense: Strictly blocked in Production accounts.
+ */
+export async function handleCreateRecord(
+	args: Record<string, unknown>,
+	mcpTools: NetSuiteMCPTools,
+	oauthManager: OAuthManager,
+	resolveRectype: (type: string) => number | null | Promise<number | null>,
+): Promise<ToolResponse> {
+	const parsed = CreateRecordArgsSchema.safeParse(args);
+	if (!parsed.success) {
+		const issues = parsed.error.issues
+			.map((i) => `${i.path.join(".")}: ${i.message}`)
+			.join(", ");
+		return textResult(
+			`❌ Invalid arguments for 'netsuite_create_record': ${issues}`,
+			true,
+		);
+	}
+
+	const accountId =
+		(await oauthManager.getAccountId()) || process.env.NETSUITE_ACCOUNT_ID;
+	if (!accountId || !isSandboxAccount(accountId)) {
+		return textResult(
+			`⛔ [Production Safety Violation] Operation 'netsuite_create_record' is strictly blocked in Production environment (${accountId || "unknown"}). ` +
+				`Record create and update operations are only permitted in Sandbox / Test environments (accounts containing '_SB', '-sb', or 'TSTDRV').`,
+			true,
+		);
+	}
+
+	const { recordType, record, ...rest } = parsed.data;
+	const recordPayload =
+		record && typeof record === "object" && Object.keys(record).length > 0
+			? record
+			: rest;
+
+	let rawResult: unknown;
+	try {
+		rawResult = await mcpTools.executeTool("ns_createRecord", {
+			recordType,
+			...recordPayload,
+			record: recordPayload,
+		});
+	} catch (err: unknown) {
+		const msg = err instanceof Error ? err.message : String(err);
+		return textResult(`❌ NetSuite Record Creation Failed: ${msg}`, true);
+	}
+
+	const unwrapped = (unwrapMcpContent(rawResult) || rawResult) as Record<
+		string,
+		unknown
+	>;
+	if (
+		unwrapped &&
+		typeof unwrapped === "object" &&
+		(unwrapped.success === false || unwrapped.error)
+	) {
+		const errMsg =
+			(unwrapped.error as string) ||
+			(unwrapped.message as string) ||
+			JSON.stringify(unwrapped);
+		return textResult(`❌ NetSuite Record Creation Error: ${errMsg}`, true);
+	}
+
+	const cleaned = cleanRecordPayload(unwrapped);
+	const targetId = String(
+		(unwrapped as Record<string, unknown>)?.id ??
+			(unwrapped as Record<string, unknown>)?.recordId ??
+			((unwrapped as Record<string, unknown>)?.data as Record<string, unknown>)
+				?.id ??
+			"",
+	);
+
+	let md = `## ✅ NetSuite Record Created: \`${recordType}\`${targetId ? ` (ID: \`${targetId}\`)` : ""}\n\n`;
+	md += `\`\`\`json\n${JSON.stringify(cleaned, null, 2)}\n\`\`\`\n`;
+
+	if (targetId) {
+		md = await appendRecordLink(
+			md,
+			recordType,
+			targetId,
+			oauthManager,
+			resolveRectype,
+		);
+	}
+
+	return textResult(md);
+}
+
+/**
+ * netsuite_update_record
+ * Authoritative tool for updating NetSuite records in Sandbox / Test environments.
+ * Dual-Gate Defense: Strictly blocked in Production accounts.
+ */
+export async function handleUpdateRecord(
+	args: Record<string, unknown>,
+	mcpTools: NetSuiteMCPTools,
+	oauthManager: OAuthManager,
+	resolveRectype: (type: string) => number | null | Promise<number | null>,
+): Promise<ToolResponse> {
+	const parsed = UpdateRecordArgsSchema.safeParse(args);
+	if (!parsed.success) {
+		const issues = parsed.error.issues
+			.map((i) => `${i.path.join(".")}: ${i.message}`)
+			.join(", ");
+		return textResult(
+			`❌ Invalid arguments for 'netsuite_update_record': ${issues}`,
+			true,
+		);
+	}
+
+	const accountId =
+		(await oauthManager.getAccountId()) || process.env.NETSUITE_ACCOUNT_ID;
+	if (!accountId || !isSandboxAccount(accountId)) {
+		return textResult(
+			`⛔ [Production Safety Violation] Operation 'netsuite_update_record' is strictly blocked in Production environment (${accountId || "unknown"}). ` +
+				`Record create and update operations are only permitted in Sandbox / Test environments (accounts containing '_SB', '-sb', or 'TSTDRV').`,
+			true,
+		);
+	}
+
+	const { recordType, id: rawId, record, ...rest } = parsed.data;
+	let targetId = rawId;
+
+	// Resolve natural key (e.g. SO10023) if not pure numeric
+	if (!/^-?\d+$/.test(targetId)) {
+		const resolved = await resolveNaturalKeyToInternalId(
+			recordType,
+			targetId,
+			mcpTools,
+		);
+		if (resolved?.id) {
+			targetId = resolved.id;
+		} else {
+			return textResult(
+				`❌ [Record Not Found] Could not resolve document number / name '${rawId}' for record type '${recordType}'.\n` +
+					`👉 Please verify the document number (tranid) or provide the numeric internal ID directly.`,
+				true,
+			);
+		}
+	}
+
+	const recordPayload =
+		record && typeof record === "object" && Object.keys(record).length > 0
+			? record
+			: rest;
+
+	let rawResult: unknown;
+	try {
+		rawResult = await mcpTools.executeTool("ns_updateRecord", {
+			recordType,
+			recordId: targetId,
+			id: targetId,
+			...recordPayload,
+			record: recordPayload,
+		});
+	} catch (err: unknown) {
+		const msg = err instanceof Error ? err.message : String(err);
+		return textResult(`❌ NetSuite Record Update Failed: ${msg}`, true);
+	}
+
+	const unwrapped = (unwrapMcpContent(rawResult) || rawResult) as Record<
+		string,
+		unknown
+	>;
+	if (
+		unwrapped &&
+		typeof unwrapped === "object" &&
+		(unwrapped.success === false || unwrapped.error)
+	) {
+		const errMsg =
+			(unwrapped.error as string) ||
+			(unwrapped.message as string) ||
+			JSON.stringify(unwrapped);
+		return textResult(`❌ NetSuite Record Update Error: ${errMsg}`, true);
+	}
+
+	const cleaned = cleanRecordPayload(unwrapped);
+
+	let md = `## ✅ NetSuite Record Updated: \`${recordType}\` (ID: \`${targetId}\`)\n\n`;
+	md += `\`\`\`json\n${JSON.stringify(cleaned, null, 2)}\n\`\`\`\n`;
+
+	md = await appendRecordLink(
+		md,
+		recordType,
+		targetId,
+		oauthManager,
+		resolveRectype,
+	);
+
+	return textResult(md);
 }

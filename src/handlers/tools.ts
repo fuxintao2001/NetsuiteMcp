@@ -20,11 +20,13 @@ import { handleAuth, handleStatus } from "./authHandlers.js";
 import { handleSuitecloudUpload } from "./deployHandlers.js";
 import { handleGetScriptLogs } from "./queryHandlers.js";
 import {
+	handleCreateRecord,
 	handleGetMetadata,
 	handleGetRecord,
 	handleGetSystemNotes,
+	handleUpdateRecord,
 } from "./recordHandlers.js";
-import { LOCAL_TOOLS } from "./toolSchemas.js";
+import { LOCAL_TOOLS, SANDBOX_MUTATION_TOOLS } from "./toolSchemas.js";
 import { type ToolHandlerDeps, textResult } from "./types.js";
 
 export type { ToolHandlerDeps };
@@ -43,7 +45,11 @@ const READ_ONLY_TOOLS = new Set([
 	"netsuite_status",
 ]);
 
-const DESTRUCTIVE_TOOLS = new Set(["netsuite_deploy_script"]);
+const DESTRUCTIVE_TOOLS = new Set([
+	"netsuite_deploy_script",
+	"netsuite_create_record",
+	"netsuite_update_record",
+]);
 
 const IDEMPOTENT_TOOLS = new Set([...READ_ONLY_TOOLS, "netsuite_auth"]);
 
@@ -102,11 +108,16 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
 			accountId =
 				(await oauthManager.getAccountId()) || process.env.NETSUITE_ACCOUNT_ID;
 		}
+		const isSandbox = accountId ? isSandboxAccount(accountId) : false;
 		const envSuffix = buildEnvSuffix(accountId ?? null);
 
-		// Expose exactly the 8 Authoritative Tools, perfectly annotated
+		// Expose 10 tools in Sandbox (8 Core + 2 Sandbox Mutation), or 8 Core tools in Production
+		const activeTools = isSandbox
+			? LOCAL_TOOLS
+			: LOCAL_TOOLS.filter((t) => !SANDBOX_MUTATION_TOOLS.has(t.name));
+
 		return {
-			tools: LOCAL_TOOLS.map((t) =>
+			tools: activeTools.map((t) =>
 				enhanceDescription(t as unknown as Record<string, unknown>, envSuffix),
 			) as unknown as Tool[],
 		};
@@ -380,6 +391,26 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
 						safeArgs,
 						oauthManager,
 						deps.projectRoot,
+					);
+				}
+
+				// 9. netsuite_create_record — Record creation in Sandbox
+				if (name === "netsuite_create_record") {
+					return await handleCreateRecord(
+						safeArgs,
+						mcpTools,
+						oauthManager,
+						resolveCustomRecordRectype,
+					);
+				}
+
+				// 10. netsuite_update_record — Record update in Sandbox
+				if (name === "netsuite_update_record") {
+					return await handleUpdateRecord(
+						safeArgs,
+						mcpTools,
+						oauthManager,
+						resolveCustomRecordRectype,
 					);
 				}
 

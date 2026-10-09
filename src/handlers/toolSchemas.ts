@@ -282,6 +282,61 @@ export const AuthArgsSchema = z.object({
 });
 export type AuthArgs = z.infer<typeof AuthArgsSchema>;
 
+/**
+ * 9. netsuite_create_record (Sandbox Only)
+ * Authoritative tool for creating NetSuite records in Sandbox / Test environments.
+ */
+export const CreateRecordArgsSchema = z
+	.object({
+		recordType: z
+			.string()
+			.trim()
+			.toLowerCase()
+			.min(1, "recordType is required")
+			.describe(
+				"NetSuite record type ID (e.g. 'salesorder', 'customer', 'invoice', 'customrecord_xxx').",
+			),
+		record: z
+			.record(z.string(), z.unknown())
+			.optional()
+			.describe(
+				"Key-value object containing the field IDs and values to populate on the new record.",
+			),
+	})
+	.passthrough();
+export type CreateRecordArgs = z.infer<typeof CreateRecordArgsSchema>;
+
+/**
+ * 10. netsuite_update_record (Sandbox Only)
+ * Authoritative tool for updating NetSuite records in Sandbox / Test environments.
+ */
+export const UpdateRecordArgsSchema = z
+	.object({
+		recordType: z
+			.string()
+			.trim()
+			.toLowerCase()
+			.min(1, "recordType is required")
+			.describe(
+				"NetSuite record type ID (e.g. 'salesorder', 'customer', 'invoice', 'customrecord_xxx').",
+			),
+		id: z
+			.string()
+			.trim()
+			.min(1, "id is required")
+			.describe(
+				"Numeric internal ID (e.g. '12345') or document number / tranid (e.g. 'SO10023').",
+			),
+		record: z
+			.record(z.string(), z.unknown())
+			.optional()
+			.describe(
+				"Key-value object containing the field IDs and values to update on the record.",
+			),
+	})
+	.passthrough();
+export type UpdateRecordArgs = z.infer<typeof UpdateRecordArgsSchema>;
+
 // ---------------------------------------------------------------------------
 // 8 Authoritative Tool Definitions for MCP Server Registration
 // ---------------------------------------------------------------------------
@@ -508,7 +563,62 @@ export const AUTH_TOOL = {
 	},
 };
 
-/** All 8 Authoritative Tools exposed by NetSuite MCP Server. */
+export const CREATE_RECORD_TOOL = {
+	name: "netsuite_create_record",
+	description:
+		"Create a new NetSuite record in Sandbox / Test environments. Physically blocked in Production to guarantee ERP data integrity. Automatically cleans noise and generates active Web UI direct link.",
+	inputSchema: {
+		type: "object" as const,
+		properties: {
+			recordType: {
+				type: "string",
+				description:
+					"NetSuite record type ID (e.g. 'salesorder', 'customer', 'invoice', 'customrecord_xxx').",
+			},
+			record: {
+				type: "object",
+				description:
+					"Key-value object containing the field IDs and values to populate on the new record.",
+			},
+		},
+		required: ["recordType"],
+	},
+};
+
+export const UPDATE_RECORD_TOOL = {
+	name: "netsuite_update_record",
+	description:
+		"Update an existing NetSuite record by numeric internal ID or document number (tranid) in Sandbox / Test environments. Physically blocked in Production. Automatically resolves natural keys and generates active Web UI direct link.",
+	inputSchema: {
+		type: "object" as const,
+		properties: {
+			recordType: {
+				type: "string",
+				description:
+					"NetSuite record type ID (e.g. 'salesorder', 'customer', 'invoice', 'customrecord_xxx').",
+			},
+			id: {
+				type: "string",
+				description:
+					"Numeric internal ID (e.g. '12345') or document number (tranid, e.g. 'SO10023').",
+			},
+			record: {
+				type: "object",
+				description:
+					"Key-value object containing the field IDs and values to update on the record.",
+			},
+		},
+		required: ["recordType", "id"],
+	},
+};
+
+/** Set of tools restricted strictly to Sandbox / Test environments. */
+export const SANDBOX_MUTATION_TOOLS = new Set([
+	"netsuite_create_record",
+	"netsuite_update_record",
+]);
+
+/** All Authoritative Tools exposed by NetSuite MCP Server (8 Core + 2 Sandbox Mutation). */
 export const LOCAL_TOOLS = [
 	RUN_SUITEQL_TOOL,
 	GET_METADATA_TOOL,
@@ -518,4 +628,6 @@ export const LOCAL_TOOLS = [
 	DEPLOY_SCRIPT_TOOL,
 	STATUS_TOOL,
 	AUTH_TOOL,
+	CREATE_RECORD_TOOL,
+	UPDATE_RECORD_TOOL,
 ];

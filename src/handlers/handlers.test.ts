@@ -116,8 +116,8 @@ describe("MCP Handler Wires", () => {
 			expect(registeredHandlers.has("tools/call")).toBe(true);
 		});
 
-		it("should list the 8 authoritative tools", async () => {
-			mockOAuthManager.getAccountId.mockResolvedValue("9260916-sb1");
+		it("should list 8 authoritative tools in Production environment", async () => {
+			mockOAuthManager.getAccountId.mockResolvedValue("123456"); // Production
 			const listFn = registeredHandlers.get("tools/list");
 
 			const result = await listFn?.();
@@ -131,7 +131,29 @@ describe("MCP Handler Wires", () => {
 			expect(names).toContain("netsuite_deploy_script");
 			expect(names).toContain("netsuite_status");
 			expect(names).toContain("netsuite_auth");
+			expect(names).not.toContain("netsuite_create_record");
+			expect(names).not.toContain("netsuite_update_record");
 			expect(names.length).toBe(8);
+		});
+
+		it("should list 10 authoritative tools in Sandbox environment", async () => {
+			mockOAuthManager.getAccountId.mockResolvedValue("9260916-sb1"); // Sandbox
+			const listFn = registeredHandlers.get("tools/list");
+
+			const result = await listFn?.();
+			const names = result.tools.map((t: any) => t.name);
+
+			expect(names).toContain("netsuite_run_suiteql");
+			expect(names).toContain("netsuite_get_metadata");
+			expect(names).toContain("netsuite_get_record");
+			expect(names).toContain("netsuite_get_script_logs");
+			expect(names).toContain("netsuite_get_system_notes");
+			expect(names).toContain("netsuite_deploy_script");
+			expect(names).toContain("netsuite_status");
+			expect(names).toContain("netsuite_auth");
+			expect(names).toContain("netsuite_create_record");
+			expect(names).toContain("netsuite_update_record");
+			expect(names.length).toBe(10);
 		});
 
 		it("should attach standard MCP annotations to tools", async () => {
@@ -145,6 +167,12 @@ describe("MCP Handler Wires", () => {
 			const deployTool = result.tools.find(
 				(t: any) => t.name === "netsuite_deploy_script",
 			);
+			const createRecordTool = result.tools.find(
+				(t: any) => t.name === "netsuite_create_record",
+			);
+			const updateRecordTool = result.tools.find(
+				(t: any) => t.name === "netsuite_update_record",
+			);
 
 			expect(getRecordTool?.annotations).toEqual({
 				readOnlyHint: true,
@@ -154,6 +182,108 @@ describe("MCP Handler Wires", () => {
 				readOnlyHint: false,
 				destructiveHint: true,
 			});
+			expect(createRecordTool?.annotations).toEqual({
+				readOnlyHint: false,
+				destructiveHint: true,
+			});
+			expect(updateRecordTool?.annotations).toEqual({
+				readOnlyHint: false,
+				destructiveHint: true,
+			});
+		});
+
+		it("should block netsuite_create_record and netsuite_update_record in Production", async () => {
+			mockOAuthManager.getAccountId.mockResolvedValue("123456"); // Production
+			const callFn = registeredHandlers.get("tools/call");
+
+			const createRes = await callFn?.({
+				params: {
+					name: "netsuite_create_record",
+					arguments: {
+						recordType: "customer",
+						record: { companyName: "Acme" },
+					},
+				},
+			});
+			expect(createRes.isError).toBe(true);
+			expect(createRes.content[0].text).toContain(
+				"⛔ [Production Safety Violation]",
+			);
+
+			const updateRes = await callFn?.({
+				params: {
+					name: "netsuite_update_record",
+					arguments: {
+						recordType: "customer",
+						id: "100",
+						record: { companyName: "Acme" },
+					},
+				},
+			});
+			expect(updateRes.isError).toBe(true);
+			expect(updateRes.content[0].text).toContain(
+				"⛔ [Production Safety Violation]",
+			);
+		});
+
+		it("should allow netsuite_create_record in Sandbox environment and append UI link", async () => {
+			mockOAuthManager.getAccountId.mockResolvedValue("9260916-sb1"); // Sandbox
+			mockMCPTools.executeTool.mockResolvedValueOnce({
+				id: 501,
+				entityid: "CUST501",
+			});
+			const callFn = registeredHandlers.get("tools/call");
+
+			const res = await callFn?.({
+				params: {
+					name: "netsuite_create_record",
+					arguments: {
+						recordType: "customer",
+						record: { companyname: "New Corp" },
+					},
+				},
+			});
+
+			expect(res.isError).toBeFalsy();
+			expect(res.content[0].text).toContain(
+				"✅ NetSuite Record Created: `customer` (ID: `501`)",
+			);
+			expect(res.content[0].text).toContain("app.netsuite.com");
+		});
+
+		it("should allow netsuite_update_record in Sandbox environment and resolve natural keys", async () => {
+			mockOAuthManager.getAccountId.mockResolvedValue("9260916-sb1"); // Sandbox
+			mockMCPTools.executeTool.mockImplementation(
+				async (toolName: string, args: any) => {
+					if (toolName === "ns_runCustomSuiteQL") {
+						return {
+							data: [{ id: "777", type: "salesorder", tranid: "SO10099" }],
+						};
+					}
+					if (toolName === "ns_updateRecord") {
+						return { id: args.recordId, tranid: "SO10099", memo: "Updated" };
+					}
+					return {};
+				},
+			);
+			const callFn = registeredHandlers.get("tools/call");
+
+			const res = await callFn?.({
+				params: {
+					name: "netsuite_update_record",
+					arguments: {
+						recordType: "salesorder",
+						id: "SO10099",
+						memo: "Updated",
+					},
+				},
+			});
+
+			expect(res.isError).toBeFalsy();
+			expect(res.content[0].text).toContain(
+				"✅ NetSuite Record Updated: `salesorder` (ID: `777`)",
+			);
+			expect(res.content[0].text).toContain("app.netsuite.com");
 		});
 
 		it("should include environment suffix in tool descriptions", async () => {
