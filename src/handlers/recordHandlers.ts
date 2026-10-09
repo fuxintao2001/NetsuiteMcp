@@ -62,7 +62,7 @@ export async function resolveNaturalKeyToInternalId(
 					? `AND LOWER(type) = '${recType}'`
 					: "";
 			const upperKey = safeKey.toUpperCase();
-			const sql = `SELECT id, type, tranid FROM transaction WHERE (tranid = '${safeKey}' OR transactionnumber = '${safeKey}' OR UPPER(tranid) = '${upperKey}' OR UPPER(transactionnumber) = '${upperKey}') ${typeFilter} ORDER BY id DESC FETCH FIRST 1 ROWS ONLY`;
+			const sql = `SELECT id, type, tranid FROM transaction WHERE UPPER(tranid) = '${upperKey}' ${typeFilter} ORDER BY id DESC FETCH FIRST 1 ROWS ONLY`;
 			const res = await mcpTools.executeTool("ns_runCustomSuiteQL", {
 				sqlQuery: sql,
 			});
@@ -78,11 +78,11 @@ export async function resolveNaturalKeyToInternalId(
 		}
 	}
 
-	// 1b. Custom record lookup by name or scriptid
+	// 1b. Custom record lookup by canonical name
 	if (recType.startsWith("customrecord")) {
 		try {
 			const upperKey = safeKey.toUpperCase();
-			const sql = `SELECT id, name, scriptid FROM ${recType} WHERE name = '${safeKey}' OR UPPER(name) = '${upperKey}' OR UPPER(scriptid) = '${upperKey}' ORDER BY id DESC FETCH FIRST 1 ROWS ONLY`;
+			const sql = `SELECT id, name FROM ${recType} WHERE UPPER(name) = '${upperKey}' ORDER BY id DESC FETCH FIRST 1 ROWS ONLY`;
 			const res = await mcpTools.executeTool("ns_runCustomSuiteQL", {
 				sqlQuery: sql,
 			});
@@ -544,7 +544,7 @@ export async function handleGetSystemNotes(
 		try {
 			const safeTranid = recordId.trim().replace(/'/g, "''");
 			const upperTranid = safeTranid.toUpperCase();
-			const lookupSql = `SELECT id FROM transaction WHERE (tranid = '${safeTranid}' OR transactionnumber = '${safeTranid}' OR UPPER(tranid) = '${upperTranid}' OR UPPER(transactionnumber) = '${upperTranid}') FETCH FIRST 1 ROWS ONLY`;
+			const lookupSql = `SELECT id FROM transaction WHERE UPPER(tranid) = '${upperTranid}' FETCH FIRST 1 ROWS ONLY`;
 			const lookupRes = await mcpTools.executeTool("ns_runCustomSuiteQL", {
 				sqlQuery: lookupSql,
 			});

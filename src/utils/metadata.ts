@@ -141,11 +141,14 @@ export async function resolveCustomRecordRectype(
 
 	try {
 		const safeType = sanitizeScriptId(upperType);
+		const canonicalScriptId = safeType.startsWith("CUSTOMRECORD_")
+			? safeType
+			: `CUSTOMRECORD_${safeType}`;
 		console.error(
-			`🔍 Resolving custom record type mapping dynamically for ${safeType}...`,
+			`🔍 Resolving custom record type mapping dynamically for ${canonicalScriptId}...`,
 		);
 		const result = await mcpTools.executeTool("ns_runCustomSuiteQL", {
-			sqlQuery: `SELECT internalId FROM customrecordtype WHERE UPPER(scriptId) = '${safeType}' OR UPPER(scriptId) = 'CUSTOMRECORD_${safeType}' OR UPPER(name) = '${safeType}' FETCH FIRST 1 ROWS ONLY`,
+			sqlQuery: `SELECT internalId FROM customrecordtype WHERE UPPER(scriptId) = '${canonicalScriptId}' FETCH FIRST 1 ROWS ONLY`,
 		});
 		const records = mcpTools.extractDataArray(result);
 		const firstRecord = records[0];

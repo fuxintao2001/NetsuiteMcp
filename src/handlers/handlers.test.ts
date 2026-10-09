@@ -960,7 +960,7 @@ describe("MCP Handler Wires", () => {
 				expect(mockMCPTools.executeTool).toHaveBeenCalledWith(
 					"ns_runCustomSuiteQL",
 					expect.objectContaining({
-						sqlQuery: expect.stringContaining("tranid = 'SO9876'"),
+						sqlQuery: expect.stringContaining("UPPER(tranid) = 'SO9876'"),
 					}),
 				);
 				expect(mockMCPTools.executeTool).toHaveBeenCalledWith(

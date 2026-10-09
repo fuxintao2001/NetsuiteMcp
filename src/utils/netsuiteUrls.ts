@@ -114,19 +114,15 @@ const RECORD_URL_MAP: Record<string, string> = {
 	customrecordtype: "/app/common/custom/custrecord.nl",
 	script: "/app/common/scripting/script.nl",
 	scriptdeployment: "/app/common/scripting/scriptrecord.nl",
-	scriptrecord: "/app/common/scripting/scriptrecord.nl",
 	workflow: "/app/common/workflow/setup/nextgen/workflowdesktop.nl",
 	savedsearch: "/app/common/search/search.nl",
 
 	// File Cabinet & Media
 	file: "/app/common/media/mediaitem.nl",
-	mediaitem: "/app/common/media/mediaitem.nl",
 	folder: "/app/common/media/mediaitemfolders.nl",
-	mediaitemfolder: "/app/common/media/mediaitemfolders.nl",
 
 	// Advanced PDF Templates
 	advancedpdftemplate: "/app/common/custom/advancedprint/pdftemplate.nl",
-	pdftemplate: "/app/common/custom/advancedprint/pdftemplate.nl",
 
 	// Custom Fields
 	customfield: "/app/common/custom/custfield.nl",
@@ -175,10 +171,7 @@ export function generateNetSuiteUrl(
 	if (isNumericRectype) {
 		const numericRectype = String(rectype).trim();
 		urlPath = `/app/common/custom/custrecordentry.nl?rectype=${numericRectype}&id=${cleanRecordId}`;
-	} else if (
-		normalizedType === "folder" ||
-		normalizedType === "mediaitemfolder"
-	) {
+	} else if (normalizedType === "folder") {
 		urlPath = `/app/common/media/mediaitemfolders.nl?folder=${cleanRecordId}`;
 	} else if (RECORD_URL_MAP[normalizedType]) {
 		urlPath = `${RECORD_URL_MAP[normalizedType]}?id=${cleanRecordId}`;
