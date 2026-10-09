@@ -186,17 +186,11 @@ class NetSuiteMCPServer {
 	private async handleCacheRefresh(args: Record<string, unknown>) {
 		try {
 			const rawTable =
-				args.tableName ??
-				args.table_name ??
-				args.recordType ??
-				args.record_type ??
-				args.table;
-			const tableName =
-				typeof rawTable === "string" ? rawTable.trim().toLowerCase() : "";
-			if (tableName) {
-				await this.mcpTools.clearTableMetadataCache(tableName);
+				typeof args.table === "string" ? args.table.trim().toLowerCase() : "";
+			if (rawTable) {
+				await this.mcpTools.clearTableMetadataCache(rawTable);
 				return textResult(
-					`✅ Successfully cleared cache for table/recordType: ${tableName}`,
+					`✅ Successfully cleared cache for table/recordType: ${rawTable}`,
 				);
 			}
 

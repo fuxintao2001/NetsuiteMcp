@@ -230,13 +230,13 @@ describe("MCP Handler Wires", () => {
 			expect(res.content[0].text).toContain("Acme Corp");
 		});
 
-		it("should normalize table_name / tableName to recordType in netsuite_get_metadata", async () => {
+		it("should query table metadata for customrecord in netsuite_get_metadata", async () => {
 			const callFn = registeredHandlers.get("tools/call");
 
 			await callFn?.({
 				params: {
 					name: "netsuite_get_metadata",
-					arguments: { table_name: "customrecord_special" },
+					arguments: { table: "customrecord_special" },
 				},
 			});
 
@@ -805,7 +805,7 @@ describe("MCP Handler Wires", () => {
 				expect(res.content[0].text).toContain("NetSuite Record Inspection");
 			});
 
-			it("should normalize type, tranid, and nested Arguments for netsuite_get_record", async () => {
+			it("should unwrap nested Arguments and resolve tranid for netsuite_get_record", async () => {
 				const callFn = registeredHandlers.get("tools/call");
 				mockMCPTools.executeTool.mockResolvedValueOnce({
 					data: [{ id: "9028600", type: "itemreceipt" }],
@@ -820,8 +820,8 @@ describe("MCP Handler Wires", () => {
 						name: "netsuite_get_record",
 						arguments: {
 							Arguments: {
-								type: "itemreceipt",
-								tranid: "IR-ZH-202609-000001",
+								recordType: "itemreceipt",
+								id: "IR-ZH-202609-000001",
 							},
 						},
 					},
@@ -1277,7 +1277,7 @@ describe("MCP Handler Wires", () => {
 				const res = await callFn?.({
 					params: {
 						name: "netsuite_status",
-						arguments: { includeDiagnostics: true },
+						arguments: { includeErrors: true },
 					},
 				});
 
@@ -1303,7 +1303,7 @@ describe("MCP Handler Wires", () => {
 
 				const res = await callFn?.({
 					params: {
-						name: "netsuite_suitecloud_upload",
+						name: "netsuite_deploy_script",
 						arguments: {
 							paths: dummyScript,
 							projectPath: testRoot,
@@ -1328,7 +1328,7 @@ describe("MCP Handler Wires", () => {
 
 				const res = await callFn?.({
 					params: {
-						name: "netsuite_suitecloud_upload",
+						name: "netsuite_deploy_script",
 						arguments: {
 							paths: dummyScript,
 							projectPath: testRoot,
@@ -1352,7 +1352,7 @@ describe("MCP Handler Wires", () => {
 
 				const res = await callFn?.({
 					params: {
-						name: "netsuite_suitecloud_upload",
+						name: "netsuite_deploy_script",
 						arguments: {
 							paths: dummyScript,
 							projectPath: testRoot,
@@ -1381,7 +1381,7 @@ describe("MCP Handler Wires", () => {
 
 				const res = await callFn?.({
 					params: {
-						name: "netsuite_suitecloud_upload",
+						name: "netsuite_deploy_script",
 						arguments: {
 							paths: dummyScript,
 							projectPath: testRoot,
@@ -1418,7 +1418,7 @@ describe("MCP Handler Wires", () => {
 
 				const res = await callFn?.({
 					params: {
-						name: "netsuite_suitecloud_upload",
+						name: "netsuite_deploy_script",
 						arguments: {
 							paths: [s1, s2],
 							projectPath: testRoot,
@@ -1444,7 +1444,7 @@ describe("MCP Handler Wires", () => {
 
 				const res = await callFn?.({
 					params: {
-						name: "netsuite_suitecloud_upload",
+						name: "netsuite_deploy_script",
 						arguments: {
 							paths: brokenScript,
 							projectPath: testRoot,
@@ -1474,7 +1474,7 @@ describe("MCP Handler Wires", () => {
 
 				const res = await callFn?.({
 					params: {
-						name: "netsuite_suitecloud_upload",
+						name: "netsuite_deploy_script",
 						arguments: {
 							paths: brokenScript,
 							projectPath: testRoot,

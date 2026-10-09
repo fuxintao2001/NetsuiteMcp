@@ -220,7 +220,7 @@ export function registerResourceHandlers(
 			const types = recordsReferenceService.listRecordTypes();
 			let md = `# Oracle NetSuite Official 272 Records Definition Index\n\n`;
 			md += `Total records available: **${types.length}**\n\n`;
-			md += `Use the tool \`netsuite_schema\` with \`{ recordType: '...' }\` to view complete field metadata for any type below.\n\n`;
+			md += `Use the tool \`netsuite_get_metadata\` with \`{ table: '...' }\` to view complete field metadata for any type below.\n\n`;
 			md += `### Supported Record Types:\n`;
 			md += types.map((t) => `- \`${t}\``).join("\n");
 

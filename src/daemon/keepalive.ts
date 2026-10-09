@@ -351,7 +351,7 @@ export async function runKeepAlive(): Promise<void> {
 					// If session is marked unrecoverable (e.g. invalid_grant), skip automatic keepalive to avoid hammering NetSuite
 					if (session.unrecoverable) {
 						logInfo(
-							`[${accountId}] Skipped (session is unrecoverable, requires manual re-authentication via netsuite_authenticate)`,
+							`[${accountId}] Skipped (session is unrecoverable, requires manual re-authentication via netsuite_auth)`,
 						);
 						skippedAccounts++;
 						continue;

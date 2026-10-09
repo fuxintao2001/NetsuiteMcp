@@ -201,7 +201,7 @@ describe("NetSuiteMCPTools", () => {
 			expect(httpPostSpy).toHaveBeenCalledTimes(1);
 		});
 
-		it("should normalize table_name / tableName / table aliases to recordType and use correct cache key", async () => {
+		it("should normalize table parameter to recordType and use correct cache key", async () => {
 			const cached = {
 				success: true,
 				metadata: { properties: { itemid: { type: "string" } } },
@@ -211,7 +211,7 @@ describe("NetSuiteMCPTools", () => {
 				.mockResolvedValue(cached);
 
 			const result = await client.executeTool("ns_getSuiteQLMetadata", {
-				table_name: "item",
+				table: "item",
 			});
 			expect(result).toEqual(cached);
 			expect(cacheGetSpy).toHaveBeenCalledWith(

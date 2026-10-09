@@ -4,7 +4,6 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { cacheService } from "../cache/cache.js";
 import type { OAuthManager } from "../oauth/manager.js";
-import { resolveRecordTypeParam } from "../utils/args.js";
 import {
 	formatNetSuiteAccountHost,
 	getSkillsDir,
@@ -108,8 +107,9 @@ export class NetSuiteMCPTools {
 
 		// --- Cache check & schema reconnaissance tracking for metadata tools ---
 		if (this.isMetadataTool(toolName)) {
-			const targetTable = resolveRecordTypeParam(parameters);
-			if (targetTable) {
+			const rawTable = parameters.table || parameters.recordType;
+			if (typeof rawTable === "string" && rawTable.trim().length > 0) {
+				const targetTable = rawTable.toLowerCase().trim();
 				parameters.recordType = targetTable;
 				schemaReconnaissanceTracker.record(targetTable);
 			}
@@ -140,12 +140,7 @@ export class NetSuiteMCPTools {
 		}
 
 		if (toolName === "ns_getRecord" || toolName === "ns_updateRecord") {
-			const idVal =
-				parameters.recordId ??
-				parameters.id ??
-				parameters.record_id ??
-				parameters.internalId ??
-				parameters.internal_id;
+			const idVal = parameters.recordId ?? parameters.id;
 			if (idVal !== undefined && idVal !== null) {
 				const strId = String(idVal).trim();
 				if (strId.length > 0) {
@@ -653,7 +648,11 @@ export class NetSuiteMCPTools {
 		toolName: string,
 		params: Record<string, unknown>,
 	): string {
-		const recordType = resolveRecordTypeParam(params) || "all";
+		const raw = params.table ?? params.recordType;
+		const recordType =
+			typeof raw === "string" && raw.trim().length > 0
+				? raw.trim().toLowerCase()
+				: "all";
 		return `${toolName}_${recordType}`;
 	}
 

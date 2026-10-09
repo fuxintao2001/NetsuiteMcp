@@ -206,7 +206,7 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
 		try {
 			const result = await (async (): Promise<CallToolResult> => {
 				// 1. netsuite_auth — Login, Logout & Cache Refresh
-				if (name === "netsuite_auth" || name === "netsuite_authenticate") {
+				if (name === "netsuite_auth") {
 					return await handleAuth(
 						safeArgs,
 						handleAuthentication,
@@ -230,11 +230,9 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
 				}
 
 				// 3. netsuite_run_suiteql — Single authoritative SuiteQL execution tool
-				if (name === "netsuite_run_suiteql" || name === "ns_runCustomSuiteQL") {
-					const rawQuery = (safeArgs.sqlQuery ||
-						safeArgs.query ||
-						safeArgs.sql ||
-						"") as string;
+				if (name === "netsuite_run_suiteql") {
+					const rawQuery =
+						typeof safeArgs.sqlQuery === "string" ? safeArgs.sqlQuery : "";
 					let queriesToRun = splitSuiteQLStatements(rawQuery);
 					if (queriesToRun.length === 0 && Array.isArray(safeArgs.sqlQueries)) {
 						queriesToRun = (safeArgs.sqlQueries as unknown[])
@@ -352,39 +350,14 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
 				}
 
 				// 4. netsuite_get_metadata — Single authoritative table & schema reconnaissance
-				if (
-					name === "netsuite_get_metadata" ||
-					name === "ns_getSuiteQLMetadata" ||
-					name === "ns_getRecordTypeMetadata" ||
-					name === "netsuite_schema"
-				) {
-					const tableParam =
-						safeArgs.table ||
-						safeArgs.recordType ||
-						safeArgs.tableName ||
-						safeArgs.table_name ||
-						"";
-					return await handleGetMetadata(
-						{ ...safeArgs, table: tableParam },
-						mcpTools,
-					);
+				if (name === "netsuite_get_metadata") {
+					return await handleGetMetadata(safeArgs, mcpTools);
 				}
 
 				// 5. netsuite_get_record — Single authoritative record fetch & inspection
-				if (
-					name === "netsuite_get_record" ||
-					name === "ns_getRecord" ||
-					name === "netsuite_inspect_record"
-				) {
-					const recordTypeParam = (safeArgs.recordType ||
-						safeArgs.type ||
-						"") as string;
-					const idParam = (safeArgs.id ||
-						safeArgs.recordId ||
-						safeArgs.tranid ||
-						"") as string;
+				if (name === "netsuite_get_record") {
 					return await handleGetRecord(
-						{ ...safeArgs, recordType: recordTypeParam, id: idParam },
+						safeArgs,
 						mcpTools,
 						oauthManager,
 						resolveCustomRecordRectype,
@@ -402,10 +375,7 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
 				}
 
 				// 8. netsuite_deploy_script — SuiteCloud deployment with syntax pre-flight
-				if (
-					name === "netsuite_deploy_script" ||
-					name === "netsuite_suitecloud_upload"
-				) {
+				if (name === "netsuite_deploy_script") {
 					return await handleSuitecloudUpload(
 						safeArgs,
 						oauthManager,
@@ -443,11 +413,9 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
 				);
 			}
 
-			if (name === "netsuite_run_suiteql" || name === "ns_runCustomSuiteQL") {
-				const sqlQuery = (safeArgs.sqlQuery ||
-					safeArgs.query ||
-					safeArgs.sql ||
-					"") as string;
+			if (name === "netsuite_run_suiteql") {
+				const sqlQuery =
+					typeof safeArgs.sqlQuery === "string" ? safeArgs.sqlQuery : "";
 				return await recordErrorIfPresent(
 					textResult(formatSuiteQLErrorResponse(message, sqlQuery), true),
 					stack,

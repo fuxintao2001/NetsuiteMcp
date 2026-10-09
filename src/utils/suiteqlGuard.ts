@@ -282,7 +282,7 @@ export function validateSuiteQL(sqlQuery: string): SuiteQLValidationResult {
 		return {
 			valid: false,
 			reason:
-				"SuiteQL query contains multiple statements separated by semicolons. Only single read-only queries are allowed per invocation (or use `netsuite_batch_execute` for batch queries).",
+				"SuiteQL query contains multiple statements separated by semicolons. Only single read-only queries are allowed per invocation (or provide 'sqlQueries' array to 'netsuite_run_suiteql' for concurrent execution).",
 		};
 	}
 
@@ -1018,7 +1018,7 @@ export function formatSuiteQLErrorResponse(
 		out += `💡 **Suggested Pattern:**\n\`\`\`sql\n${diag.suggestedFix}\n\`\`\`\n`;
 	}
 	out += `🔄 **Self-Healing Action:** ${diag.selfHealingAction}\n\n`;
-	out += `💡 **Official Skill Guidance:** Call \`netsuite_get_skill({ skillName: 'netsuite-ai-connector-instructions' })\` for deep Oracle patterns.`;
+	out += `💡 **Official Guidance:** Read MCP resource 'netsuite://guides/suiteql' for deep Oracle patterns.`;
 
 	return out;
 }

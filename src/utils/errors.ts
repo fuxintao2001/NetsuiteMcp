@@ -99,8 +99,8 @@ function getActionableAdvice(code: string, message: string): string {
 
 		let advice = "\n💡 [Troubleshooting Advice - Record Type / ID]:";
 		advice += "\n  👉 Code-level immediate self-healing steps:";
-		advice += `\n  - 0ms Offline Standard Schema: Check standard field definitions and types:\n    netsuite_schema({ recordType: '${recName}' })`;
-		advice += `\n  - Live Tenant Schema: For custom records or custom fields (custbody_*):\n    ns_getRecordTypeMetadata({ recordType: '${recName}' })`;
+		advice += `\n  - Offline Standard Schema: Check standard field definitions and types:\n    netsuite_get_metadata({ table: '${recName}' })`;
+		advice += `\n  - Live Tenant Schema: For custom records or custom fields (custbody_*):\n    netsuite_get_metadata({ table: '${recName}' })`;
 		advice += `\n  - Verify record type is lowercase standard (e.g. 'salesorder', 'customer', 'item', 'invoice', 'customrecord_xxx').`;
 		return advice;
 	}
@@ -114,7 +114,7 @@ function getActionableAdvice(code: string, message: string): string {
 		let advice = "\n💡 [Troubleshooting Advice - Missing Required Argument]:";
 		advice += "\n  👉 Code-level immediate self-healing steps:";
 		advice +=
-			"\n  - 0ms Offline Mandatory Check: Inspect mandatory/required fields for the record:\n    netsuite_schema({ recordType: '<record_type>' })";
+			"\n  - Offline Mandatory Check: Inspect mandatory/required fields for the record:\n    netsuite_get_metadata({ table: '<record_type>' })";
 		advice +=
 			"\n  - Ensure all non-nullable / mandatory fields (e.g. entity, subsidiary, trandate) are provided in the mutation payload.";
 		return advice;
@@ -130,7 +130,7 @@ function getActionableAdvice(code: string, message: string): string {
 		advice +=
 			"\n  - Select/List Fields: Pass internal numeric ID strings (e.g. { entity: '123' }) rather than display names (e.g. { entity: 'Acme Corp' }).";
 		advice +=
-			"\n  - Data Types: Check boolean/date/number formats against schema definitions using netsuite_schema.";
+			"\n  - Data Types: Check boolean/date/number formats against schema definitions using netsuite_get_metadata.";
 		return advice;
 	}
 
@@ -149,7 +149,7 @@ function getActionableAdvice(code: string, message: string): string {
 		let advice = "\n💡 [Troubleshooting Advice - Concurrency]:";
 		advice += "\n  - You have exceeded NetSuite's concurrent request limit.";
 		advice +=
-			"\n  👉 Code-level immediate self-healing steps:\n  - Recommended: Batch multiple independent operations into parallel execution:\n    netsuite_batch_execute({ tasks: [{ toolName: 'ns_runCustomSuiteQL', arguments: { sqlQuery: '...' } }] })";
+			"\n  👉 Code-level immediate self-healing steps:\n  - Recommended: Provide 'sqlQueries' array to netsuite_run_suiteql for concurrent execution.";
 		advice +=
 			"\n  - Otherwise, reduce request frequency or add exponential backoff.";
 		return advice;
@@ -233,7 +233,7 @@ export function parseNetSuiteError(error: unknown): Error {
 					errDesc.toLowerCase().includes("refresh token")
 				) {
 					advice +=
-						"\n💡 [Troubleshooting Advice - OAuth Session]:\n  👉 Immediate Action: Refresh token is invalid or expired. Call 'netsuite_authenticate' to re-authenticate.";
+						"\n💡 [Troubleshooting Advice - OAuth Session]:\n  👉 Immediate Action: Refresh token is invalid or expired. Call 'netsuite_auth' with { action: 'login' } to re-authenticate.";
 				}
 				return new Error(
 					`OAuth Error [${errCode}]: ${errDesc || "No details provided"}${advice}`,
@@ -261,7 +261,7 @@ export function parseNetSuiteError(error: unknown): Error {
 		let advice = "";
 		if (status === 429) {
 			advice =
-				"\n💡 [Troubleshooting Advice - Concurrency]:\n  - You have exceeded NetSuite's concurrent request limit.\n  - Recommended: Use `netsuite_batch_execute` or reduce request frequency.";
+				"\n💡 [Troubleshooting Advice - Concurrency]:\n  - You have exceeded NetSuite's concurrent request limit.\n  - Recommended: Provide `sqlQueries` array to `netsuite_run_suiteql` or reduce request frequency.";
 		} else if (status === 403) {
 			advice = PERMISSION_HARD_STOP_ADVICE;
 		}

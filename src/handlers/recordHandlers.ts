@@ -25,42 +25,38 @@ type ToolResponse = CallToolResult;
  * Resolves natural keys (document tranid, entity entityid, item itemid) to numeric internal ID via 1-turn SuiteQL.
  */
 export async function resolveNaturalKeyToInternalId(
-	recordType: string | undefined,
+	recordType: string,
 	naturalKey: string,
 	mcpTools: NetSuiteMCPTools,
 ): Promise<{ id: string; recordType?: string | undefined } | null> {
 	const safeKey = naturalKey.replace(/'/g, "''").trim();
-	if (!safeKey) return null;
+	if (!safeKey || !recordType) return null;
 
-	const recType = recordType ? recordType.toLowerCase().trim() : "";
+	const recType = recordType.toLowerCase().trim();
 
-	// 1. Transaction types (or unspecified): search transaction by tranid
-	const isTransaction =
-		!recType ||
-		[
-			"salesorder",
-			"invoice",
-			"purchaseorder",
-			"estimate",
-			"opportunity",
-			"customerpayment",
-			"vendorbill",
-			"vendorpayment",
-			"creditmemo",
-			"itemfulfillment",
-			"itemreceipt",
-			"returnauthorization",
-			"journalentry",
-			"transferorder",
-			"transaction",
-		].includes(recType);
+	// 1. Transaction types: search transaction by tranid
+	const isTransaction = [
+		"salesorder",
+		"invoice",
+		"purchaseorder",
+		"estimate",
+		"opportunity",
+		"customerpayment",
+		"vendorbill",
+		"vendorpayment",
+		"creditmemo",
+		"itemfulfillment",
+		"itemreceipt",
+		"returnauthorization",
+		"journalentry",
+		"transferorder",
+		"transaction",
+	].includes(recType);
 
 	if (isTransaction) {
 		try {
 			const typeFilter =
-				recType && recType !== "transaction"
-					? `AND LOWER(type) = '${recType}'`
-					: "";
+				recType !== "transaction" ? `AND LOWER(type) = '${recType}'` : "";
 			const upperKey = safeKey.toUpperCase();
 			const sql = `SELECT id, type, tranid FROM transaction WHERE UPPER(tranid) = '${upperKey}' ${typeFilter} ORDER BY id DESC FETCH FIRST 1 ROWS ONLY`;
 			const res = await mcpTools.executeTool("ns_runCustomSuiteQL", {
@@ -74,11 +70,12 @@ export async function resolveNaturalKeyToInternalId(
 				};
 			}
 		} catch {
-			/* fallback to other lookups */
+			/* Lookup failed */
 		}
+		return null;
 	}
 
-	// 1b. Custom record lookup by canonical name
+	// 2. Custom record lookup by canonical name
 	if (recType.startsWith("customrecord")) {
 		try {
 			const upperKey = safeKey.toUpperCase();
@@ -91,35 +88,34 @@ export async function resolveNaturalKeyToInternalId(
 				return { id: String(rows[0].id), recordType: recType };
 			}
 		} catch {
-			/* continue */
+			/* Lookup failed */
 		}
+		return null;
 	}
 
-	// 2. Customer / Entity
-	if (
-		!recType ||
-		recType === "customer" ||
-		recType === "vendor" ||
-		recType === "entity"
-	) {
+	// 3. Customer / Vendor / Entity
+	if (recType === "customer" || recType === "vendor" || recType === "entity") {
 		try {
-			const sql = `SELECT id FROM entity WHERE entityid = '${safeKey}' FETCH FIRST 1 ROWS ONLY`;
+			const upperKey = safeKey.toUpperCase();
+			const sql = `SELECT id FROM entity WHERE UPPER(entityid) = '${upperKey}' FETCH FIRST 1 ROWS ONLY`;
 			const res = await mcpTools.executeTool("ns_runCustomSuiteQL", {
 				sqlQuery: sql,
 			});
 			const rows = mcpTools.extractDataArray(res);
 			if (rows.length > 0 && rows[0]?.id) {
-				return { id: String(rows[0].id), recordType: recType || "customer" };
+				return { id: String(rows[0].id), recordType: recType };
 			}
 		} catch {
-			/* continue */
+			/* Lookup failed */
 		}
+		return null;
 	}
 
-	// 3. Item
-	if (!recType || recType === "item" || recType === "inventoryitem") {
+	// 4. Item
+	if (recType === "item" || recType === "inventoryitem") {
 		try {
-			const sql = `SELECT id FROM item WHERE itemid = '${safeKey}' FETCH FIRST 1 ROWS ONLY`;
+			const upperKey = safeKey.toUpperCase();
+			const sql = `SELECT id FROM item WHERE UPPER(itemid) = '${upperKey}' FETCH FIRST 1 ROWS ONLY`;
 			const res = await mcpTools.executeTool("ns_runCustomSuiteQL", {
 				sqlQuery: sql,
 			});
@@ -128,8 +124,9 @@ export async function resolveNaturalKeyToInternalId(
 				return { id: String(rows[0].id), recordType: "item" };
 			}
 		} catch {
-			/* continue */
+			/* Lookup failed */
 		}
+		return null;
 	}
 
 	return null;

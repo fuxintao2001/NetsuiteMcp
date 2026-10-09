@@ -67,10 +67,7 @@ describe("toolErrorLogger", () => {
 				"ARGUMENT_VALIDATION",
 			);
 			expect(
-				classifyError(
-					"netsuite_authenticate",
-					"Required field clientId is missing",
-				),
+				classifyError("netsuite_auth", "Required field clientId is missing"),
 			).toBe("ARGUMENT_VALIDATION");
 		});
 

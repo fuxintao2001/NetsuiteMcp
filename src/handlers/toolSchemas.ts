@@ -266,11 +266,6 @@ export const StatusArgsSchema = z.object({
 		.describe(
 			"Whether to include recent error summary and self-healing recommendations.",
 		),
-	includeDiagnostics: z
-		.boolean()
-		.optional()
-		.default(false)
-		.describe("Alias for includeErrors."),
 });
 export type StatusArgs = z.infer<typeof StatusArgsSchema>;
 

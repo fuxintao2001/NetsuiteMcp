@@ -3,71 +3,46 @@ import { formatNetSuiteAccountHost } from "./environment.js";
 const RECORD_URL_MAP: Record<string, string> = {
 	// Entities
 	customer: "/app/common/entity/custjob.nl",
-	custjob: "/app/common/entity/custjob.nl",
 	lead: "/app/common/entity/custjob.nl",
 	prospect: "/app/common/entity/custjob.nl",
 	project: "/app/common/entity/custjob.nl",
-	job: "/app/common/entity/custjob.nl",
 	vendor: "/app/common/entity/vendor.nl",
 	employee: "/app/common/entity/employee.nl",
 	contact: "/app/common/entity/contact.nl",
 	partner: "/app/common/entity/partner.nl",
-	entity: "/app/common/entity/custjob.nl",
 
 	// CRM & Activities
 	supportcase: "/app/crm/support/supportcase.nl",
-	case: "/app/crm/support/supportcase.nl",
 	task: "/app/common/entity/task.nl",
 	phonecall: "/app/crm/calendar/call.nl",
-	call: "/app/crm/calendar/call.nl",
 	event: "/app/crm/calendar/event.nl",
 	message: "/app/common/entity/message.nl",
 	opportunity: "/app/accounting/transactions/opprtnty.nl",
-	opprtnty: "/app/accounting/transactions/opprtnty.nl",
 
 	// Transactions (Direct URL paths)
 	salesorder: "/app/accounting/transactions/salesord.nl",
-	salesord: "/app/accounting/transactions/salesord.nl",
 	invoice: "/app/accounting/transactions/custinvc.nl",
-	custinvc: "/app/accounting/transactions/custinvc.nl",
 	purchaseorder: "/app/accounting/transactions/purchord.nl",
-	purchord: "/app/accounting/transactions/purchord.nl",
 	vendorbill: "/app/accounting/transactions/vendbill.nl",
-	vendbill: "/app/accounting/transactions/vendbill.nl",
 	cashsale: "/app/accounting/transactions/cashsale.nl",
 	estimate: "/app/accounting/transactions/estimate.nl",
-	quote: "/app/accounting/transactions/estimate.nl",
-	custpymt: "/app/accounting/transactions/custpymt.nl",
 	customerpayment: "/app/accounting/transactions/custpymt.nl",
-	payment: "/app/accounting/transactions/custpymt.nl",
-	vendpymt: "/app/accounting/transactions/vendpymt.nl",
 	vendorpayment: "/app/accounting/transactions/vendpymt.nl",
 	journalentry: "/app/accounting/transactions/journal.nl",
-	journal: "/app/accounting/transactions/journal.nl",
 	creditmemo: "/app/accounting/transactions/custcred.nl",
-	custcred: "/app/accounting/transactions/custcred.nl",
 	vendorcredit: "/app/accounting/transactions/vendcred.nl",
-	vendcred: "/app/accounting/transactions/vendcred.nl",
 	returnauthorization: "/app/accounting/transactions/rtnauth.nl",
-	rtnauth: "/app/accounting/transactions/rtnauth.nl",
 	vendorreturnauthorization: "/app/accounting/transactions/vendauth.nl",
 	deposit: "/app/accounting/transactions/deposit.nl",
 	check: "/app/accounting/transactions/check.nl",
 	assemblybuild: "/app/accounting/transactions/build.nl",
 	assemblyunbuild: "/app/accounting/transactions/unbuild.nl",
 	itemfulfillment: "/app/accounting/transactions/itemship.nl",
-	itemship: "/app/accounting/transactions/itemship.nl",
-	itemfld: "/app/accounting/transactions/itemship.nl",
 	itemreceipt: "/app/accounting/transactions/itemrcpt.nl",
-	itemrcpt: "/app/accounting/transactions/itemrcpt.nl",
 	transferorder: "/app/accounting/transactions/trnfrord.nl",
-	transfer: "/app/accounting/transactions/trnfrord.nl",
 	expensereport: "/app/accounting/transactions/exprept.nl",
-	exprept: "/app/accounting/transactions/exprept.nl",
 	cashrefund: "/app/accounting/transactions/cashrfnd.nl",
-	cashrfnd: "/app/accounting/transactions/cashrfnd.nl",
 	workorder: "/app/accounting/transactions/workord.nl",
-	workord: "/app/accounting/transactions/workord.nl",
 	inventoryadjustment: "/app/accounting/transactions/invadjst.nl",
 	inventorytransfer: "/app/accounting/transactions/invtrnfr.nl",
 	inventorycostrevaluation: "/app/accounting/transactions/reval.nl",
@@ -79,12 +54,10 @@ const RECORD_URL_MAP: Record<string, string> = {
 	location: "/app/common/other/location.nl",
 	account: "/app/accounting/general/account.nl",
 	accountingperiod: "/app/accounting/other/period.nl",
-	period: "/app/accounting/other/period.nl",
 	accountingbook: "/app/accounting/general/accountingbook.nl",
 	currency: "/app/common/other/currency.nl",
 	nexus: "/app/accounting/general/nexus.nl",
 	taxitem: "/app/accounting/general/taxitem.nl",
-	salestaxitem: "/app/accounting/general/taxitem.nl",
 	taxgroup: "/app/accounting/general/taxgroup.nl",
 	taxtype: "/app/accounting/general/taxtype.nl",
 	pricelevel: "/app/accounting/general/pricelevel.nl",
@@ -175,14 +148,8 @@ export function generateNetSuiteUrl(
 		urlPath = `/app/common/media/mediaitemfolders.nl?folder=${cleanRecordId}`;
 	} else if (RECORD_URL_MAP[normalizedType]) {
 		urlPath = `${RECORD_URL_MAP[normalizedType]}?id=${cleanRecordId}`;
-	} else if (originalType.startsWith("customrecord")) {
-		// Custom records MUST have a numeric rectype in NetSuite UI.
-		// Passing a string script ID (e.g. rectype=customrecord_xxx) produces a broken NetSuite page.
-		// Return null to signal resolution failure.
-		return null;
 	} else {
-		// Fallback: transaction.nl automatically redirects standard transaction types
-		urlPath = `/app/accounting/transactions/transaction.nl?id=${cleanRecordId}`;
+		return null;
 	}
 
 	return `https://${formattedAccountId}.app.netsuite.com${urlPath}`;

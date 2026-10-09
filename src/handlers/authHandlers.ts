@@ -35,9 +35,7 @@ export async function handleStatus(
 	args: Record<string, unknown> = {},
 ): Promise<ToolResponse> {
 	const parsed = StatusArgsSchema.safeParse(args);
-	const includeErrors = parsed.success
-		? parsed.data.includeErrors || parsed.data.includeDiagnostics
-		: false;
+	const includeErrors = parsed.success ? parsed.data.includeErrors : false;
 
 	const sessionInfo = await oauthManager.getSessionInfo();
 	const cacheStats = await cacheService.getStats();

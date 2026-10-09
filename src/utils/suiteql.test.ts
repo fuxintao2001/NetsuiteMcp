@@ -1022,11 +1022,9 @@ describe("SuiteQL, Search & Query Utilities", () => {
 			);
 		});
 
-		it("should fall back to standard transaction page if record type is unmapped", () => {
+		it("should return null deterministically if record type is unmapped", () => {
 			const fallbackUrl = generateNetSuiteUrl("123456", "unknown_type", "888");
-			expect(fallbackUrl).toBe(
-				"https://123456.app.netsuite.com/app/accounting/transactions/transaction.nl?id=888",
-			);
+			expect(fallbackUrl).toBeNull();
 		});
 
 		it("should resolve file cabinet, customization, and workflow URLs accurately", () => {

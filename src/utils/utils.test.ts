@@ -365,7 +365,7 @@ SPACED = trimmed
 				const result = parseNetSuiteError(mockError);
 				expect(result.message).toContain("OAuth Error [invalid_grant]");
 				expect(result.message).toContain(
-					"Call 'netsuite_authenticate' to re-authenticate",
+					"Call 'netsuite_auth' with { action: 'login' } to re-authenticate",
 				);
 			});
 
@@ -385,8 +385,7 @@ SPACED = trimmed
 				};
 
 				const result = parseNetSuiteError(mockError);
-				expect(result.message).toContain("netsuite_schema");
-				expect(result.message).toContain("ns_getRecordTypeMetadata");
+				expect(result.message).toContain("netsuite_get_metadata");
 			});
 
 			it("should append hard-stop permission advice on INSUFFICIENT_PERMISSION", () => {
