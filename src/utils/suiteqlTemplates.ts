@@ -296,6 +296,43 @@ FETCH FIRST 10 ROWS ONLY`,
 		officialSource:
 			"Oracle NetSuite Records Catalog & SAFE Guide Section 3.3.7 (Tim Dietrich SuiteQL Library)",
 	},
+	{
+		id: "record_deployed_scripts",
+		name: "Scripts Deployed to Record Type (User Events, Client & Action Scripts)",
+		category: "system_debug",
+		description:
+			"Inspect all SuiteScripts and Workflows deployed to a given record type (e.g. Sales Order, Customer, Invoice) along with their entry point handlers and active status.",
+		sqlTemplate: `SELECT 
+  s.id AS script_id,
+  s.scriptid AS script_text_id,
+  s.name AS script_name,
+  s.scripttype AS script_type,
+  sd.primarykey AS deployment_id,
+  sd.scriptid AS deployment_text_id,
+  sd.status,
+  sd.isdeployed,
+  s.isinactive,
+  s.beforeloadfunction,
+  s.beforesubmitfunction,
+  s.aftersubmitfunction
+FROM 
+  ScriptDeployment sd
+  INNER JOIN Script s ON sd.script = s.id
+WHERE 
+  UPPER(sd.recordtype) = UPPER(:recordType)
+ORDER BY 
+  s.scripttype, s.name`,
+		params: {
+			":recordType":
+				"Record type script ID (e.g. \x27SALESORDER\x27, \x27CUSTOMER\x27, \x27INVOICE\x27, or custom record ID)",
+		},
+		bestPractices: [
+			"Essential diagnostic query when debugging record save errors or slow UI performance.",
+			"Filters by uppercase recordtype on ScriptDeployment table to reveal all active User Event and Client scripts.",
+		],
+		officialSource:
+			"Oracle NetSuite SAFE Guide 2025.2 & ScriptDeployment Records Catalog",
+	},
 ];
 
 export class SuiteQLTemplateService {

@@ -129,6 +129,14 @@ export type GetRecordArgs = z.infer<typeof GetRecordArgsSchema>;
  * Single authoritative tool for debugging SuiteScript execution logs (ScriptNote).
  */
 export const GetScriptLogsArgsSchema = z.object({
+	recordType: z
+		.string()
+		.trim()
+		.toLowerCase()
+		.optional()
+		.describe(
+			"Optional filter by NetSuite record type (e.g. 'salesorder', 'customer', 'invoice', 'customrecord_xxx'). Automatically resolves all scripts deployed to this record type via ScriptDeployment.",
+		),
 	scriptId: z
 		.string()
 		.trim()
@@ -368,10 +376,15 @@ export const GET_RECORD_TOOL = {
 export const SCRIPT_LOGS_TOOL = {
 	name: "netsuite_get_script_logs",
 	description:
-		"Query NetSuite SuiteScript execution logs (ScriptNote) with index optimization. Defaults to the last 7 days.",
+		"Query NetSuite SuiteScript execution logs (ScriptNote) by script, deployment, or record type with index optimization. Defaults to the last 7 days.",
 	inputSchema: {
 		type: "object" as const,
 		properties: {
+			recordType: {
+				type: "string",
+				description:
+					"Optional filter by NetSuite record type (e.g. 'salesorder', 'customer'). Resolves all scripts deployed to this record type.",
+			},
 			scriptId: {
 				type: "string",
 				description:

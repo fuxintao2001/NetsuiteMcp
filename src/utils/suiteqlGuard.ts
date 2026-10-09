@@ -611,6 +611,91 @@ export function diagnoseSuiteQLError(
 	const err = (rawError || "").trim();
 	const sql = (sqlQuery || "").trim();
 
+	// 0. The "False near: FETCH Trap" (Derived from netsuite-full-tools real-world telemetry)
+	if (
+		/failed to parse sql[\s\S]*near:\s*FETCH/i.test(err) ||
+		/syntax error[\s\S]*near:\s*FETCH/i.test(err)
+	) {
+		return {
+			isDiagnosed: true,
+			summary: "Preceding Syntax/Column Error (The False 'near: FETCH' Trap)",
+			rootCause:
+				"NetSuite SuiteQL fully supports 'FETCH FIRST N ROWS ONLY'. The parser encountered an invalid column name, missing comma, or unbalanced expression immediately before the FETCH clause and derailed onto the FETCH token.",
+			officialGuidance:
+				"DO NOT remove 'FETCH FIRST' or convert it to MySQL 'LIMIT' (which is completely invalid in NetSuite). Inspect the column list or WHERE clause immediately before 'FETCH'. You can test individual columns or use 'WHERE ROWNUM <= N' to locate the offending column.",
+			suggestedFix: "SELECT id, tranid FROM transaction WHERE ROWNUM <= 10",
+			selfHealingAction:
+				"Keep Oracle-standard pagination. Check the column list and WHERE condition directly preceding the FETCH clause for typos or missing commas.",
+		};
+	}
+
+	// 0b. Duplicate column alias
+	if (/duplicate alias|QUERY_DUPLICATE_ALIAS|SSS_DUPLICATE_ALIAS/i.test(err)) {
+		return {
+			isDiagnosed: true,
+			summary: "Duplicate Column Alias in SELECT Clause",
+			rootCause:
+				"Two or more projected columns share the identical AS alias name. In NetSuite SuiteQL, each column alias must be unique across the projection.",
+			officialGuidance:
+				"Assign distinct alias names to each projected column (e.g. 'AS col1', 'AS col2').",
+			suggestedFix:
+				"SELECT t.id AS tran_id, tl.id AS line_id, t.tranid FROM transaction t JOIN transactionline tl ON t.id = tl.transaction",
+			selfHealingAction: "Rename conflicting column aliases to unique names.",
+		};
+	}
+
+	// 0c. Ambiguous column reference
+	if (/ambiguous column|ambiguously defined/i.test(err)) {
+		return {
+			isDiagnosed: true,
+			summary: "Ambiguous Column Reference in Joined Tables",
+			rootCause:
+				"The specified column exists in multiple joined tables (e.g. 'id', 'lastmodifieddate', 'subsidiary', 'memo'). NetSuite cannot determine which table to read from.",
+			officialGuidance:
+				"Prefix the column name with the appropriate table alias (e.g. 't.id' or 'tl.id').",
+			suggestedFix:
+				"SELECT t.id, t.tranid, tl.item FROM transaction t JOIN transactionline tl ON t.id = tl.transaction",
+			selfHealingAction:
+				"Prefix ambiguous column(s) with their specific table alias.",
+		};
+	}
+
+	// 0d. GROUP BY non-aggregated expression
+	if (
+		/not a GROUP BY expression|not a single-group group function|must appear in the GROUP BY/i.test(
+			err,
+		)
+	) {
+		return {
+			isDiagnosed: true,
+			summary: "Invalid GROUP BY Expression (Non-Aggregated Column)",
+			rootCause:
+				"When mixing aggregate functions (SUM, COUNT, AVG, MAX, MIN) with regular columns, Oracle NetSuite requires EVERY non-aggregated column in SELECT to appear in the GROUP BY clause.",
+			officialGuidance:
+				"Add all non-aggregated SELECT columns to the GROUP BY clause, or reference them by ordinal column position (e.g. GROUP BY 1, 2).",
+			suggestedFix:
+				"SELECT t.type, t.entity, COUNT(*), SUM(t.foreigntotal) FROM transaction t GROUP BY t.type, t.entity",
+			selfHealingAction:
+				"Add missing non-aggregated columns to the GROUP BY clause.",
+		};
+	}
+
+	// 0e. Invalid JOIN relationship
+	if (/QUERY_INVALID_JOIN|invalid join/i.test(err)) {
+		return {
+			isDiagnosed: true,
+			summary: "Invalid Table JOIN (No Direct Relationship)",
+			rootCause:
+				"The two joined tables do not have a direct foreign key relationship in NetSuite SuiteQL schema.",
+			officialGuidance:
+				"Verify valid join paths via 'netsuite_get_metadata'. For example, join 'transaction' to 'item' through 'transactionline'.",
+			suggestedFix:
+				"SELECT t.id, tl.item, i.itemid FROM transaction t JOIN transactionline tl ON t.id = tl.transaction JOIN item i ON tl.item = i.id",
+			selfHealingAction:
+				"Call netsuite_get_metadata to verify foreign keys and join through linking tables (such as transactionline).",
+		};
+	}
+
 	// 1. Unknown identifier: createdfrom on transaction
 	if (
 		/unknown identifier ['"]?createdfrom['"]?/i.test(err) ||

@@ -8,7 +8,10 @@ import {
 	formatTableCatalogMarkdown,
 	searchSuiteQLCatalog,
 } from "./metadata.js";
-import { generateNetSuiteUrl } from "./netsuiteUrls.js";
+import {
+	generateNetSuiteScriptFileUrl,
+	generateNetSuiteUrl,
+} from "./netsuiteUrls.js";
 import {
 	assertValidSuiteQL,
 	diagnoseSuiteQLError,
@@ -673,6 +676,51 @@ describe("SuiteQL, Search & Query Utilities", () => {
 				);
 			});
 
+			it("should diagnose the false 'near: FETCH' trap and prevent invalid LIMIT conversion", () => {
+				const diag = diagnoseSuiteQLError(
+					"Failed to parse sql near: FETCH",
+					"SELECT id, bad_column FROM transaction FETCH FIRST 10 ROWS ONLY",
+				);
+				expect(diag.isDiagnosed).toBe(true);
+				expect(diag.summary).toContain("False 'near: FETCH' Trap");
+				expect(diag.officialGuidance).toContain("DO NOT remove 'FETCH FIRST'");
+				expect(diag.selfHealingAction).toContain(
+					"Keep Oracle-standard pagination",
+				);
+			});
+
+			it("should diagnose duplicate alias errors", () => {
+				const diag = diagnoseSuiteQLError("duplicate alias 'amount'");
+				expect(diag.isDiagnosed).toBe(true);
+				expect(diag.summary).toContain("Duplicate Column Alias");
+				expect(diag.suggestedFix).toContain("AS tran_id");
+			});
+
+			it("should diagnose ambiguous column references in joined tables", () => {
+				const diag = diagnoseSuiteQLError("column 'id' is ambiguous column");
+				expect(diag.isDiagnosed).toBe(true);
+				expect(diag.summary).toContain("Ambiguous Column Reference");
+				expect(diag.selfHealingAction).toContain("Prefix ambiguous column(s)");
+			});
+
+			it("should diagnose GROUP BY non-aggregated expression errors", () => {
+				const diag = diagnoseSuiteQLError("not a GROUP BY expression");
+				expect(diag.isDiagnosed).toBe(true);
+				expect(diag.summary).toContain("Invalid GROUP BY Expression");
+				expect(diag.officialGuidance).toContain(
+					"Add all non-aggregated SELECT columns",
+				);
+			});
+
+			it("should diagnose invalid table JOIN relationships", () => {
+				const diag = diagnoseSuiteQLError(
+					"QUERY_INVALID_JOIN: invalid join between transaction and item",
+				);
+				expect(diag.isDiagnosed).toBe(true);
+				expect(diag.summary).toContain("Invalid Table JOIN");
+				expect(diag.selfHealingAction).toContain("netsuite_get_metadata");
+			});
+
 			it("should handle unknown generic errors gracefully", () => {
 				const diag = diagnoseSuiteQLError("Some bizarre internal error");
 				expect(diag.isDiagnosed).toBe(false);
@@ -978,6 +1026,43 @@ describe("SuiteQL, Search & Query Utilities", () => {
 			const fallbackUrl = generateNetSuiteUrl("123456", "unknown_type", "888");
 			expect(fallbackUrl).toBe(
 				"https://123456.app.netsuite.com/app/accounting/transactions/transaction.nl?id=888",
+			);
+		});
+
+		it("should resolve file cabinet, customization, and workflow URLs accurately", () => {
+			const folderUrl = generateNetSuiteUrl("123456", "folder", "42");
+			expect(folderUrl).toBe(
+				"https://123456.app.netsuite.com/app/common/media/mediaitemfolders.nl?folder=42",
+			);
+
+			const fileUrl = generateNetSuiteUrl("123456", "file", "108");
+			expect(fileUrl).toBe(
+				"https://123456.app.netsuite.com/app/common/media/mediaitem.nl?id=108",
+			);
+
+			const customRecordTypeUrl = generateNetSuiteUrl(
+				"123456",
+				"customrecordtype",
+				"999",
+			);
+			expect(customRecordTypeUrl).toBe(
+				"https://123456.app.netsuite.com/app/common/custom/custrecord.nl?id=999",
+			);
+
+			const workflowUrl = generateNetSuiteUrl("123456", "workflow", "15");
+			expect(workflowUrl).toBe(
+				"https://123456.app.netsuite.com/app/common/workflow/setup/nextgen/workflowdesktop.nl?id=15",
+			);
+		});
+
+		it("should generate NetSuite script file editor direct link", () => {
+			expect(generateNetSuiteScriptFileUrl(undefined, "123")).toBeNull();
+			expect(generateNetSuiteScriptFileUrl("123456", undefined)).toBeNull();
+			expect(generateNetSuiteScriptFileUrl("123456", "")).toBeNull();
+
+			const scriptFileUrl = generateNetSuiteScriptFileUrl("123456_SB1", "2048");
+			expect(scriptFileUrl).toBe(
+				"https://123456-sb1.app.netsuite.com/app/common/record/edittextmediaitem.nl?id=2048&e=T&l=T&target=filesize&syntaxHighlighting=T",
 			);
 		});
 	});

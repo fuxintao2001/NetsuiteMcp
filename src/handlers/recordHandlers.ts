@@ -61,7 +61,8 @@ export async function resolveNaturalKeyToInternalId(
 				recType && recType !== "transaction"
 					? `AND LOWER(type) = '${recType}'`
 					: "";
-			const sql = `SELECT id, type, tranid FROM transaction WHERE tranid = '${safeKey}' ${typeFilter} ORDER BY id DESC FETCH FIRST 1 ROWS ONLY`;
+			const upperKey = safeKey.toUpperCase();
+			const sql = `SELECT id, type, tranid FROM transaction WHERE (tranid = '${safeKey}' OR transactionnumber = '${safeKey}' OR UPPER(tranid) = '${upperKey}' OR UPPER(transactionnumber) = '${upperKey}') ${typeFilter} ORDER BY id DESC FETCH FIRST 1 ROWS ONLY`;
 			const res = await mcpTools.executeTool("ns_runCustomSuiteQL", {
 				sqlQuery: sql,
 			});
@@ -74,6 +75,23 @@ export async function resolveNaturalKeyToInternalId(
 			}
 		} catch {
 			/* fallback to other lookups */
+		}
+	}
+
+	// 1b. Custom record lookup by name or scriptid
+	if (recType.startsWith("customrecord")) {
+		try {
+			const upperKey = safeKey.toUpperCase();
+			const sql = `SELECT id, name, scriptid FROM ${recType} WHERE name = '${safeKey}' OR UPPER(name) = '${upperKey}' OR UPPER(scriptid) = '${upperKey}' ORDER BY id DESC FETCH FIRST 1 ROWS ONLY`;
+			const res = await mcpTools.executeTool("ns_runCustomSuiteQL", {
+				sqlQuery: sql,
+			});
+			const rows = mcpTools.extractDataArray(res);
+			if (rows.length > 0 && rows[0]?.id) {
+				return { id: String(rows[0].id), recordType: recType };
+			}
+		} catch {
+			/* continue */
 		}
 	}
 
@@ -525,7 +543,8 @@ export async function handleGetSystemNotes(
 	if (!isNumeric) {
 		try {
 			const safeTranid = recordId.trim().replace(/'/g, "''");
-			const lookupSql = `SELECT id FROM transaction WHERE tranid = '${safeTranid}' FETCH FIRST 1 ROWS ONLY`;
+			const upperTranid = safeTranid.toUpperCase();
+			const lookupSql = `SELECT id FROM transaction WHERE (tranid = '${safeTranid}' OR transactionnumber = '${safeTranid}' OR UPPER(tranid) = '${upperTranid}' OR UPPER(transactionnumber) = '${upperTranid}') FETCH FIRST 1 ROWS ONLY`;
 			const lookupRes = await mcpTools.executeTool("ns_runCustomSuiteQL", {
 				sqlQuery: lookupSql,
 			});

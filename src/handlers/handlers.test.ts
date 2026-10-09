@@ -567,6 +567,26 @@ describe("MCP Handler Wires", () => {
 				expect(sqlArg).toContain("FETCH FIRST 100 ROWS ONLY");
 			});
 
+			it("should filter logs by recordType via ScriptDeployment", async () => {
+				const callFn = registeredHandlers.get("tools/call");
+				mockMCPTools.executeTool.mockResolvedValueOnce({ data: [] });
+
+				await callFn?.({
+					params: {
+						name: "netsuite_get_script_logs",
+						arguments: {
+							recordType: "salesorder",
+						},
+					},
+				});
+
+				const sqlArg = mockMCPTools.executeTool.mock.calls[0][1]
+					.sqlQuery as string;
+				expect(sqlArg).toContain(
+					"sn.scripttype IN (SELECT sd_sub.script FROM ScriptDeployment sd_sub WHERE UPPER(sd_sub.recordtype) = 'SALESORDER')",
+				);
+			});
+
 			it("should reject invalid date format", async () => {
 				const callFn = registeredHandlers.get("tools/call");
 
@@ -940,7 +960,7 @@ describe("MCP Handler Wires", () => {
 				expect(mockMCPTools.executeTool).toHaveBeenCalledWith(
 					"ns_runCustomSuiteQL",
 					expect.objectContaining({
-						sqlQuery: expect.stringContaining("WHERE tranid = 'SO9876'"),
+						sqlQuery: expect.stringContaining("tranid = 'SO9876'"),
 					}),
 				);
 				expect(mockMCPTools.executeTool).toHaveBeenCalledWith(

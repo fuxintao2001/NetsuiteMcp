@@ -111,10 +111,32 @@ const RECORD_URL_MAP: Record<string, string> = {
 	// Customization, SuiteScript & Search
 	customlist: "/app/common/custom/customlist.nl",
 	customsegment: "/app/common/custom/customsegment.nl",
+	customrecordtype: "/app/common/custom/custrecord.nl",
 	script: "/app/common/scripting/script.nl",
 	scriptdeployment: "/app/common/scripting/scriptrecord.nl",
-	workflow: "/app/common/workflow/setup.nl",
+	scriptrecord: "/app/common/scripting/scriptrecord.nl",
+	workflow: "/app/common/workflow/setup/nextgen/workflowdesktop.nl",
 	savedsearch: "/app/common/search/search.nl",
+
+	// File Cabinet & Media
+	file: "/app/common/media/mediaitem.nl",
+	mediaitem: "/app/common/media/mediaitem.nl",
+	folder: "/app/common/media/mediaitemfolders.nl",
+	mediaitemfolder: "/app/common/media/mediaitemfolders.nl",
+
+	// Advanced PDF Templates
+	advancedpdftemplate: "/app/common/custom/advancedprint/pdftemplate.nl",
+	pdftemplate: "/app/common/custom/advancedprint/pdftemplate.nl",
+
+	// Custom Fields
+	customfield: "/app/common/custom/custfield.nl",
+	bodycustfield: "/app/common/custom/bodycustfield.nl",
+	columncustfield: "/app/common/custom/columncustfield.nl",
+	entitycustfield: "/app/common/custom/entitycustfield.nl",
+	itemcustfield: "/app/common/custom/itemcustfield.nl",
+	othercustfield: "/app/common/custom/othercustfield.nl",
+	crmcustfield: "/app/common/custom/crmcustfield.nl",
+	itemnumbercustfield: "/app/common/custom/itemnumbercustfield.nl",
 };
 
 /**
@@ -153,17 +175,36 @@ export function generateNetSuiteUrl(
 	if (isNumericRectype) {
 		const numericRectype = String(rectype).trim();
 		urlPath = `/app/common/custom/custrecordentry.nl?rectype=${numericRectype}&id=${cleanRecordId}`;
+	} else if (
+		normalizedType === "folder" ||
+		normalizedType === "mediaitemfolder"
+	) {
+		urlPath = `/app/common/media/mediaitemfolders.nl?folder=${cleanRecordId}`;
+	} else if (RECORD_URL_MAP[normalizedType]) {
+		urlPath = `${RECORD_URL_MAP[normalizedType]}?id=${cleanRecordId}`;
 	} else if (originalType.startsWith("customrecord")) {
 		// Custom records MUST have a numeric rectype in NetSuite UI.
 		// Passing a string script ID (e.g. rectype=customrecord_xxx) produces a broken NetSuite page.
 		// Return null to signal resolution failure.
 		return null;
-	} else if (RECORD_URL_MAP[normalizedType]) {
-		urlPath = `${RECORD_URL_MAP[normalizedType]}?id=${cleanRecordId}`;
 	} else {
 		// Fallback: transaction.nl automatically redirects standard transaction types
 		urlPath = `/app/accounting/transactions/transaction.nl?id=${cleanRecordId}`;
 	}
 
 	return `https://${formattedAccountId}.app.netsuite.com${urlPath}`;
+}
+
+/**
+ * Generate NetSuite script file editor direct link URL.
+ */
+export function generateNetSuiteScriptFileUrl(
+	accountId: string | undefined,
+	fileId: string | number | undefined,
+): string | null {
+	const cleanFileId =
+		fileId !== undefined && fileId !== null ? String(fileId).trim() : "";
+	if (!accountId || !cleanFileId) return null;
+	const formattedAccountId = formatNetSuiteAccountHost(accountId.toString());
+	return `https://${formattedAccountId}.app.netsuite.com/app/common/record/edittextmediaitem.nl?id=${cleanFileId}&e=T&l=T&target=filesize&syntaxHighlighting=T`;
 }

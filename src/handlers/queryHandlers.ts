@@ -19,6 +19,7 @@ export async function handleGetScriptLogs(
 		return textResult(`❌ ${parsed.error.issues[0]?.message}`, true);
 	}
 	const {
+		recordType,
 		scriptId,
 		type: logType,
 		dateFrom,
@@ -33,6 +34,20 @@ export async function handleGetScriptLogs(
 
 	// Build WHERE clauses with OWASP input validation & sanitization
 	const conditions: string[] = [];
+
+	if (recordType) {
+		const cleanRecordType = recordType.trim().toUpperCase();
+		if (!/^[A-Z0-9_\-.]+$/.test(cleanRecordType)) {
+			return textResult(
+				"❌ Invalid recordType format. Only alphanumeric characters, dashes, and underscores are permitted.",
+				true,
+			);
+		}
+		const escapedRecordType = cleanRecordType.replace(/'/g, "''");
+		conditions.push(
+			`sn.scripttype IN (SELECT sd_sub.script FROM ScriptDeployment sd_sub WHERE UPPER(sd_sub.recordtype) = '${escapedRecordType}')`,
+		);
+	}
 
 	if (scriptId) {
 		const cleanScriptId = scriptId.trim();
