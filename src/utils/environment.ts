@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const projectRoot = path.resolve(__dirname, "../../");
+const defaultProjectRoot = path.resolve(__dirname, "../../");
 
 // ---------------------------------------------------------------------------
 // Environment detection utilities
@@ -66,6 +66,11 @@ export function getSkillsDir(projectRoot?: string): string {
 	if (fs.existsSync(globalPath)) {
 		return globalPath;
 	}
+	const localRoot = projectRoot || defaultProjectRoot;
+	const localSkills = path.join(localRoot, "skills");
+	if (fs.existsSync(localSkills)) {
+		return localSkills;
+	}
 	if (projectRoot) {
 		return path.join(projectRoot, "skills");
 	}
@@ -114,7 +119,7 @@ export function getDefaultLogsDir(): string {
 	if (process.env.NETSUITE_LOGS_DIR) {
 		return path.resolve(process.env.NETSUITE_LOGS_DIR);
 	}
-	const localProjectLogs = path.join(projectRoot, "logs");
+	const localProjectLogs = path.join(defaultProjectRoot, "logs");
 	if (fs.existsSync(localProjectLogs)) {
 		return localProjectLogs;
 	}

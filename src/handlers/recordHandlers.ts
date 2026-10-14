@@ -6,6 +6,7 @@ import {
 	formatMetadataToCompactMarkdown,
 } from "../utils/contextSlimmer.js";
 import { isSandboxAccount } from "../utils/environment.js";
+import { isPermissionError } from "../utils/errors.js";
 import {
 	formatTableCatalogMarkdown,
 	searchSuiteQLCatalog,
@@ -26,6 +27,14 @@ import {
 import { textResult } from "./types.js";
 
 type ToolResponse = CallToolResult;
+
+interface RecordInspectOptions {
+	includeSublists: boolean;
+	linesMode: "all" | "summary";
+	maxLines?: number | undefined;
+	lineFields?: string[] | undefined;
+	format: "markdown" | "compact_json";
+}
 
 /**
  * Resolves natural keys (document tranid, entity entityid, item itemid) to numeric internal ID via 1-turn SuiteQL.
@@ -168,33 +177,17 @@ export async function appendRecordLink(
 }
 
 /**
- * netsuite_get_record
- * Authoritative tool for inspecting NetSuite records.
- * Integrates natural key resolution, structured field grouping, empty pruning, and active UI links.
+ * Core helper to fetch, clean, and format a single NetSuite record.
  */
-export async function handleGetRecord(
-	args: Record<string, unknown>,
+async function inspectSingleRecord(
+	recordType: string,
+	rawId: string,
+	options: RecordInspectOptions,
 	mcpTools: NetSuiteMCPTools,
 	oauthManager: OAuthManager,
 	resolveRectype: (type: string) => number | null | Promise<number | null>,
 ): Promise<ToolResponse> {
-	const parsed = GetRecordArgsSchema.safeParse(args);
-	if (!parsed.success) {
-		return textResult(
-			`❌ Invalid arguments: ${parsed.error.issues[0]?.message}`,
-			true,
-		);
-	}
-
-	const {
-		recordType,
-		id: rawId,
-		includeSublists,
-		linesMode,
-		maxLines,
-		lineFields,
-		format,
-	} = parsed.data;
+	const { includeSublists, linesMode, maxLines, lineFields, format } = options;
 	let targetId = rawId.trim();
 
 	// Auto-resolve document number (tranid) to numeric internal ID if needed
@@ -224,6 +217,9 @@ export async function handleGetRecord(
 		});
 	} catch (err: unknown) {
 		const msg = err instanceof Error ? err.message : String(err);
+		if (isPermissionError(msg)) {
+			throw err;
+		}
 		return textResult(`❌ NetSuite Record Fetch Failed: ${msg}`, true);
 	}
 
@@ -416,15 +412,17 @@ export async function handleGetRecord(
 }
 
 /**
- * netsuite_get_metadata
- * Single authoritative tool for inspecting NetSuite table schema, valid column names, and data types.
- * Powered by Redis cache and authoritative 272 records catalog.
+ * netsuite_get_record
+ * Authoritative tool for inspecting one or multiple NetSuite records concurrently.
+ * Integrates natural key resolution, structured field grouping, empty pruning, and active UI links.
  */
-export async function handleGetMetadata(
+export async function handleGetRecord(
 	args: Record<string, unknown>,
 	mcpTools: NetSuiteMCPTools,
+	oauthManager: OAuthManager,
+	resolveRectype: (type: string) => number | null | Promise<number | null>,
 ): Promise<ToolResponse> {
-	const parsed = GetMetadataArgsSchema.safeParse(args);
+	const parsed = GetRecordArgsSchema.safeParse(args);
 	if (!parsed.success) {
 		return textResult(
 			`❌ Invalid arguments: ${parsed.error.issues[0]?.message}`,
@@ -432,14 +430,116 @@ export async function handleGetMetadata(
 		);
 	}
 
-	const { table, keyword, source = "auto" } = parsed.data;
+	const {
+		recordType,
+		id: rawId,
+		ids: rawIds,
+		includeSublists,
+		linesMode,
+		maxLines,
+		lineFields,
+		format,
+	} = parsed.data;
 
-	// Case 1: Catalog search if table is missing
-	if (!table) {
-		const matches = searchSuiteQLCatalog(keyword);
-		return textResult(formatTableCatalogMarkdown(matches, keyword));
+	const targetIds: string[] = [];
+	if (Array.isArray(rawIds) && rawIds.length > 0) {
+		for (const item of rawIds) {
+			const trimmed = item.trim();
+			if (trimmed && !targetIds.includes(trimmed)) {
+				targetIds.push(trimmed);
+			}
+		}
+	}
+	if (rawId && rawId.trim().length > 0) {
+		const trimmed = rawId.trim();
+		if (!targetIds.includes(trimmed)) {
+			targetIds.unshift(trimmed);
+		}
 	}
 
+	if (targetIds.length === 0) {
+		return textResult(
+			"❌ Invalid arguments: id is required (provide 'id' or 'ids')",
+			true,
+		);
+	}
+
+	const options: RecordInspectOptions = {
+		includeSublists,
+		linesMode,
+		maxLines,
+		lineFields,
+		format,
+	};
+
+	if (targetIds.length === 1 && targetIds[0]) {
+		return inspectSingleRecord(
+			recordType,
+			targetIds[0],
+			options,
+			mcpTools,
+			oauthManager,
+			resolveRectype,
+		);
+	}
+
+	const parallelResults = await Promise.all(
+		targetIds.map(async (itemId, index) => {
+			try {
+				const res = await inspectSingleRecord(
+					recordType,
+					itemId,
+					options,
+					mcpTools,
+					oauthManager,
+					resolveRectype,
+				);
+				const firstContent = res.content?.[0];
+				const text =
+					firstContent && firstContent.type === "text" ? firstContent.text : "";
+				return {
+					index: index + 1,
+					id: itemId,
+					isError: Boolean(res.isError),
+					text,
+				};
+			} catch (err: unknown) {
+				const msg = err instanceof Error ? err.message : String(err);
+				if (isPermissionError(msg)) {
+					throw err;
+				}
+				return {
+					index: index + 1,
+					id: itemId,
+					isError: true,
+					text: `❌ NetSuite Record Fetch Failed (${itemId}): ${msg}`,
+				};
+			}
+		}),
+	);
+
+	let combinedOutput = `## 🔍 Parallel NetSuite Record Batch Inspection: \`${recordType}\` (${targetIds.length} Records)\n\n`;
+	let failCount = 0;
+	for (const res of parallelResults) {
+		if (res.isError) failCount++;
+		combinedOutput += `### 🔹 Record #${res.index} (\`${res.id}\`)\n\n${res.text}\n\n`;
+	}
+
+	return textResult(
+		combinedOutput.trim(),
+		failCount === parallelResults.length,
+	);
+}
+
+/**
+ * Core helper to inspect metadata for a single NetSuite table or record type.
+ */
+async function inspectSingleTableMetadata(
+	table: string,
+	keyword: string | undefined,
+	source: "auto" | "offline" | "remote",
+	mcpTools: NetSuiteMCPTools,
+): Promise<ToolResponse> {
 	const isCustom = table.toLowerCase().startsWith("customrecord");
 
 	// Case 2: Explicit offline source routing or auto standard reference check
@@ -486,6 +586,83 @@ export async function handleGetMetadata(
 			true,
 		);
 	}
+}
+
+/**
+ * netsuite_get_metadata
+ * Single authoritative tool for inspecting NetSuite table schema, valid column names, and data types.
+ * Supports single-turn parallel inspection of multiple tables via 'tables'.
+ * Powered by Redis cache and authoritative 272 records catalog.
+ */
+export async function handleGetMetadata(
+	args: Record<string, unknown>,
+	mcpTools: NetSuiteMCPTools,
+): Promise<ToolResponse> {
+	const parsed = GetMetadataArgsSchema.safeParse(args);
+	if (!parsed.success) {
+		return textResult(
+			`❌ Invalid arguments: ${parsed.error.issues[0]?.message}`,
+			true,
+		);
+	}
+
+	const { table, tables, keyword, source = "auto" } = parsed.data;
+
+	const targetTables: string[] = [];
+	if (Array.isArray(tables) && tables.length > 0) {
+		for (const tbl of tables) {
+			if (tbl && !targetTables.includes(tbl)) {
+				targetTables.push(tbl);
+			}
+		}
+	}
+	if (table && !targetTables.includes(table)) {
+		targetTables.unshift(table);
+	}
+
+	// Case 1: Catalog search if no table is specified
+	if (targetTables.length === 0) {
+		const matches = searchSuiteQLCatalog(keyword);
+		return textResult(formatTableCatalogMarkdown(matches, keyword));
+	}
+
+	if (targetTables.length === 1 && targetTables[0]) {
+		return inspectSingleTableMetadata(
+			targetTables[0],
+			keyword,
+			source,
+			mcpTools,
+		);
+	}
+
+	const parallelResults = await Promise.all(
+		targetTables.map(async (tbl, index) => {
+			const res = await inspectSingleTableMetadata(
+				tbl,
+				keyword,
+				source,
+				mcpTools,
+			);
+			const firstContent = res.content?.[0];
+			const text =
+				firstContent && firstContent.type === "text" ? firstContent.text : "";
+			return {
+				index: index + 1,
+				table: tbl,
+				isError: Boolean(res.isError),
+				text,
+			};
+		}),
+	);
+
+	let combinedMd = `## 📚 Parallel Metadata Batch Inspection (${targetTables.length} Tables)\n\n`;
+	let failCount = 0;
+	for (const res of parallelResults) {
+		if (res.isError) failCount++;
+		combinedMd += `### 🔹 Table #${res.index}: \`${res.table}\`\n\n${res.text}\n\n`;
+	}
+
+	return textResult(combinedMd.trim(), failCount === parallelResults.length);
 }
 
 const TRANSACTION_RECORD_TYPES = new Set([

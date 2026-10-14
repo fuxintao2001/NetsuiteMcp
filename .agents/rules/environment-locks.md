@@ -4,17 +4,17 @@
 
 ## 1. Mutation Hard-Stop in Production
 
-- **`ns_createRecord` / `ns_updateRecord`**:
-  - Strictly blocked in Production accounts (`5848789`, `9260916`).
-  - Permitted only in Sandbox (`_SB`, `TSTDRV`).
-  - Reconnaissance must be executed via `ns_getRecordTypeMetadata` before mutation in Sandbox.
+- **`netsuite_create_record` / `netsuite_update_record`**:
+  - Strictly blocked and filtered out in Production accounts (`5848789`, `9260916`).
+  - Permitted exclusively in Sandbox / Test environments (`_SB`, `-sb`, `TSTDRV`).
+  - Inspect schema via `netsuite_get_metadata` before executing mutations in Sandbox.
 
 ## 2. Code Deployment Card Protocol
 
-- When calling `netsuite_suitecloud_upload`:
-  - Must present an interactive card via `ask_question` with only the file's absolute path and choices `Accept` / `Reject`.
-  - In Production, requires `allowProduction: true` to bypass server-side write guard.
-  - Pre-flight security hooks (`.agents/hooks.json` -> `scripts/pre-upload-check.js`) will verify syntax and block sensitive credentials.
+- When calling `netsuite_deploy_script`:
+  - Present an interactive confirmation card via `ask_question` showing only the file's absolute path and choices `Accept` and `Reject`.
+  - In Production, pass `allowProduction: true` only after explicit user acceptance.
+  - Pre-flight security hooks (`.agents/hooks.json` -> `scripts/pre-upload-check.js`) verify syntax and block sensitive credentials.
 
 ## 3. Permission Hard-Stop
 

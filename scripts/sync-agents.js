@@ -58,11 +58,11 @@ const WRITE_TOOLS_TABLE_PRODUCTION = `> 🔒 **Production Safety Guard**: Mutati
 
 const WRITE_OPS_SECTION_SANDBOX = `### Record Mutations & Code Deployment (✅ Sandbox Enabled)
 - **Record Mutations**: Inspect schema via \`netsuite_get_metadata\` ➔ Build valid JSON ➔ Execute \`netsuite_create_record\` or \`netsuite_update_record\`.
-- **File Upload Card Protocol**: When deploying code, display an interactive confirmation card (\`ask_question\`) showing only the file's absolute path, with choices "接受" and "拒绝". Call \`netsuite_deploy_script\` directly upon acceptance.`;
+- **File Upload Card Protocol**: When deploying code, display an interactive confirmation card (\`ask_question\`) showing only the file's absolute path, with choices "Accept" and "Reject". Call \`netsuite_deploy_script\` directly upon acceptance.`;
 
 const WRITE_OPS_SECTION_PRODUCTION = `### Simplified File Upload & Code Deployment (🔒 Production Read-Only)
 - **Record Mutations**: Strictly blocked. Never attempt record creation or updates in Production.
-- **File Upload Card Protocol**: When uploading code to Production, display an interactive confirmation card (\`ask_question\`) showing only the file's absolute path, with choices "接受" and "拒绝". Call \`netsuite_deploy_script\` with \`allowProduction: true\` directly upon acceptance.`;
+- **File Upload Card Protocol**: When uploading code to Production, display an interactive confirmation card (\`ask_question\`) showing only the file's absolute path, with choices "Accept" and "Reject". Call \`netsuite_deploy_script\` with \`allowProduction: true\` directly upon acceptance.`;
 
 // ---------------------------------------------------------------------------
 // Helper: Variable Interpolator

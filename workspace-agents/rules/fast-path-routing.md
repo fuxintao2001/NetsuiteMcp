@@ -1,8 +1,8 @@
 # Fast-Path & Slow-Path Routing Directives
 
-> ⚡ **Core Business Latency Elimination (Zero Unnecessary Reconnaissance)**
+> ⚡ **Core Business Latency Elimination & Single-Turn Fan-Out (Zero Unnecessary Reconnaissance)**
 
-## 1. Dual-Path Execution Model
+## 1. Dual-Path Execution Model & Single-Turn Fan-Out
 
 1. **⚡ Fast-Path (Standard Core Business — Direct 1-Turn Penetration Mandate)**:
    - For queries involving standard core tables (`transaction`, `transactionline`, `customer`, `vendor`, `item`, `account`, `subsidiary`, `aggregateitemlocation`, `accountingperiod`, `transactionaccountingline`, `employee`):
@@ -11,13 +11,17 @@
 
 2. **🔍 Slow-Path (Unknown Custom Records — Reconnaissance First)**:
    - When operating on unverified custom records (`customrecord_*`), custom fields (`custbody_*`, `custcol_*`), or unlisted tables:
-   - **MANDATORY**: Call `netsuite_get_metadata` to inspect table columns and field data types.
+   - **MANDATORY**: Call `netsuite_get_metadata` to inspect table columns and field data types. When inspecting multiple unknown tables, pass `tables: ["customrecord_a", "customrecord_b"]` in a single call.
 
-3. **🚀 Parallel Multi-Query Mandate (Zero Sequential Turn Delay)**:
-   - When a task requires retrieving multiple independent datasets (e.g. Transaction details + Customer info + Stock balance):
-   - **STRICTLY PROHIBITED**: Executing queries sequentially across multiple conversation turns.
-   - **MANDATORY**: Execute concurrently within **1 single turn** by separating queries with semicolons `;` in `netsuite_run_suiteql({ sqlQuery: "SELECT ... FROM transaction ...; SELECT ... FROM customer ...;" })`.
-   - All queries execute concurrently via the MCP server's parallel pool and return unified results in 1 turn.
+3. **🚀 Single-Turn Fan-Out & Batch Execution Mandate (Zero Sequential Turn Delay)**:
+   - When a task requires retrieving multiple independent datasets, inspecting multiple tables, or fetching multiple records:
+   - **STRICTLY PROHIBITED**: Executing read-only calls sequentially one-by-one across multiple conversation turns.
+   - **MANDATORY (Batch-Parameter First)**:
+     - **Multiple SuiteQL Queries**: Pass `sqlQueries: ["SELECT ... FROM transaction ...", "SELECT ... FROM customer ..."]` (or separate with semicolons `;` in `sqlQuery`) in a single `netsuite_run_suiteql` call.
+     - **Multiple Table Schemas**: Pass `tables: ["table_a", "table_b"]` in a single `netsuite_get_metadata` call.
+     - **Multiple Records**: Pass `ids: ["SO10023", "SO10024"]` in a single `netsuite_get_record` call.
+   - **MANDATORY (Multi-Tool Call Fan-Out)**:
+     - When combining different read-only tools without data dependencies (e.g., `netsuite_get_record` + `netsuite_get_script_logs` + `netsuite_get_system_notes`), emit all `tool_calls` concurrently in the **same turn**.
 
 ---
 

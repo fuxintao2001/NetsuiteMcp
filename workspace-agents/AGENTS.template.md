@@ -70,24 +70,34 @@ To ensure high-density reasoning without context bloat, deep domain knowledge is
 | **UIF SPA Component Development** | `~/.gemini/config/skills/netsuite-uif-spa-reference/SKILL.md` | Modern NetSuite UIF SPA development, `@uif-js/core` and `@uif-js/component` APIs and hooks. |
 
 > [!TIP]
-> **Schema Discovery**: Use `netsuite_get_metadata` for inspecting database table columns, table catalog, and record fields (with automatic offline standard catalog fallback).
+> **Schema Discovery**: Use `netsuite_get_metadata` for inspecting database table columns, table catalog, and record fields (supports batch `tables: [...]` with automatic offline standard catalog fallback).
 
 ---
 
-## 🚨 4. Dual-Path Routing & Execution Gates
+## 🚨 4. Dual-Path Routing & Single-Turn Fan-Out Mandate
 
 1. **👑 Dual-Path Routing (Zero Unnecessary Reconnaissance)**:
    - ⚡ **Fast-Path (Standard Core Business — Direct 1-Turn Execution)**:
      - For queries involving standard core tables (`transaction`, `transactionline`, `customer`, `vendor`, `item`, `account`, `subsidiary`, `aggregateitemlocation`, `accountingperiod`, `transactionaccountingline`, `employee`) or common document lineage:
      - **DO NOT call reconnaissance tools** (e.g. `netsuite_get_metadata`).
-     - **MUST generate precise SuiteQL and call `netsuite_run_suiteql` directly in Turn 1.** When retrieving multiple datasets, pass multiple statements separated by `;` or an array in `sqlQueries` to execute concurrently in 1 single turn. Detailed rules: [Fast-Path Routing](file://{{PROJECT_PATH}}/.agents/rules/fast-path-routing.md).
+     - **MUST generate precise SuiteQL and call `netsuite_run_suiteql` directly in Turn 1.** When retrieving multiple datasets, pass `sqlQueries: [...]` or multiple statements separated by `;` to execute concurrently in 1 single turn. Detailed rules: [Fast-Path Routing](file://{{PROJECT_PATH}}/.agents/rules/fast-path-routing.md).
    - 🔍 **Slow-Path (Unknown Custom Records — Reconnaissance First)**:
      - When operating on unverified custom records (`customrecord_*`), custom fields (`custbody_*`, `custcol_*`), or unlisted tables:
-     - Call `netsuite_get_metadata` (table columns, catalog search, or record type fields).
-2. **SuiteQL Guardrails & Zero-Transpile Standard**:
+     - Call `netsuite_get_metadata` (pass `tables: [...]` when inspecting multiple tables concurrently in 1 turn).
+2. **⚡ Single-Turn Fan-Out Mandate (Zero Step-by-Step Serialization)**:
+   - For all read-only operations, **strictly prohibit sequential turn-by-turn execution** when inputs are already known:
+   - **Batch-Parameter First**:
+     - Multiple SuiteQL queries ➔ 1 call to `netsuite_run_suiteql({ sqlQueries: ["SELECT ...", "SELECT ..."] })`.
+     - Multiple table schemas ➔ 1 call to `netsuite_get_metadata({ tables: ["table_a", "table_b"] })`.
+     - Multiple records of the same type ➔ 1 call to `netsuite_get_record({ recordType: "...", ids: ["SO1001", "SO1002"] })`.
+   - **Multi-Tool Call Fan-Out**:
+     - When executing independent read-only actions across different tools (e.g., `netsuite_get_record` + `netsuite_get_script_logs` + `netsuite_get_system_notes`), emit all `tool_calls` concurrently in the **exact same assistant turn**.
+   - **Only Permitted Sequential Boundary**:
+     - Split across turns ONLY when a downstream call's required parameter (e.g., an unknown internal ID or unverified custom column name) must be extracted from an upstream call's output.
+3. **SuiteQL Guardrails & Zero-Transpile Standard**:
    - Ensure all queries conform strictly to [SuiteQL Guardrails](file://{{PROJECT_PATH}}/.agents/rules/suiteql-guardrails.md) (No `SELECT *`, explicit `mainline = 'F'`, pagination via `FETCH FIRST N ROWS ONLY`, `ROWNUM <= N`, or Oracle-standard `OFFSET M ROWS FETCH NEXT N ROWS ONLY`, index driving filter).
    - The server performs **zero implicit rewriting** of queries. Queries with non-standard syntax (e.g., bare `LIMIT`) are strictly rejected at runtime with actionable remediation guidance.
-3. **Primary Query Mechanism**:
+4. **Primary Query Mechanism**:
    - SuiteQL (`netsuite_run_suiteql`) is the authoritative and primary query mechanism for all business data retrieval.
 
 ---
@@ -97,9 +107,9 @@ To ensure high-density reasoning without context bloat, deep domain knowledge is
 The server exposes 8 authoritative core tools (plus 2 sandbox mutation tools in Sandbox environments) with strict orthogonal boundaries (zero bloat, zero deprecated aliases):
 
 1. **Tool Execution Hierarchy**:
-   - **SuiteQL Queries**: `netsuite_run_suiteql` (Direct 1-turn execution; supports parallel multi-query execution via semicolon `;` syntax or `sqlQueries: [...]` array).
-   - **Schema Reconnaissance**: `netsuite_get_metadata` (Inspect database table columns, search table catalog, or inspect record type fields with offline fallback).
-   - **Record Fetch & Inspection**: `netsuite_get_record` (Accepts numeric internal ID or document number `tranid`, automatically resolves natural keys, formats Markdown, and generates Web UI direct links).
+   - **SuiteQL Queries**: `netsuite_run_suiteql` (Direct 1-turn execution; supports parallel multi-query execution via `sqlQueries: [...]` array or semicolon `;` syntax).
+   - **Schema Reconnaissance**: `netsuite_get_metadata` (Inspect database table columns, search table catalog, or inspect multiple tables concurrently via `tables: [...]` with offline fallback).
+   - **Record Fetch & Inspection**: `netsuite_get_record` (Accepts single `id` or batch `ids: [...]` of numeric internal IDs / document numbers `tranid`, automatically resolves natural keys, formats Markdown, and generates Web UI direct links).
    - **Record Creation (Sandbox)**: `netsuite_create_record` (Create new business records in Sandbox/Test environments; physically blocked in Production).
    - **Record Update (Sandbox)**: `netsuite_update_record` (Update existing records in Sandbox/Test environments, automatically resolving `tranid` natural keys; physically blocked in Production).
    - **Script Execution Logs**: `netsuite_get_script_logs` (Retrieve real-time execution logs and error stacks for NetSuite scripts).
@@ -107,8 +117,8 @@ The server exposes 8 authoritative core tools (plus 2 sandbox mutation tools in 
    - **Code Deployment**: `netsuite_deploy_script` (Deploy SuiteScript files via SuiteCloud CLI with environment safety confirmation).
    - **Account Status & Error Diagnostics**: `netsuite_status` (Check active account, authentication mode, role, and structured error frequency summary).
    - **Authentication Management**: `netsuite_auth` (Manage OAuth 2.0 PKCE login, token refresh, and logout).
-2. **Parallel SuiteQL Execution (`netsuite_run_suiteql`)**:
-   - For multiple queries, pass multiple statements separated by `;` or provide an array in `sqlQueries`. Queries run concurrently in parallel via the MCP 5-thread pool in a single turn.
+2. **Parallel Batch Execution (`sqlQueries`, `tables`, `ids`)**:
+   - Always prefer built-in array parameters (`sqlQueries` on `netsuite_run_suiteql`, `tables` on `netsuite_get_metadata`, `ids` on `netsuite_get_record`) to execute up to 10 sub-requests concurrently via the MCP 5-thread pool in a single turn.
 3. **File Deployment Confirmation Protocol (`netsuite_deploy_script`)**:
    - Before uploading code, display an interactive confirmation card via `ask_question` with ONLY the file's absolute path and choices: `Accept` and `Reject`.
    - Execute immediately upon acceptance; abort immediately upon rejection.
@@ -124,7 +134,7 @@ When NetSuite MCP tools return errors, the response includes structured diagnost
 
 | Diagnostic Tag / Pattern | Root Cause | Mandated Self-Healing Action |
 |:---|:---|:---|
-| `[Self-Healing Action]: Call netsuite_get_metadata` | Unverified column or invalid table name | 1. Call `netsuite_get_metadata` on the table. 2. Verify valid column names. 3. Fix SQL and re-execute. |
+| `[Self-Healing Action]: Call netsuite_get_metadata` | Unverified column or invalid table name | 1. Call `netsuite_get_metadata` on the table(s). 2. Verify valid column names. 3. Fix SQL and re-execute. |
 | `[suiteqlGuard] Missing 'mainline' filter` | Missing `mainline = 'F'` or `'T'` on transactionline | Add `tl.mainline = 'F'` (for line items) or `tl.mainline = 'T'` (for summary header) to WHERE clause. |
 | `[suiteqlGuard] Suboptimal table 'inventoryitemlocations'` | Table omits non-standard items | Replace `inventoryitemlocations` with `aggregateitemlocation`. |
 | `[suiteqlGuard] Prohibited 'JOIN SystemNote'` | Cartesian timeout risk | Split into standalone `systemnote` query or call `netsuite_get_system_notes`. |

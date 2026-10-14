@@ -55,6 +55,13 @@ export const GetMetadataArgsSchema = z.object({
 		.describe(
 			"NetSuite database table name or record type ID (e.g. 'customer', 'transaction', 'transactionline', 'item', 'salesorder'). Omit to list or search the table catalog.",
 		),
+	tables: z
+		.array(z.string().trim().toLowerCase().min(1))
+		.max(10, "A maximum of 10 tables can be inspected in parallel.")
+		.optional()
+		.describe(
+			"Optional array of NetSuite database table names or record type IDs to inspect concurrently in parallel in a single turn (max 10).",
+		),
 	keyword: z
 		.string()
 		.trim()
@@ -89,8 +96,17 @@ export const GetRecordArgsSchema = z.object({
 		.string()
 		.trim()
 		.min(1, "id is required")
+		.optional()
 		.describe(
 			"Numeric internal ID (e.g. '12345') or document number / tranid (e.g. 'SO10023').",
+		),
+	ids: z
+		.array(z.string().trim().min(1, "id is required"))
+		.min(1, "id is required")
+		.max(10, "A maximum of 10 records can be inspected in parallel.")
+		.optional()
+		.describe(
+			"Optional array of numeric internal IDs or document numbers (tranid) to inspect concurrently in parallel in a single turn (max 10).",
 		),
 	includeSublists: z
 		.boolean()
@@ -343,7 +359,7 @@ export type UpdateRecordArgs = z.infer<typeof UpdateRecordArgsSchema>;
 
 export const RUN_SUITEQL_TOOL = {
 	name: "netsuite_run_suiteql",
-	description: `Execute read-only Oracle NetSuite SuiteQL queries and return tabular results.
+	description: `Execute read-only Oracle NetSuite SuiteQL queries and return tabular results. Supports single-turn parallel batch execution via 'sqlQueries' array or ';' separated statements.
 MANDATORY OFFICIAL SYNTAX RULES:
 1. PROJECTION: NEVER use 'SELECT *'. Always specify explicit column names.
 2. PAGINATION: Oracle-standard ONLY. Use 'FETCH FIRST N ROWS ONLY' or 'WHERE ROWNUM <= N'. NEVER use MySQL/Postgres 'LIMIT' or 'OFFSET'.
@@ -351,7 +367,8 @@ MANDATORY OFFICIAL SYNTAX RULES:
 4. LINEAGE: 'createdfrom' exists ONLY on 'transactionline', NEVER on 'transaction'.
 5. ITEMS: 'item' table has 'itemtype' and 'subtype', NEVER 'recordtype'.
 6. AUDIT: NEVER JOIN 'systemnote' directly (causes 45s+ timeouts). Use 'netsuite_get_system_notes'.
-7. UNKNOWN SCHEMA: If not 100% sure of column names, MUST call 'netsuite_get_metadata' first before writing SQL.`,
+7. UNKNOWN SCHEMA: If not 100% sure of column names, MUST call 'netsuite_get_metadata' first before writing SQL.
+8. PARALLEL BATCHING: When retrieving multiple independent datasets, pass an array in 'sqlQueries' to execute concurrently in 1 turn.`,
 	inputSchema: {
 		type: "object" as const,
 		properties: {
@@ -360,19 +377,24 @@ MANDATORY OFFICIAL SYNTAX RULES:
 				description:
 					"The SuiteQL query string to execute. Follows Oracle NetSuite dialect rules above. Supports multiple statements separated by ';'.",
 			},
+			sqlQueries: {
+				type: "array",
+				items: { type: "string" },
+				description:
+					"Optional array of independent SuiteQL query strings to execute concurrently in parallel in a single turn (max 10).",
+			},
 			limit: {
 				type: "number",
 				description: "Optional safe row limit (default: 100).",
 			},
 		},
-		required: ["sqlQuery"],
 	},
 };
 
 export const GET_METADATA_TOOL = {
 	name: "netsuite_get_metadata",
 	description:
-		"Inspect NetSuite database table schema, valid column names, and data types for SuiteQL and records. Powered by 2ms Redis cache and authoritative 272 records catalog.",
+		"Inspect NetSuite database table schema, valid column names, and data types for SuiteQL and records. Supports single-turn parallel inspection of multiple tables via 'tables'. Powered by 2ms Redis cache and authoritative 272 records catalog.",
 	inputSchema: {
 		type: "object" as const,
 		properties: {
@@ -381,20 +403,25 @@ export const GET_METADATA_TOOL = {
 				description:
 					"NetSuite database table name or record type ID (e.g. 'customer', 'transaction', 'transactionline', 'item', 'salesorder').",
 			},
+			tables: {
+				type: "array",
+				items: { type: "string" },
+				description:
+					"Optional array of NetSuite database table names or record type IDs to inspect concurrently in parallel in a single turn (max 10).",
+			},
 			keyword: {
 				type: "string",
 				description:
 					"Optional search keyword to filter column names, labels, or descriptions.",
 			},
 		},
-		required: ["table"],
 	},
 };
 
 export const GET_RECORD_TOOL = {
 	name: "netsuite_get_record",
 	description:
-		"Retrieve and inspect a NetSuite record by numeric internal ID or document number (tranid). Returns cleaned header fields, custom fields, and an active Web UI link.",
+		"Retrieve and inspect one or multiple NetSuite records concurrently by numeric internal ID or document number (tranid). Returns cleaned header fields, custom fields, and active Web UI links.",
 	inputSchema: {
 		type: "object" as const,
 		properties: {
@@ -408,6 +435,12 @@ export const GET_RECORD_TOOL = {
 				description:
 					"Numeric internal ID (e.g. '12345') or document number (tranid, e.g. 'SO10023').",
 			},
+			ids: {
+				type: "array",
+				items: { type: "string" },
+				description:
+					"Optional array of numeric internal IDs or document numbers (tranid) to inspect concurrently in parallel in a single turn (max 10).",
+			},
 			includeSublists: {
 				type: "boolean",
 				description:
@@ -419,7 +452,7 @@ export const GET_RECORD_TOOL = {
 				description: "Output format: 'markdown' (default) or 'compact_json'.",
 			},
 		},
-		required: ["recordType", "id"],
+		required: ["recordType"],
 	},
 };
 

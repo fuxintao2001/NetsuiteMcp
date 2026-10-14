@@ -1275,6 +1275,59 @@ describe("MCP Handler Wires", () => {
 				expect(res.content[0].text).toContain("Invalid arguments");
 			});
 
+			it("should execute batch tables array in parallel in netsuite_get_metadata", async () => {
+				const callFn = registeredHandlers.get("tools/call");
+
+				const res = (await callFn?.({
+					params: {
+						name: "netsuite_get_metadata",
+						arguments: {
+							tables: ["salesorder", "customer"],
+						},
+					},
+				})) as any;
+
+				expect(res.isError).toBeFalsy();
+				expect(res.content[0].text).toContain(
+					"Parallel Metadata Batch Inspection (2 Tables)",
+				);
+				expect(res.content[0].text).toContain("Table #1: `salesorder`");
+				expect(res.content[0].text).toContain("Table #2: `customer`");
+			});
+
+			it("should execute batch ids array in parallel in netsuite_get_record", async () => {
+				const callFn = registeredHandlers.get("tools/call");
+				mockMCPTools.executeTool.mockImplementation(
+					async (toolName: string, args: any) => {
+						if (toolName === "ns_getRecord") {
+							return {
+								id: args.recordId,
+								tranid: `SO-${args.recordId}`,
+							};
+						}
+						return {};
+					},
+				);
+
+				const res = (await callFn?.({
+					params: {
+						name: "netsuite_get_record",
+						arguments: {
+							recordType: "salesorder",
+							ids: ["101", "102"],
+						},
+					},
+				})) as any;
+
+				expect(res.isError).toBeFalsy();
+				expect(res.content[0].text).toContain(
+					"Parallel NetSuite Record Batch Inspection: `salesorder` (2 Records)",
+				);
+				expect(res.content[0].text).toContain("SO-101");
+				expect(res.content[0].text).toContain("SO-102");
+				expect(mockMCPTools.executeTool).toHaveBeenCalledTimes(2);
+			});
+
 			it("should allow negative numeric internal IDs for netsuite_get_record", async () => {
 				const callFn = registeredHandlers.get("tools/call");
 				mockMCPTools.executeTool.mockResolvedValueOnce({
