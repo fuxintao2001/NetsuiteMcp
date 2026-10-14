@@ -66,7 +66,7 @@ src/
 │   ├── recordHandlers.ts   # Record inspection, natural key resolution, metadata dictionary, and system notes
 │   ├── queryHandlers.ts    # Real-time SuiteScript execution logs & error stack tracing
 │   ├── authHandlers.ts     # OAuth authentication status, logout, and diagnostic dashboard
-│   ├── deployHandlers.ts   # SuiteCloud script upload & production write barrier
+│   ├── uploadHandlers.ts   # SuiteCloud file upload & production write barrier
 │   ├── prompts.ts          # MCP Prompts templates
 │   └── resources.ts        # MCP read-only resources registration & retrieval
 ├── oauth/                  # OAuth 2.0 PKCE authentication subsystem (token rotation, session isolation)
@@ -185,7 +185,7 @@ All SuiteQL queries executed through this server undergo static AST and regex va
 
 - **Authoritative Environment Detection**: Determined solely by `isSandboxAccount(accountId)` (accounts containing `_sb`, `-sb`, or starting with `tstdrv` are Sandbox; all others are Production).
 - **Physical Mutation Lockout**: `netsuite_create_record` and `netsuite_update_record` are physically filtered out and blocked in Production environments.
-- **Script Deployment Confirmation**: `netsuite_deploy_script` requires explicit `allowProduction: true` authorization when targeting a Production account.
+- **File Upload Confirmation**: `netsuite_upload_file` requires explicit `allowProduction: true` authorization when targeting a Production account.
 
 ---
 

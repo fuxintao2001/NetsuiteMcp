@@ -229,10 +229,10 @@ export const GetSystemNotesArgsSchema = z.object({
 export type GetSystemNotesArgs = z.infer<typeof GetSystemNotesArgsSchema>;
 
 /**
- * 6. netsuite_deploy_script
+ * 6. netsuite_upload_file
  * Single authoritative tool for uploading SuiteScript files to NetSuite FileCabinet.
  */
-export const DeployScriptArgsSchema = z.object({
+export const UploadFileArgsSchema = z.object({
 	paths: z
 		.union([z.string().trim().min(1), z.array(z.string().trim().min(1))])
 		.describe("Relative or absolute path(s) to the local file(s) to upload."),
@@ -247,7 +247,7 @@ export const DeployScriptArgsSchema = z.object({
 		.string()
 		.trim()
 		.optional()
-		.describe("Optional SDF CLI authId to use for deployment."),
+		.describe("Optional SDF CLI authId to use for file upload."),
 	dryRun: z
 		.boolean()
 		.optional()
@@ -268,7 +268,7 @@ export const DeployScriptArgsSchema = z.object({
 			"Explicit user authorization required if uploading to a Production account.",
 		),
 });
-export type DeployScriptArgs = z.infer<typeof DeployScriptArgsSchema>;
+export type UploadFileArgs = z.infer<typeof UploadFileArgsSchema>;
 
 /**
  * 7. netsuite_status
@@ -526,10 +526,10 @@ export const SYSTEM_NOTES_TOOL = {
 	},
 };
 
-export const DEPLOY_SCRIPT_TOOL = {
-	name: "netsuite_deploy_script",
+export const UPLOAD_FILE_TOOL = {
+	name: "netsuite_upload_file",
 	description:
-		"Upload SuiteScript files to NetSuite FileCabinet via SuiteCloud CLI. Includes syntax pre-flight check and production write barrier.",
+		"Upload SuiteScript or FileCabinet files to NetSuite via SuiteCloud CLI. Before invocation, confirmation must be requested via ask_question displaying '<folder>/<fileName>' (e.g. '9260916/script.js'). Includes syntax pre-flight check and production write barrier.",
 	inputSchema: {
 		type: "object" as const,
 		properties: {
@@ -555,7 +555,7 @@ export const DEPLOY_SCRIPT_TOOL = {
 			allowProduction: {
 				type: "boolean",
 				description:
-					"Explicit confirmation required if deploying to a production account.",
+					"Explicit confirmation required if uploading to a production account.",
 			},
 		},
 		required: ["paths"],
@@ -658,7 +658,7 @@ export const LOCAL_TOOLS = [
 	GET_RECORD_TOOL,
 	SCRIPT_LOGS_TOOL,
 	SYSTEM_NOTES_TOOL,
-	DEPLOY_SCRIPT_TOOL,
+	UPLOAD_FILE_TOOL,
 	STATUS_TOOL,
 	AUTH_TOOL,
 	CREATE_RECORD_TOOL,

@@ -17,7 +17,6 @@ import {
 	splitSuiteQLStatements,
 } from "../utils/suiteqlGuard.js";
 import { handleAuth, handleStatus } from "./authHandlers.js";
-import { handleSuitecloudUpload } from "./deployHandlers.js";
 import { handleGetScriptLogs } from "./queryHandlers.js";
 import {
 	handleCreateRecord,
@@ -28,6 +27,7 @@ import {
 } from "./recordHandlers.js";
 import { LOCAL_TOOLS, SANDBOX_MUTATION_TOOLS } from "./toolSchemas.js";
 import { type ToolHandlerDeps, textResult } from "./types.js";
+import { handleUploadFile } from "./uploadHandlers.js";
 
 export type { ToolHandlerDeps };
 export { textResult };
@@ -46,7 +46,7 @@ const READ_ONLY_TOOLS = new Set([
 ]);
 
 const DESTRUCTIVE_TOOLS = new Set([
-	"netsuite_deploy_script",
+	"netsuite_upload_file",
 	"netsuite_create_record",
 	"netsuite_update_record",
 ]);
@@ -385,9 +385,9 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
 					return await handleGetSystemNotes(safeArgs, mcpTools);
 				}
 
-				// 8. netsuite_deploy_script — SuiteCloud deployment with syntax pre-flight
-				if (name === "netsuite_deploy_script") {
-					return await handleSuitecloudUpload(
+				// 8. netsuite_upload_file — SuiteCloud file upload with syntax pre-flight
+				if (name === "netsuite_upload_file") {
+					return await handleUploadFile(
 						safeArgs,
 						oauthManager,
 						deps.projectRoot,

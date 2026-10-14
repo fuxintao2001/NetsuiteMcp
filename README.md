@@ -115,7 +115,7 @@
    - **自动保底分页**：未显式包含分页约束的查询自动注入 `FETCH FIRST 100 ROWS ONLY`。
 4. **双重沙箱生产写保护屏障**：
    - 单一权威环境判定：账号含 `_sb`、`-sb`、`tstdrv` 判定为沙箱，其余均为生产。
-   - 脚本部署工具（`netsuite_deploy_script`）部署到生产账套时强制要求显式传入 `allowProduction: true` 二次确认。
+   - 脚本部署工具（`netsuite_upload_file`）部署到生产账套时强制要求显式传入 `allowProduction: true` 二次确认。
 5. **极简上下文与紧凑 Markdown 表格渲染**：
    - `contextSlimmer` 自动清洗 NetSuite API 响应中的 `null`、`undefined` 和空数组。
    - 查询数据与元数据秒级转换为紧凑 Markdown 表格，大幅减少 LLM Context 占用。
@@ -264,7 +264,7 @@
 | [`netsuite_get_record`](#3-netsuite_get_record) | 按内部 ID 或单据编号 (tranid) 检索记录，清洗噪点，输出紧凑表格并附直达 Web UI 链接。 | `readOnlyHint: true`, `idempotentHint: true` | 全环境 |
 | [`netsuite_get_script_logs`](#4-netsuite_get_script_logs) | 索引优化检索 SuiteScript 脚本执行日志（ScriptNote），支持按等级、脚本与时间范围过滤。 | `readOnlyHint: true`, `idempotentHint: true` | 全环境 |
 | [`netsuite_get_system_notes`](#5-netsuite_get_system_notes) | 高性能单记录审计追踪（SystemNote），独立索引查询，杜绝跨表关联引发的慢查询超时。 | `readOnlyHint: true`, `idempotentHint: true` | 全环境 |
-| [`netsuite_deploy_script`](#6-netsuite_deploy_script) | 通过 SuiteCloud CLI 部署脚本至文件柜。包含语法预检、工程结构识别及生产写屏障。 | `destructiveHint: true` | 全环境（生产需确认） |
+| [`netsuite_upload_file`](#6-netsuite_upload_file) | 通过 SuiteCloud CLI 部署脚本至文件柜。包含语法预检、工程结构识别及生产写屏障。 | `destructiveHint: true` | 全环境（生产需确认） |
 | [`netsuite_status`](#7-netsuite_status) | 诊断系统健康：Token 寿命、环境分类（Prod/Sandbox）、Redis 缓存状态及错误聚合自愈。 | `readOnlyHint: true`, `idempotentHint: true` | 全环境 |
 | [`netsuite_auth`](#8-netsuite_auth) | 集中管理 OAuth 2.0 PKCE 会话与缓存，支持登录、注销与缓存刷新。 | `idempotentHint: true` | 全环境 |
 | [`netsuite_create_record`](#9-netsuite_create_record) | 在 NetSuite 沙箱/测试环境中创建新业务记录，清洗噪点并生成 Web UI 直达链接。 | `destructiveHint: true` | **沙箱限定**（生产物理阻断） |
@@ -322,7 +322,7 @@
   - `recordType` (`string`, 可选): 可选的记录类型。
   - `limit` (`number`, 可选): 返回条数限制（默认 50，最大 100）。
 
-### 6. `netsuite_deploy_script`
+### 6. `netsuite_upload_file`
 基于 SuiteCloud CLI 将 SuiteScript 脚本与静态资产上传至文件柜。
 
 - **输入参数**：

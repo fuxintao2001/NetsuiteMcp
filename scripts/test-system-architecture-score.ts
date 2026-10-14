@@ -260,7 +260,7 @@ const AUTHORITATIVE_8_TOOLS = [
 	"netsuite_get_record",
 	"netsuite_get_script_logs",
 	"netsuite_get_system_notes",
-	"netsuite_deploy_script",
+	"netsuite_upload_file",
 	"netsuite_status",
 	"netsuite_auth",
 ];
@@ -326,9 +326,9 @@ let annotationCheckPassed = 0;
 for (const toolName of AUTHORITATIVE_8_TOOLS) {
 	const annotations = getToolAnnotations(toolName);
 	if (typeof annotations.readOnlyHint === "boolean") {
-		if (toolName === "netsuite_deploy_script" && annotations.destructiveHint) {
+		if (toolName === "netsuite_upload_file" && annotations.destructiveHint) {
 			annotationCheckPassed++;
-		} else if (toolName !== "netsuite_deploy_script") {
+		} else if (toolName !== "netsuite_upload_file") {
 			annotationCheckPassed++;
 		}
 	}
@@ -794,8 +794,8 @@ const pillar6Metrics: MetricEvaluationResult[] = [];
 const errorClassificationDataset = [
 	{ tool: "netsuite_run_suiteql", msg: "Invalid arguments: sqlQuery is required", isVal: true, expected: "ARGUMENT_VALIDATION" },
 	{ tool: "netsuite_get_record", msg: "validation error: id is required", isVal: true, expected: "ARGUMENT_VALIDATION" },
-	{ tool: "netsuite_deploy_script", msg: "Production safety violation: deploy prohibited", isVal: false, expected: "PRODUCTION_WRITE_BLOCKED" },
-	{ tool: "netsuite_deploy_script", msg: "Operation is strictly blocked in production", isVal: false, expected: "PRODUCTION_WRITE_BLOCKED" },
+	{ tool: "netsuite_upload_file", msg: "Production safety violation: deploy prohibited", isVal: false, expected: "PRODUCTION_WRITE_BLOCKED" },
+	{ tool: "netsuite_upload_file", msg: "Operation is strictly blocked in production", isVal: false, expected: "PRODUCTION_WRITE_BLOCKED" },
 	{ tool: "netsuite_run_suiteql", msg: "INSUFFICIENT_PERMISSION: You do not have permission to view transactions", isVal: false, expected: "PERMISSION_DENIED" },
 	{ tool: "netsuite_get_record", msg: "403 Forbidden: Permission Violation on record customer", isVal: false, expected: "PERMISSION_DENIED" },
 	{ tool: "netsuite_run_suiteql", msg: "SuiteQL syntax error: table or view does not exist", isVal: false, expected: "SUITEQL_SYNTAX" },

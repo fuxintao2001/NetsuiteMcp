@@ -1,19 +1,66 @@
+import fs from "node:fs";
 import path from "node:path";
 import type { CallToolResult } from "@modelcontextprotocol/server";
 import type { OAuthManager } from "../oauth/manager.js";
 import { isSandboxAccount } from "../utils/environment.js";
 import { suitecloudRunnerService } from "../utils/suitecloudRunner.js";
-import { DeployScriptArgsSchema } from "./toolSchemas.js";
+import { UploadFileArgsSchema } from "./toolSchemas.js";
 import { textResult } from "./types.js";
 
 type ToolResponse = CallToolResult;
 
-export async function handleSuitecloudUpload(
+/**
+ * Format target file for confirmation card and summary presentation:
+ * Extracts the workspace / account folder name (e.g. 9260916) and filename (e.g. test.js).
+ * Example: /Users/fuxintao/WebstormProjects/9260916/src/FileCabinet/SuiteScripts/test.js ➔ 9260916/test.js
+ */
+export function formatTargetFileDisplay(
+	localFullPath: string,
+	projectRoot?: string,
+): string {
+	const fileName = path.basename(localFullPath);
+
+	if (projectRoot?.trim()) {
+		const folderName = path.basename(path.resolve(projectRoot));
+		if (folderName && folderName !== "." && folderName !== "/") {
+			return `${folderName}/${fileName}`;
+		}
+	}
+
+	const normalized = path.resolve(localFullPath).replace(/\\/g, "/");
+
+	// Check if path contains src/FileCabinet
+	const fcIdx = normalized.indexOf("/src/FileCabinet");
+	if (fcIdx !== -1) {
+		const sub = normalized.substring(0, fcIdx);
+		const folderName = path.basename(sub);
+		if (folderName) {
+			return `${folderName}/${fileName}`;
+		}
+	}
+
+	// Check for /WebstormProjects/<folder>/ or /projects/<folder>/ or workspace folder
+	const wsMatch = normalized.match(
+		/(?:WebstormProjects|projects|workspace|workspaces)\/([^/]+)/i,
+	);
+	if (wsMatch?.[1]) {
+		return `${wsMatch[1]}/${fileName}`;
+	}
+
+	const parentDir = path.basename(path.dirname(normalized));
+	if (parentDir && parentDir !== "." && parentDir !== "/") {
+		return `${parentDir}/${fileName}`;
+	}
+
+	return fileName;
+}
+
+export async function handleUploadFile(
 	args: Record<string, unknown>,
 	oauthManager: OAuthManager,
 	defaultProjectRoot: string,
 ): Promise<ToolResponse> {
-	const parsed = DeployScriptArgsSchema.safeParse(args);
+	const parsed = UploadFileArgsSchema.safeParse(args);
 	if (!parsed.success) {
 		return textResult(
 			`❌ Invalid arguments: ${parsed.error.issues[0]?.message}`,
@@ -120,7 +167,11 @@ export async function handleSuitecloudUpload(
 		prodMd += `为防止误操作覆盖生产代码，需获得用户明确授权。\n\n`;
 		prodMd += `### 待上传文件清单（共 ${resolution.files.length} 个文件，${(resolution.totalBytes / 1024).toFixed(2)} KB）：\n`;
 		for (const f of resolution.files) {
-			prodMd += `- \`${f.fileCabinetPath}\` (${f.sizeBytes !== undefined ? (f.sizeBytes / 1024).toFixed(2) : 0} KB)\n`;
+			const targetDisplay = formatTargetFileDisplay(
+				f.localFullPath || f.fileCabinetPath || "",
+				resolvedProjectRoot,
+			);
+			prodMd += `- \`${targetDisplay}\` (${f.fileCabinetPath}, ${f.sizeBytes !== undefined ? (f.sizeBytes / 1024).toFixed(2) : 0} KB)\n`;
 		}
 		prodMd += `\n若用户已明确指示上传到生产环境，请设置 \`allowProduction: true\` 重新调用此工具，即可直接一步执行上传。`;
 		return textResult(prodMd, true);
@@ -162,7 +213,27 @@ export async function handleSuitecloudUpload(
 		return textResult(previewMd);
 	}
 
-	// 8. Execute the upload via SuiteCloud CLI
+	// 8. Synchronize external source files into resolvedProjectRoot if execution directory was switched
+	for (const f of resolution.files) {
+		if (f.exists && f.localFullPath && f.fileCabinetPath) {
+			const cleanFcPath = f.fileCabinetPath.replace(/^\/+/, "");
+			const expectedInRoot = path.join(
+				resolvedProjectRoot,
+				"src",
+				"FileCabinet",
+				cleanFcPath,
+			);
+			if (path.resolve(f.localFullPath) !== path.resolve(expectedInRoot)) {
+				const targetDir = path.dirname(expectedInRoot);
+				if (!fs.existsSync(targetDir)) {
+					fs.mkdirSync(targetDir, { recursive: true });
+				}
+				fs.copyFileSync(f.localFullPath, expectedInRoot);
+			}
+		}
+	}
+
+	// 9. Execute the upload via SuiteCloud CLI
 	const execResult = await suitecloudRunnerService.executeUpload(
 		resolvedProjectRoot,
 		uploadFcPaths,
@@ -201,7 +272,11 @@ export async function handleSuitecloudUpload(
 	for (const f of resolution.files) {
 		const sizeKb =
 			f.sizeBytes !== undefined ? (f.sizeBytes / 1024).toFixed(2) : "0";
-		successMd += `- \`${f.fileCabinetPath}\` (${sizeKb} KB) ➔ \`${f.localFullPath}\`\n`;
+		const targetDisplay = formatTargetFileDisplay(
+			f.localFullPath || f.fileCabinetPath || "",
+			resolvedProjectRoot,
+		);
+		successMd += `- \`${targetDisplay}\` (${sizeKb} KB) ➔ \`${f.fileCabinetPath}\`\n`;
 	}
 
 	if (execResult.stdout.trim().length > 0) {
@@ -210,3 +285,5 @@ export async function handleSuitecloudUpload(
 
 	return textResult(successMd);
 }
+
+export { handleUploadFile as uploadFile };

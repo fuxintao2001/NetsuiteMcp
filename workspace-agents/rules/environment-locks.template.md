@@ -6,7 +6,7 @@
 
 {{WRITE_TOOLS_TABLE}}
 
-## 2. Code Deployment & Card Protocol
+## 2. File Upload & Card Protocol
 
 {{WRITE_OPS_SECTION}}
 

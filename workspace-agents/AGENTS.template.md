@@ -114,14 +114,14 @@ The server exposes 8 authoritative core tools (plus 2 sandbox mutation tools in 
    - **Record Update (Sandbox)**: `netsuite_update_record` (Update existing records in Sandbox/Test environments, automatically resolving `tranid` natural keys; physically blocked in Production).
    - **Script Execution Logs**: `netsuite_get_script_logs` (Retrieve real-time execution logs and error stacks for NetSuite scripts).
    - **Audit Trail & System Notes**: `netsuite_get_system_notes` (Retrieve field-level modification history and audit trail by record ID or document number).
-   - **Code Deployment**: `netsuite_deploy_script` (Deploy SuiteScript files via SuiteCloud CLI with environment safety confirmation).
+   - **File Upload**: `netsuite_upload_file` (Upload SuiteScript files via SuiteCloud CLI with environment safety confirmation).
    - **Account Status & Error Diagnostics**: `netsuite_status` (Check active account, authentication mode, role, and structured error frequency summary).
    - **Authentication Management**: `netsuite_auth` (Manage OAuth 2.0 PKCE login, token refresh, and logout).
 2. **Parallel Batch Execution (`sqlQueries`, `tables`, `ids`)**:
    - Always prefer built-in array parameters (`sqlQueries` on `netsuite_run_suiteql`, `tables` on `netsuite_get_metadata`, `ids` on `netsuite_get_record`) to execute up to 10 sub-requests concurrently via the MCP 5-thread pool in a single turn.
-3. **File Deployment Confirmation Protocol (`netsuite_deploy_script`)**:
-   - Before uploading code, display an interactive confirmation card via `ask_question` with ONLY the file's absolute path and choices: `Accept` and `Reject`.
-   - Execute immediately upon acceptance; abort immediately upon rejection.
+3. **File Upload Confirmation Protocol (`netsuite_upload_file`)**:
+   - Before uploading code, display an interactive confirmation card via `ask_question` extracting the workspace folder name and filename from the absolute path (e.g. from `/Users/fuxintao/WebstormProjects/9260916/...` extract `9260916` + `test.js` ➔ `9260916/test.js`) with choices: `(Recommended) Accept` and `Reject`.
+   - Execute immediately upon acceptance (in Production, pass `allowProduction: true`); abort immediately upon rejection.
 4. **Observability & Diagnostics**:
    - Every MCP tool call automatically records structured metrics (`tool`, `durationMs`, `isError`, `payloadChars`) in the server telemetry log.
    - When diagnosing performance or Token cost anomalies, call `netsuite_status` with `includeErrors: true` to inspect aggregated invocation patterns.

@@ -661,7 +661,8 @@ export class SuiteCloudRunnerService {
 	}
 
 	/**
-	 * Verify and align project.json defaultAuthId with active target account ID
+	 * Verify project.json defaultAuthId with active target account ID (read-only inspection).
+	 * Strictly read-only: never modifies the user's project.json on disk.
 	 */
 	async syncProjectAuthId(
 		projectRoot: string,
@@ -670,11 +671,12 @@ export class SuiteCloudRunnerService {
 	): Promise<AuthSyncResult> {
 		const projectJsonPath = path.join(projectRoot, "project.json");
 		let currentConfiguredAuthId: string | undefined;
-		let projectJson: Record<string, unknown> = {};
 
 		if (fs.existsSync(projectJsonPath)) {
 			try {
-				projectJson = JSON.parse(fs.readFileSync(projectJsonPath, "utf-8"));
+				const projectJson = JSON.parse(
+					fs.readFileSync(projectJsonPath, "utf-8"),
+				) as Record<string, unknown>;
 				currentConfiguredAuthId = projectJson.defaultAuthId as string;
 			} catch {}
 		}
@@ -682,23 +684,19 @@ export class SuiteCloudRunnerService {
 		const available = await this.getAvailableAuthIds();
 		const availableIds = available.map((a) => a.authId);
 
-		// If user explicitly provided preferredAuthId
+		// If caller explicitly provided preferredAuthId
 		if (preferredAuthId) {
-			projectJson.defaultAuthId = preferredAuthId;
-			try {
-				fs.writeFileSync(projectJsonPath, JSON.stringify(projectJson, null, 2));
-			} catch {}
 			return {
-				configuredAuthId: preferredAuthId,
+				configuredAuthId: currentConfiguredAuthId || preferredAuthId,
 				matchedAuthId: preferredAuthId,
-				autoUpdated: true,
+				autoUpdated: false,
 				availableAuthIds: availableIds,
 			};
 		}
 
 		const normTarget = targetAccountId.toLowerCase().replace(/[-_]/g, "");
 
-		// Check if current defaultAuthId already matches target account ID
+		// Check if current defaultAuthId in project.json already matches target account ID
 		if (currentConfiguredAuthId) {
 			const normCurrent = currentConfiguredAuthId
 				.toLowerCase()
@@ -728,14 +726,10 @@ export class SuiteCloudRunnerService {
 		});
 
 		if (matched) {
-			projectJson.defaultAuthId = matched.authId;
-			try {
-				fs.writeFileSync(projectJsonPath, JSON.stringify(projectJson, null, 2));
-			} catch {}
 			return {
-				configuredAuthId: matched.authId,
+				configuredAuthId: currentConfiguredAuthId,
 				matchedAuthId: matched.authId,
-				autoUpdated: true,
+				autoUpdated: false,
 				availableAuthIds: availableIds,
 			};
 		}
@@ -967,6 +961,20 @@ export class SuiteCloudRunnerService {
 				diagnostics,
 			};
 		}
+	}
+
+	/**
+	 * Upload files to NetSuite FileCabinet via SuiteCloud CLI (uploadFile method)
+	 */
+	async uploadFile(
+		projectRoot: string,
+		fileCabinetPaths: string | string[],
+		options?: {
+			targetAccountId?: string | undefined;
+			authId?: string | undefined;
+		},
+	): Promise<UploadExecutionResult> {
+		return this.executeUpload(projectRoot, fileCabinetPaths, options);
 	}
 }
 

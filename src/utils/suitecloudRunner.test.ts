@@ -180,7 +180,7 @@ describe("SuiteCloudRunnerService", () => {
 		fs.rmSync(tmpDir, { recursive: true, force: true });
 	});
 
-	it("should synchronize project.json Auth ID properly", async () => {
+	it("should inspect Auth ID properly without mutating project.json", async () => {
 		const tmpDir = path.join(process.cwd(), "temp-test-auth");
 		fs.mkdirSync(tmpDir, { recursive: true });
 		fs.writeFileSync(
@@ -201,12 +201,13 @@ describe("SuiteCloudRunnerService", () => {
 			"9260916_SB1",
 		);
 		expect(res.matchedAuthId).toBe("9260916_SB1-Adm-Sand");
-		expect(res.autoUpdated).toBe(true);
+		expect(res.autoUpdated).toBe(false);
 
-		const updatedProjectJson = JSON.parse(
+		// Verify project.json is NOT mutated on disk
+		const diskProjectJson = JSON.parse(
 			fs.readFileSync(path.join(tmpDir, "project.json"), "utf-8"),
 		);
-		expect(updatedProjectJson.defaultAuthId).toBe("9260916_SB1-Adm-Sand");
+		expect(diskProjectJson.defaultAuthId).toBe("old-auth");
 
 		fs.rmSync(tmpDir, { recursive: true, force: true });
 	});

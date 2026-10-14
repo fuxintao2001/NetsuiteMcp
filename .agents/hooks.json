@@ -1,9 +1,9 @@
 {
-  "deploy-safety-gate": {
+  "upload-safety-gate": {
     "enabled": true,
     "PreToolUse": [
       {
-        "matcher": "netsuite_suitecloud_upload",
+        "matcher": "netsuite_upload_file",
         "hooks": [
           {
             "type": "command",

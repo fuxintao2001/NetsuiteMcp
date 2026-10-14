@@ -2,7 +2,7 @@
 /**
  * pre-upload-check.js — Antigravity PreToolUse safety gate.
  *
- * Verifies code syntax and blocks accidental deployment of sensitive files.
+ * Verifies code syntax and blocks accidental upload of sensitive files.
  * Supports both CLI arguments and Antigravity stdin hook protocol.
  *
  * Usage:
@@ -70,7 +70,7 @@ async function main() {
 
 		if (sensitiveInRoot.length > 0) {
 			console.log(
-				`ℹ️ [Pre-Upload Check] Local sensitive files detected (protected from deployment): ${sensitiveInRoot.join(", ")}`,
+				`ℹ️ [Pre-Upload Check] Local sensitive files detected (protected from upload): ${sensitiveInRoot.join(", ")}`,
 			);
 		}
 		console.log("✅ [Pre-Upload Check] General sanity check passed.");
@@ -87,7 +87,7 @@ async function main() {
 		// 1. Sensitive file check
 		if (sensitivePatterns.some((p) => p.test(base))) {
 			console.error(
-				`🚨 [Security Hard-Stop] Attempted to deploy sensitive/credential file: ${filePath}`,
+				`🚨 [Security Hard-Stop] Attempted to upload sensitive/credential file: ${filePath}`,
 			);
 			hasErrors = true;
 			continue;
@@ -116,7 +116,7 @@ async function main() {
 
 	if (hasErrors) {
 		console.error(
-			"🛑 [Pre-Upload Check] Safety check failed. Deployment blocked.",
+			"🛑 [Pre-Upload Check] Safety check failed. Upload blocked.",
 		);
 		process.stdout.write("{}");
 		process.exit(1);

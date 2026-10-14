@@ -4,6 +4,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { suitecloudRunnerService } from "../utils/suitecloudRunner.js";
 import { registerResourceHandlers } from "./resources.js";
 import { registerToolHandlers } from "./tools.js";
+import {
+	formatTargetFileDisplay,
+	handleUploadFile,
+	uploadFile,
+} from "./uploadHandlers.js";
 
 describe("MCP Handler Wires", () => {
 	let mockServer: any;
@@ -128,7 +133,7 @@ describe("MCP Handler Wires", () => {
 			expect(names).toContain("netsuite_get_record");
 			expect(names).toContain("netsuite_get_script_logs");
 			expect(names).toContain("netsuite_get_system_notes");
-			expect(names).toContain("netsuite_deploy_script");
+			expect(names).toContain("netsuite_upload_file");
 			expect(names).toContain("netsuite_status");
 			expect(names).toContain("netsuite_auth");
 			expect(names).not.toContain("netsuite_create_record");
@@ -148,7 +153,7 @@ describe("MCP Handler Wires", () => {
 			expect(names).toContain("netsuite_get_record");
 			expect(names).toContain("netsuite_get_script_logs");
 			expect(names).toContain("netsuite_get_system_notes");
-			expect(names).toContain("netsuite_deploy_script");
+			expect(names).toContain("netsuite_upload_file");
 			expect(names).toContain("netsuite_status");
 			expect(names).toContain("netsuite_auth");
 			expect(names).toContain("netsuite_create_record");
@@ -164,8 +169,8 @@ describe("MCP Handler Wires", () => {
 			const getRecordTool = result.tools.find(
 				(t: any) => t.name === "netsuite_get_record",
 			);
-			const deployTool = result.tools.find(
-				(t: any) => t.name === "netsuite_deploy_script",
+			const uploadTool = result.tools.find(
+				(t: any) => t.name === "netsuite_upload_file",
 			);
 			const createRecordTool = result.tools.find(
 				(t: any) => t.name === "netsuite_create_record",
@@ -178,7 +183,7 @@ describe("MCP Handler Wires", () => {
 				readOnlyHint: true,
 				idempotentHint: true,
 			});
-			expect(deployTool?.annotations).toEqual({
+			expect(uploadTool?.annotations).toEqual({
 				readOnlyHint: false,
 				destructiveHint: true,
 			});
@@ -310,7 +315,7 @@ describe("MCP Handler Wires", () => {
 			expect(res.content[0].text).toContain("Unknown tool: 'ns_unknown_tool'");
 		});
 
-		it("should require allowProduction for code deploy in Production", async () => {
+		it("should require allowProduction for file upload in Production", async () => {
 			mockOAuthManager.getAccountId.mockResolvedValue("123456"); // Production
 			const callFn = registeredHandlers.get("tools/call");
 
@@ -319,7 +324,7 @@ describe("MCP Handler Wires", () => {
 
 			const res = await callFn?.({
 				params: {
-					name: "netsuite_deploy_script",
+					name: "netsuite_upload_file",
 					arguments: { paths: dummy, projectPath: testRoot },
 				},
 			});
@@ -1486,7 +1491,7 @@ describe("MCP Handler Wires", () => {
 
 				const res = await callFn?.({
 					params: {
-						name: "netsuite_deploy_script",
+						name: "netsuite_upload_file",
 						arguments: {
 							paths: dummyScript,
 							projectPath: testRoot,
@@ -1511,7 +1516,7 @@ describe("MCP Handler Wires", () => {
 
 				const res = await callFn?.({
 					params: {
-						name: "netsuite_deploy_script",
+						name: "netsuite_upload_file",
 						arguments: {
 							paths: dummyScript,
 							projectPath: testRoot,
@@ -1535,7 +1540,7 @@ describe("MCP Handler Wires", () => {
 
 				const res = await callFn?.({
 					params: {
-						name: "netsuite_deploy_script",
+						name: "netsuite_upload_file",
 						arguments: {
 							paths: dummyScript,
 							projectPath: testRoot,
@@ -1564,7 +1569,7 @@ describe("MCP Handler Wires", () => {
 
 				const res = await callFn?.({
 					params: {
-						name: "netsuite_deploy_script",
+						name: "netsuite_upload_file",
 						arguments: {
 							paths: dummyScript,
 							projectPath: testRoot,
@@ -1601,7 +1606,7 @@ describe("MCP Handler Wires", () => {
 
 				const res = await callFn?.({
 					params: {
-						name: "netsuite_deploy_script",
+						name: "netsuite_upload_file",
 						arguments: {
 							paths: [s1, s2],
 							projectPath: testRoot,
@@ -1627,7 +1632,7 @@ describe("MCP Handler Wires", () => {
 
 				const res = await callFn?.({
 					params: {
-						name: "netsuite_deploy_script",
+						name: "netsuite_upload_file",
 						arguments: {
 							paths: brokenScript,
 							projectPath: testRoot,
@@ -1657,7 +1662,7 @@ describe("MCP Handler Wires", () => {
 
 				const res = await callFn?.({
 					params: {
-						name: "netsuite_deploy_script",
+						name: "netsuite_upload_file",
 						arguments: {
 							paths: brokenScript,
 							projectPath: testRoot,
@@ -1667,6 +1672,88 @@ describe("MCP Handler Wires", () => {
 				});
 
 				expect(execSpy).toHaveBeenCalled();
+				expect(res.content[0].text).toContain(
+					"SuiteCloud File Upload Succeeded",
+				);
+				execSpy.mockRestore();
+			});
+
+			it("should extract project folder and filename correctly via formatTargetFileDisplay", () => {
+				const fullPath1 =
+					"/Users/fuxintao/WebstormProjects/9260916/src/FileCabinet/SuiteScripts/test.js";
+				expect(formatTargetFileDisplay(fullPath1)).toBe("9260916/test.js");
+
+				const fullPath2 =
+					"/Users/fuxintao/WebstormProjects/5848789_SB1/src/FileCabinet/SuiteScripts/custom/service.js";
+				expect(formatTargetFileDisplay(fullPath2)).toBe(
+					"5848789_SB1/service.js",
+				);
+
+				const fullPath3 = "/some/path/my_script.js";
+				const projectRoot = "/Users/fuxintao/WebstormProjects/9260916";
+				expect(formatTargetFileDisplay(fullPath3, projectRoot)).toBe(
+					"9260916/my_script.js",
+				);
+			});
+
+			it("should switch execution directory when projectPath is explicitly specified and sync external file", async () => {
+				const callFn = registeredHandlers.get("tools/call");
+				mockOAuthManager.getAccountId.mockResolvedValueOnce("9260916_sb1");
+
+				const sourceProject = path.join(testRoot, "source_proj");
+				const targetProject = path.join(testRoot, "target_proj");
+				const sourceFile = path.join(
+					sourceProject,
+					"src/FileCabinet/SuiteScripts/test.js",
+				);
+				await fs.mkdir(path.dirname(sourceFile), { recursive: true });
+				await fs.mkdir(path.join(targetProject, "src/FileCabinet"), {
+					recursive: true,
+				});
+				await fs.writeFile(sourceFile, "console.log('external');");
+				await fs.writeFile(
+					path.join(targetProject, "project.json"),
+					JSON.stringify({ defaultAuthId: "target-auth" }),
+				);
+				await fs.writeFile(
+					path.join(targetProject, "manifest.xml"),
+					"<manifest/>",
+				);
+
+				let executedCwd = "";
+				const execSpy = vi
+					.spyOn(suitecloudRunnerService, "executeUpload")
+					.mockImplementation(async (projectRoot, _uploadFcPaths) => {
+						executedCwd = projectRoot;
+						return {
+							success: true,
+							stdout: "Switched upload complete.",
+							stderr: "",
+							executionTimeMs: 100,
+						};
+					});
+
+				const res = await callFn?.({
+					params: {
+						name: "netsuite_upload_file",
+						arguments: {
+							paths: sourceFile,
+							projectPath: targetProject,
+						},
+					},
+				});
+
+				expect(execSpy).toHaveBeenCalled();
+				expect(executedCwd).toBe(targetProject);
+
+				// Verify the file was synchronized to targetProject/src/FileCabinet/SuiteScripts/test.js
+				const syncedTargetFile = path.join(
+					targetProject,
+					"src/FileCabinet/SuiteScripts/test.js",
+				);
+				const content = await fs.readFile(syncedTargetFile, "utf-8");
+				expect(content).toBe("console.log('external');");
+
 				expect(res.content[0].text).toContain(
 					"SuiteCloud File Upload Succeeded",
 				);
@@ -1717,6 +1804,10 @@ describe("MCP Handler Wires", () => {
 			expect(res.contents[0].text).toContain(
 				"Official 272 Records Definition Index",
 			);
+		});
+
+		it("should export uploadFile alias identical to handleUploadFile", () => {
+			expect(uploadFile).toBe(handleUploadFile);
 		});
 	});
 });

@@ -115,7 +115,7 @@ The server's protocol architecture, tool orthogonality, and defensive mechanisms
    - **Automatic Fallback Pagination**: Injects `FETCH FIRST 100 ROWS ONLY` when queries lack explicit limit constraints.
 4. **Dual Sandbox/Production Defense Barrier**:
    - Single authoritative classification: account IDs containing `_sb`, `-sb`, or `tstdrv` are classified as Sandbox; all others as Production.
-   - Script deployment (`netsuite_deploy_script`) requires explicit user confirmation via `allowProduction: true` when targeting production.
+   - Script deployment (`netsuite_upload_file`) requires explicit user confirmation via `allowProduction: true` when targeting production.
 5. **Context Slimming & Tabular Markdown Rendering**:
    - `contextSlimmer` purges extraneous `null`, `undefined`, and empty arrays from NetSuite API payloads.
    - Automatically converts records and query results into compact Markdown tables.
@@ -264,7 +264,7 @@ In accordance with **Zero-Bloat and orthogonal duty principles**, all obsolete a
 | [`netsuite_get_record`](#3-netsuite_get_record) | Inspect records by ID or tranid, prune noise, and generate deep-links to NetSuite Web UI. | `readOnlyHint: true`, `idempotentHint: true` |
 | [`netsuite_get_script_logs`](#4-netsuite_get_script_logs) | Query SuiteScript execution logs (`ScriptNote`) with index optimization by level, script ID, and date range. | `readOnlyHint: true`, `idempotentHint: true` |
 | [`netsuite_get_system_notes`](#5-netsuite_get_system_notes) | Perform record-level audit trail queries (`SystemNote`) via standalone indexed queries, avoiding SAFE Pitfall 11 timeouts. | `readOnlyHint: true`, `idempotentHint: true` |
-| [`netsuite_deploy_script`](#6-netsuite_deploy_script) | Upload SuiteScript files to NetSuite FileCabinet via SuiteCloud CLI with syntax check and production write barrier. | `destructiveHint: true` |
+| [`netsuite_upload_file`](#6-netsuite_upload_file) | Upload SuiteScript files to NetSuite FileCabinet via SuiteCloud CLI with syntax check and production write barrier. | `destructiveHint: true` |
 | [`netsuite_status`](#7-netsuite_status) | Comprehensive diagnostic check of token lifespan, environment classification (Prod/Sandbox), Redis cache, and error telemetry. | `readOnlyHint: true`, `idempotentHint: true` |
 | [`netsuite_auth`](#8-netsuite_auth) | Centralized OAuth 2.0 PKCE session and cache management (login, logout, refresh cache). | `idempotentHint: true` |
 
@@ -320,7 +320,7 @@ Standalone indexed audit trail and field change history queries (`SystemNote`) f
   - `recordType` (`string`, optional): Optional record type.
   - `limit` (`number`, optional): Maximum audit entries to return (default: 50, max: 100).
 
-### 6. `netsuite_deploy_script`
+### 6. `netsuite_upload_file`
 Uploads SuiteScript files and assets to the NetSuite FileCabinet via SuiteCloud CLI.
 
 - **Input Parameters**:

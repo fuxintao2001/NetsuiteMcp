@@ -52,17 +52,17 @@ const WRITE_TOOLS_TABLE_SANDBOX = `| Tool | Permissions & Behavior |
 |:---|:---|
 | \`netsuite_create_record\` | Create a new record in Sandbox (cleans noise, generates Web UI link) |
 | \`netsuite_update_record\` | Update an existing record in Sandbox (resolves natural keys, generates Web UI link) |
-| \`netsuite_deploy_script\` | Deploy SuiteScript code via SuiteCloud CLI (simplified card confirmation) |`;
+| \`netsuite_upload_file\` | Upload SuiteScript files via SuiteCloud CLI (simplified card confirmation) |`;
 
-const WRITE_TOOLS_TABLE_PRODUCTION = `> 🔒 **Production Safety Guard**: Mutation tools (\`netsuite_create_record\`, \`netsuite_update_record\`) are strictly blocked and filtered out in Production. Code deployment to Production requires explicit confirmation.`;
+const WRITE_TOOLS_TABLE_PRODUCTION = `> 🔒 **Production Safety Guard**: Mutation tools (\`netsuite_create_record\`, \`netsuite_update_record\`) are strictly blocked and filtered out in Production. File upload to Production requires explicit confirmation.`;
 
-const WRITE_OPS_SECTION_SANDBOX = `### Record Mutations & Code Deployment (✅ Sandbox Enabled)
+const WRITE_OPS_SECTION_SANDBOX = `### Record Mutations & File Upload (✅ Sandbox Enabled)
 - **Record Mutations**: Inspect schema via \`netsuite_get_metadata\` ➔ Build valid JSON ➔ Execute \`netsuite_create_record\` or \`netsuite_update_record\`.
-- **File Upload Card Protocol**: When deploying code, display an interactive confirmation card (\`ask_question\`) showing only the file's absolute path, with choices "Accept" and "Reject". Call \`netsuite_deploy_script\` directly upon acceptance.`;
+- **File Upload Card Protocol**: When uploading code, display an interactive confirmation card (\`ask_question\`) extracting the workspace folder name and filename from the absolute path (e.g. from \`/Users/fuxintao/WebstormProjects/9260916/...\` extract \`9260916\` and combine with the filename: \`9260916/test.js\`), with choices "(Recommended) Accept" and "Reject". Call \`netsuite_upload_file\` directly upon acceptance.`;
 
-const WRITE_OPS_SECTION_PRODUCTION = `### Simplified File Upload & Code Deployment (🔒 Production Read-Only)
+const WRITE_OPS_SECTION_PRODUCTION = `### Simplified File Upload (🔒 Production Read-Only)
 - **Record Mutations**: Strictly blocked. Never attempt record creation or updates in Production.
-- **File Upload Card Protocol**: When uploading code to Production, display an interactive confirmation card (\`ask_question\`) showing only the file's absolute path, with choices "Accept" and "Reject". Call \`netsuite_deploy_script\` with \`allowProduction: true\` directly upon acceptance.`;
+- **File Upload Card Protocol**: When uploading code to Production, display an interactive confirmation card (\`ask_question\`) extracting the workspace folder name and filename from the absolute path (e.g. \`9260916/test.js\`), with choices "(Recommended) Accept" and "Reject". Call \`netsuite_upload_file\` with \`allowProduction: true\` directly upon acceptance.`;
 
 // ---------------------------------------------------------------------------
 // Helper: Variable Interpolator
