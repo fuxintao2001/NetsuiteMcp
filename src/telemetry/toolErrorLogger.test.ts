@@ -78,6 +78,12 @@ describe("toolErrorLogger", () => {
 					"⛔ [Production Safety Violation] Operation strictly blocked in Production",
 				),
 			).toBe("PRODUCTION_WRITE_BLOCKED");
+			expect(
+				classifyError(
+					"netsuite_upload_file",
+					"🚨 **生产环境安全拦截 (Production Safety Block)**",
+				),
+			).toBe("PRODUCTION_WRITE_BLOCKED");
 		});
 
 		it("should classify permission errors", () => {
@@ -91,6 +97,12 @@ describe("toolErrorLogger", () => {
 				classifyError(
 					"ns_getRecord",
 					"403 Forbidden NetSuite Permission Error",
+				),
+			).toBe("PERMISSION_DENIED");
+			expect(
+				classifyError(
+					"netsuite_run_suiteql",
+					"❌ NetSuite Permission Error: 403 Forbidden\n\n⛔ PERMISSION DENIED — HARD STOP REQUIRED",
 				),
 			).toBe("PERMISSION_DENIED");
 		});

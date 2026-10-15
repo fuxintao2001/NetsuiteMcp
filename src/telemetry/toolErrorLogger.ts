@@ -93,22 +93,9 @@ export function classifyError(
 	const lower = (errorMessage || "").toLowerCase();
 
 	if (
-		isValidation ||
-		lower.includes("invalid arguments") ||
-		lower.includes("validation error") ||
-		lower.includes("invalid input") ||
-		lower.includes("schema error") ||
-		lower.includes("expected string") ||
-		lower.includes("expected number") ||
-		lower.includes("required") ||
-		lower.includes("missing required")
-	) {
-		return "ARGUMENT_VALIDATION";
-	}
-
-	if (
 		lower.includes("production safety violation") ||
-		lower.includes("strictly blocked in production")
+		lower.includes("strictly blocked in production") ||
+		lower.includes("production safety block")
 	) {
 		return "PRODUCTION_WRITE_BLOCKED";
 	}
@@ -122,6 +109,21 @@ export function classifyError(
 		lower.includes("permission violation")
 	) {
 		return "PERMISSION_DENIED";
+	}
+
+	if (
+		isValidation ||
+		lower.includes("invalid arguments") ||
+		lower.includes("validation error") ||
+		lower.includes("invalid input") ||
+		lower.includes("schema error") ||
+		lower.includes("expected string") ||
+		lower.includes("expected number") ||
+		/\bis required\b|required field|missing required|\bis missing\b/i.test(
+			errorMessage || "",
+		)
+	) {
+		return "ARGUMENT_VALIDATION";
 	}
 
 	if (

@@ -81,7 +81,7 @@ function getActionableAdvice(code: string, message: string): string {
 		advice +=
 			"\n  - Transaction Types: SalesOrd, CustInvc, PurchOrd, VendBill, Journal, CustCred, ItemRcpt, ItemShip, CashSale, CustPymt, VendPymt.";
 		advice +=
-			"\n  - Self-Healing Template: If table/column schema is uncertain, inspect live metadata directly:\n    ns_getSuiteQLMetadata({ recordType: '<target_table>' })";
+			"\n  - Self-Healing Template: If table/column schema is uncertain, inspect live metadata directly:\n    netsuite_get_metadata({ table: '<target_table>' })";
 		return advice;
 	}
 

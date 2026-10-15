@@ -228,111 +228,106 @@ export class OAuthManager {
 		session: SessionData,
 		tokenToRefresh: string,
 	): Promise<string> {
-		this.refreshPromise = (async () => {
-			const accountId =
-				session?.config?.accountId || session?.tokens?.accountId || "unknown";
-			const lockResource = `token_refresh:${formatNetSuiteAccountHost(accountId)}`;
-			let lockId: unknown = null;
+		const accountId =
+			session?.config?.accountId || session?.tokens?.accountId || "unknown";
+		const lockResource = `token_refresh:${formatNetSuiteAccountHost(accountId)}`;
+		let lockId: unknown = null;
 
-			try {
-				// Acquire Redis distributed lock
-				if (this.lockProvider) {
-					lockId = await this.lockProvider.acquire(lockResource);
-					if (!lockId) {
-						throw new TokenRefreshError(
-							"Failed to acquire Redis lock for token refresh",
-							true,
-						);
-					}
-				}
-
-				// Reload session from disk after lock is acquired to check for concurrent updates
-				const currentSession = await this.storage.load();
-				if (currentSession?.tokens) {
-					const currentToken = currentSession.tokens.access_token;
-					// If the token has already been refreshed by another process, reuse it
-					if (
-						tokenToRefresh !== currentToken &&
-						!shouldRefreshToken(currentSession.tokens)
-					) {
-						console.error(
-							"🔄 Token was refreshed by another process concurrently.",
-						);
-						return currentToken;
-					}
-					// Also check if refresh_token changed (rotation by another process)
-					if (
-						session.tokens?.refresh_token &&
-						currentSession.tokens.refresh_token !== session.tokens.refresh_token
-					) {
-						console.error(
-							"🔄 Refresh token was rotated by another process. Using their result.",
-						);
-						return currentSession.tokens.access_token;
-					}
-					// Update the session in our scope
-					session = currentSession;
-				}
-
-				if (!session.tokens) {
+		try {
+			// Acquire Redis distributed lock
+			if (this.lockProvider) {
+				lockId = await this.lockProvider.acquire(lockResource);
+				if (!lockId) {
 					throw new TokenRefreshError(
-						"No tokens available to refresh in session",
-						false,
+						"Failed to acquire Redis lock for token refresh",
+						true,
 					);
 				}
+			}
 
-				const oldRT = session.tokens.refresh_token?.slice(-8) || "unknown";
-				const newTokens = await refreshAccessToken(session.tokens);
-				const newRT = newTokens.refresh_token?.slice(-8) || "unchanged";
-				console.error(
-					`🔄 Token rotation: old_rt=...${oldRT} → new_rt=...${newRT}`,
-				);
-
-				// Token Rotation safety: verify refresh_token hasn't been rotated during our HTTP request
-				const preWriteSession = await this.storage.load();
+			// Reload session from disk after lock is acquired to check for concurrent updates
+			const currentSession = await this.storage.load();
+			if (currentSession?.tokens) {
+				const currentToken = currentSession.tokens.access_token;
+				// If the token has already been refreshed by another process, reuse it
 				if (
-					preWriteSession?.tokens?.refresh_token &&
-					session.tokens?.refresh_token &&
-					preWriteSession.tokens.refresh_token !== session.tokens.refresh_token
+					tokenToRefresh !== currentToken &&
+					!shouldRefreshToken(currentSession.tokens)
 				) {
 					console.error(
-						"⚠️ Refresh token was rotated by another process during our refresh. Using their result.",
+						"🔄 Token was refreshed by another process concurrently.",
 					);
-					return preWriteSession.tokens.access_token;
+					return currentToken;
 				}
-
-				await this.storage.save({
-					...session,
-					previous_tokens: session.tokens,
-					tokens: newTokens,
-					authenticated: true,
-					unrecoverable: false,
-				});
-				return newTokens.access_token;
-			} catch (error: unknown) {
-				if (error instanceof TokenRefreshError && !error.recoverable) {
+				// Also check if refresh_token changed (rotation by another process)
+				if (
+					session.tokens?.refresh_token &&
+					currentSession.tokens.refresh_token !== session.tokens.refresh_token
+				) {
 					console.error(
-						"🔒 Refresh token expired — marking session unauthenticated",
+						"🔄 Refresh token was rotated by another process. Using their result.",
 					);
-					// Mark session as unauthenticated while preserving config for potential re-auth
-					const current = await this.storage.load();
-					if (current && current.authenticated !== false) {
-						await this.storage.save({
-							...current,
-							authenticated: false,
-						});
-					}
+					return currentSession.tokens.access_token;
 				}
-				throw error;
-			} finally {
-				if (lockId && this.lockProvider) {
-					await this.lockProvider.release(lockResource, lockId);
-				}
-				this.refreshPromise = null;
+				// Update the session in our scope
+				session = currentSession;
 			}
-		})();
 
-		return this.refreshPromise;
+			if (!session.tokens) {
+				throw new TokenRefreshError(
+					"No tokens available to refresh in session",
+					false,
+				);
+			}
+
+			const oldRT = session.tokens.refresh_token?.slice(-8) || "unknown";
+			const newTokens = await refreshAccessToken(session.tokens);
+			const newRT = newTokens.refresh_token?.slice(-8) || "unchanged";
+			console.error(
+				`🔄 Token rotation: old_rt=...${oldRT} → new_rt=...${newRT}`,
+			);
+
+			// Token Rotation safety: verify refresh_token hasn't been rotated during our HTTP request
+			const preWriteSession = await this.storage.load();
+			if (
+				preWriteSession?.tokens?.refresh_token &&
+				session.tokens?.refresh_token &&
+				preWriteSession.tokens.refresh_token !== session.tokens.refresh_token
+			) {
+				console.error(
+					"⚠️ Refresh token was rotated by another process during our refresh. Using their result.",
+				);
+				return preWriteSession.tokens.access_token;
+			}
+
+			await this.storage.save({
+				...session,
+				previous_tokens: session.tokens,
+				tokens: newTokens,
+				authenticated: true,
+				unrecoverable: false,
+			});
+			return newTokens.access_token;
+		} catch (error: unknown) {
+			if (error instanceof TokenRefreshError && !error.recoverable) {
+				console.error(
+					"🔒 Refresh token expired — marking session unauthenticated",
+				);
+				// Mark session as unauthenticated while preserving config for potential re-auth
+				const current = await this.storage.load();
+				if (current && current.authenticated !== false) {
+					await this.storage.save({
+						...current,
+						authenticated: false,
+					});
+				}
+			}
+			throw error;
+		} finally {
+			if (lockId && this.lockProvider) {
+				await this.lockProvider.release(lockId);
+			}
+		}
 	}
 
 	/**
@@ -473,7 +468,13 @@ export class OAuthManager {
 		}
 
 		console.error("🔄 Force-refreshing access token...");
-		return this.executeTokenRefresh(session, currentToken);
+		this.refreshPromise = this.executeTokenRefresh(
+			session,
+			currentToken,
+		).finally(() => {
+			this.refreshPromise = null;
+		});
+		return this.refreshPromise;
 	}
 
 	/**
@@ -650,7 +651,7 @@ export class OAuthManager {
 						`⚠️ Auto-recovery attempt ${attempt} failed (transient error), retrying in ${delay / 1000}s...`,
 					);
 					if (lockId && this.lockProvider) {
-						await this.lockProvider.release(lockResource, lockId);
+						await this.lockProvider.release(lockId);
 						lockId = null;
 					}
 					await new Promise((resolve) => setTimeout(resolve, delay));
@@ -673,7 +674,7 @@ export class OAuthManager {
 				}
 			} finally {
 				if (lockId && this.lockProvider) {
-					await this.lockProvider.release(lockResource, lockId);
+					await this.lockProvider.release(lockId);
 					lockId = null;
 				}
 			}
@@ -721,12 +722,5 @@ export class OAuthManager {
 				expiresAt: null,
 			};
 		}
-	}
-
-	/**
-	 * Clear session data for logout
-	 */
-	async logout(): Promise<void> {
-		await this.storage.clear();
 	}
 }

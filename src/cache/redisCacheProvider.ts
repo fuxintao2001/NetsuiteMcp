@@ -24,6 +24,9 @@ export class RedisCacheProvider implements CacheProvider {
 			lazyConnect: true,
 			maxRetriesPerRequest: 3,
 		});
+		this.redis.on("error", (err) => {
+			console.error("⚠️ [Redis Error]", err);
+		});
 		await this.redis.connect();
 		console.error("✅ Connected to Redis successfully");
 	}
@@ -38,7 +41,7 @@ export class RedisCacheProvider implements CacheProvider {
 	}
 
 	private getRedisKey(accountId: string, key: string): string {
-		return `nsmcp:${accountId.toLowerCase()}:${key.toLowerCase()}`;
+		return `ns:${accountId.toLowerCase()}:${key.toLowerCase()}`;
 	}
 
 	private ensureConnected(): Redis {
@@ -65,7 +68,7 @@ export class RedisCacheProvider implements CacheProvider {
 		accountId: string,
 		key: string,
 		data: T,
-		ttlSeconds?: number,
+		ttlSeconds: number = 3600,
 	): Promise<void> {
 		const client = this.ensureConnected();
 		const redisKey = this.getRedisKey(accountId, key);
@@ -85,7 +88,7 @@ export class RedisCacheProvider implements CacheProvider {
 
 	async clearAccountCache(accountId: string): Promise<void> {
 		const client = this.ensureConnected();
-		const pattern = `nsmcp:${accountId.toLowerCase()}:*`;
+		const pattern = `ns:${accountId.toLowerCase()}:*`;
 
 		let cursor = "0";
 		let keysDeleted = 0;
@@ -125,7 +128,7 @@ export class RedisCacheProvider implements CacheProvider {
 					const reply = await this.redis.scan(
 						cursor,
 						"MATCH",
-						"nsmcp:*",
+						"ns:*",
 						"COUNT",
 						100,
 					);

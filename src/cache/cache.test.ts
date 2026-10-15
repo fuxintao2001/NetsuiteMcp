@@ -32,7 +32,7 @@ describe("Cache & Locking", () => {
 		});
 
 		it("should get stats based on mock instance connection status", async () => {
-			mockRedisInstance.scan.mockResolvedValueOnce(["0", ["nsmcp:acc1:key1"]]);
+			mockRedisInstance.scan.mockResolvedValueOnce(["0", ["ns:acc1:key1"]]);
 			const stats = await cache.getStats();
 			expect(stats).toEqual({
 				provider: "redis",
@@ -46,36 +46,34 @@ describe("Cache & Locking", () => {
 
 			await cache.set("acc1", "myKey", { foo: "bar" }, 60);
 			expect(mockRedisInstance.set).toHaveBeenCalledWith(
-				"nsmcp:acc1:mykey",
+				"ns:acc1:mykey",
 				JSON.stringify({ foo: "bar" }),
 				"EX",
 				60,
 			);
 
 			const result = await cache.get<any>("acc1", "myKey");
-			expect(mockRedisInstance.get).toHaveBeenCalledWith("nsmcp:acc1:mykey");
+			expect(mockRedisInstance.get).toHaveBeenCalledWith("ns:acc1:mykey");
 			expect(result).toEqual({ foo: "bar" });
 		});
 
 		it("should set without EX if ttl is 0", async () => {
 			await cache.set("acc1", "myKey", "val", 0);
 			expect(mockRedisInstance.set).toHaveBeenCalledWith(
-				"nsmcp:acc1:mykey",
+				"ns:acc1:mykey",
 				JSON.stringify("val"),
 			);
 		});
 
 		it("should delete keys from Redis", async () => {
 			await cache.delete("acc1", "deleteKey");
-			expect(mockRedisInstance.del).toHaveBeenCalledWith(
-				"nsmcp:acc1:deletekey",
-			);
+			expect(mockRedisInstance.del).toHaveBeenCalledWith("ns:acc1:deletekey");
 		});
 
 		it("should scan and clear all cache for a specific account", async () => {
 			mockRedisInstance.scan.mockResolvedValueOnce([
 				"0",
-				["nsmcp:acc1:key1", "nsmcp:acc1:key2"],
+				["ns:acc1:key1", "ns:acc1:key2"],
 			]);
 
 			await cache.clearAccountCache("acc1");
@@ -83,13 +81,13 @@ describe("Cache & Locking", () => {
 			expect(mockRedisInstance.scan).toHaveBeenCalledWith(
 				"0",
 				"MATCH",
-				"nsmcp:acc1:*",
+				"ns:acc1:*",
 				"COUNT",
 				100,
 			);
 			expect(mockRedisInstance.del).toHaveBeenCalledWith(
-				"nsmcp:acc1:key1",
-				"nsmcp:acc1:key2",
+				"ns:acc1:key1",
+				"ns:acc1:key2",
 			);
 		});
 	});
@@ -117,7 +115,7 @@ describe("Cache & Locking", () => {
 			const lock = await lockProvider.acquire("my-resource", 1000);
 
 			expect(lock).toBe(mockLock);
-			expect(acquireSpy).toHaveBeenCalledWith(["nsmcp:lock:my-resource"], 1000);
+			expect(acquireSpy).toHaveBeenCalledWith(["ns:lock:my-resource"], 1000);
 		});
 
 		it("should return null when acquire fails", async () => {
@@ -133,7 +131,7 @@ describe("Cache & Locking", () => {
 		it("should return true on release success", async () => {
 			const mockLock = { release: vi.fn().mockResolvedValue(undefined) };
 
-			const result = await lockProvider.release("my-resource", mockLock as any);
+			const result = await lockProvider.release(mockLock as any);
 
 			expect(result).toBe(true);
 			expect(mockLock.release).toHaveBeenCalled();
@@ -144,7 +142,7 @@ describe("Cache & Locking", () => {
 				release: vi.fn().mockRejectedValue(new Error("Release failed")),
 			};
 
-			const result = await lockProvider.release("my-resource", mockLock as any);
+			const result = await lockProvider.release(mockLock as any);
 
 			expect(result).toBe(false);
 		});

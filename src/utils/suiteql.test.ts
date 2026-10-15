@@ -382,6 +382,14 @@ describe("SuiteQL, Search & Query Utilities", () => {
 				expect(res.reason).toContain("Prohibited 'JOIN SystemNote'");
 			});
 
+			it("should reject prohibited SystemNote implicit comma joins", () => {
+				const res = validateSuiteQL(
+					"SELECT t.id, sn.detail FROM systemnote sn, transaction t WHERE sn.recordid = t.id AND t.id = 1",
+				);
+				expect(res.valid).toBe(false);
+				expect(res.reason).toContain("Prohibited 'JOIN SystemNote'");
+			});
+
 			it("should reject unindexed standalone SystemNote queries without recordid filter", () => {
 				const res = validateSuiteQL(
 					"SELECT recordid, recordtypeid, field, date FROM systemnote WHERE date >= TO_DATE('2026-09-26', 'YYYY-MM-DD')",
@@ -449,6 +457,16 @@ describe("SuiteQL, Search & Query Utilities", () => {
 			it("should reject transactionline queries missing mainline filter", () => {
 				const res = validateSuiteQL(
 					"SELECT tl.id, tl.item, tl.quantity FROM transactionline tl WHERE tl.transaction = 100",
+				);
+				expect(res.valid).toBe(false);
+				expect(res.reason).toContain(
+					"Missing 'mainline' filter on 'transactionline'",
+				);
+			});
+
+			it("should reject transactionline queries where mainline filter is disguised in comments", () => {
+				const res = validateSuiteQL(
+					"SELECT tl.id, tl.item FROM transactionline tl WHERE tl.transaction = 100 /* tl.mainline = 'F' */",
 				);
 				expect(res.valid).toBe(false);
 				expect(res.reason).toContain(
@@ -610,14 +628,14 @@ describe("SuiteQL, Search & Query Utilities", () => {
 				expect(diag.suggestedFix).toContain("inventorybalance");
 			});
 
-			it("should diagnose non-existent table and suggest ns_getSuiteQLMetadata", () => {
+			it("should diagnose non-existent table and suggest netsuite_get_metadata", () => {
 				const diag = diagnoseSuiteQLError(
 					"Record 'nonexistent_tbl' was not found",
 				);
 				expect(diag.isDiagnosed).toBe(true);
 				expect(diag.summary).toContain("Non-Existent or Disabled Table");
 				expect(diag.selfHealingAction).toContain(
-					"ns_getSuiteQLMetadata({ keyword: 'nonexistent_tbl' })",
+					"netsuite_get_metadata({ keyword: 'nonexistent_tbl' })",
 				);
 			});
 
@@ -724,7 +742,7 @@ describe("SuiteQL, Search & Query Utilities", () => {
 			it("should handle unknown generic errors gracefully", () => {
 				const diag = diagnoseSuiteQLError("Some bizarre internal error");
 				expect(diag.isDiagnosed).toBe(false);
-				expect(diag.selfHealingAction).toContain("ns_getSuiteQLMetadata");
+				expect(diag.selfHealingAction).toContain("netsuite_get_metadata");
 			});
 		});
 

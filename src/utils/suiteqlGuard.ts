@@ -17,29 +17,6 @@ export interface SuiteQLValidationResult {
 	hasPagination?: boolean;
 }
 
-/**
- * Tracks schema metadata reconnaissance calls in the current session
- * to prevent agents from skipping ns_getSuiteQLMetadata (Gate 2 Enforcement).
- */
-const consultedTables = new Set<string>();
-
-export const schemaReconnaissanceTracker = {
-	record(tableName?: unknown): void {
-		if (typeof tableName === "string" && tableName.trim().length > 0) {
-			consultedTables.add(tableName.toLowerCase().trim());
-		}
-	},
-	has(tableName: string): boolean {
-		return consultedTables.has(tableName.toLowerCase().trim());
-	},
-	getConsultedTables(): string[] {
-		return Array.from(consultedTables);
-	},
-	clear(): void {
-		consultedTables.clear();
-	},
-};
-
 const DISALLOWED_KEYWORDS_REGEX =
 	/\b(INSERT|UPDATE|DELETE|DROP|CREATE|ALTER|TRUNCATE|GRANT|REVOKE|EXEC|EXECUTE|MERGE|INTO|DATABASE|SCHEMA)\b/i;
 
@@ -157,18 +134,52 @@ export function splitSuiteQLStatements(rawSql: string): string[] {
  */
 export function extractReferencedTables(sqlQuery: string): string[] {
 	const { maskedSql } = maskStringLiterals(sqlQuery);
+	const cleanSql = stripSqlComments(maskedSql);
 	const tableSet = new Set<string>();
 
-	// Match FROM and JOIN clauses
-	const tableRegex = /\b(?:FROM|JOIN)\s+([a-zA-Z0-9_]+)/gi;
+	// 1. Match JOIN clauses: JOIN <table> [AS <alias>]
+	const joinRegex = /\bJOIN\s+([a-zA-Z0-9_]+)/gi;
 	let match: RegExpExecArray | null;
-
 	while (true) {
-		match = tableRegex.exec(maskedSql);
+		match = joinRegex.exec(cleanSql);
 		if (!match) break;
 		const tableName = match[1]?.toLowerCase().trim();
 		if (tableName && !tableName.startsWith("__str_literal")) {
 			tableSet.add(tableName);
+		}
+	}
+
+	// 2. Match FROM clauses (including comma-separated table lists: FROM tableA a, tableB b)
+	const fromRegex =
+		/\bFROM\s+([\s\S]+?)(?=\b(?:WHERE|GROUP\s+BY|HAVING|ORDER\s+BY|FETCH\s+FIRST|LIMIT|OFFSET|JOIN|LEFT\s+JOIN|RIGHT\s+JOIN|INNER\s+JOIN|FULL\s+JOIN|CROSS\s+JOIN|UNION|WINDOW)\b|;|\)|$)/gi;
+	while (true) {
+		match = fromRegex.exec(cleanSql);
+		if (!match) break;
+		const fromClause = match[1]?.trim();
+		if (fromClause) {
+			const items = fromClause.split(",");
+			for (const rawItem of items) {
+				const item = rawItem.trim();
+				if (!item || item.startsWith("(")) continue;
+				const firstToken = item.split(/\s+/)[0]?.toLowerCase().trim();
+				if (
+					firstToken &&
+					/^[a-zA-Z0-9_]+$/.test(firstToken) &&
+					!firstToken.startsWith("__str_literal") &&
+					![
+						"select",
+						"where",
+						"join",
+						"left",
+						"right",
+						"inner",
+						"outer",
+						"from",
+					].includes(firstToken)
+				) {
+					tableSet.add(firstToken);
+				}
+			}
 		}
 	}
 
@@ -269,9 +280,10 @@ export function validateSuiteQL(sqlQuery: string): SuiteQLValidationResult {
 	}
 
 	const trimmed = sqlQuery.trim();
-	const { maskedSql } = maskStringLiterals(trimmed);
+	const { maskedSql, literals } = maskStringLiterals(trimmed);
 	// Safely strip SQL comments outside string literals (preserving legitimate comments without false-positive blocks)
 	const cleanMaskedSql = stripSqlComments(maskedSql).trim();
+	const cleanSql = unmaskStringLiterals(cleanMaskedSql, literals).trim();
 
 	// Check for multi-statement execution (semicolons that are not just a single trailing semicolon)
 	const withoutTrailingSemicolon = cleanMaskedSql.endsWith(";")
@@ -332,7 +344,7 @@ export function validateSuiteQL(sqlQuery: string): SuiteQLValidationResult {
 	if (match) {
 		return {
 			valid: false,
-			reason: `SuiteQL query contains disallowed mutation or DDL keyword: '${match[1]}'. Only read-only queries are permitted. Use ns_createRecord or ns_updateRecord for data mutations.`,
+			reason: `SuiteQL query contains disallowed mutation or DDL keyword: '${match[1]}'. Only read-only queries are permitted. Use netsuite_create_record or netsuite_update_record for data mutations.`,
 		};
 	}
 
@@ -404,7 +416,7 @@ export function validateSuiteQL(sqlQuery: string): SuiteQLValidationResult {
 
 		if (
 			hasHeaderCreatedFrom ||
-			(!tables.includes("transactionline") && /\bcreatedfrom\b/i.test(trimmed))
+			(!tables.includes("transactionline") && /\bcreatedfrom\b/i.test(cleanSql))
 		) {
 			return {
 				valid: false,
@@ -418,7 +430,7 @@ export function validateSuiteQL(sqlQuery: string): SuiteQLValidationResult {
 	if (
 		tables.includes("inventoryitemlocations") &&
 		!/\b(?:[a-zA-Z0-9_]+\.)?(?:itemtype|type)\s*=\s*['"]?InvtPart['"]?/i.test(
-			trimmed,
+			cleanSql,
 		)
 	) {
 		return {
@@ -431,7 +443,9 @@ export function validateSuiteQL(sqlQuery: string): SuiteQLValidationResult {
 	// Anti-Pattern 4: 'transactionline' missing 'mainline' filter
 	if (
 		tables.includes("transactionline") &&
-		!/\b(?:[a-zA-Z0-9_]+\.)?mainline\s*(?:=|IS)\s*['"]?[TF]['"]?/i.test(trimmed)
+		!/\b(?:[a-zA-Z0-9_]+\.)?mainline\s*(?:=|IS)\s*['"]?[TF]['"]?/i.test(
+			cleanSql,
+		)
 	) {
 		return {
 			valid: false,
@@ -777,8 +791,8 @@ export function diagnoseSuiteQLError(
 			summary: `Non-Existent or Disabled Table: '${tableName}'`,
 			rootCause: `Table '${tableName}' does not exist in NetSuite's SuiteQL schema or the corresponding feature is disabled.`,
 			officialGuidance:
-				"Verify available tables by calling `ns_getSuiteQLMetadata({ keyword: '...' })` or check NetSuite Records Catalog.",
-			selfHealingAction: `Call ns_getSuiteQLMetadata({ keyword: '${tableName}' }) to discover the correct table name.`,
+				"Verify available tables by calling `netsuite_get_metadata({ keyword: '...' })` or check NetSuite Records Catalog.",
+			selfHealingAction: `Call netsuite_get_metadata({ keyword: '${tableName}' }) to discover the correct table name.`,
 		};
 	}
 
@@ -794,8 +808,8 @@ export function diagnoseSuiteQLError(
 			isDiagnosed: true,
 			summary: `Unknown Field/Column: '${colName}'`,
 			rootCause: `Column '${colName}' was not recognized${tableContext}. Field names are case-sensitive and vary by custom fields (custbody_*, custrecord_*, custitem_*).`,
-			officialGuidance: `Inspect the exact column definitions for ${tables[0] || "the table"} using ns_getSuiteQLMetadata.`,
-			selfHealingAction: `Call ns_getSuiteQLMetadata({ recordType: '${tables[0] || "tableName"}' }) to verify valid column names.`,
+			officialGuidance: `Inspect the exact column definitions for ${tables[0] || "the table"} using netsuite_get_metadata.`,
+			selfHealingAction: `Call netsuite_get_metadata({ table: '${tables[0] || "tableName"}' }) to verify valid column names.`,
 		};
 	}
 
@@ -995,9 +1009,9 @@ export function diagnoseSuiteQLError(
 		summary: "SuiteQL Query Error",
 		rootCause: err,
 		officialGuidance:
-			"Verify table and column names using ns_getSuiteQLMetadata, ensure strict read-only SELECT syntax, and include indexed filters.",
+			"Verify table and column names using netsuite_get_metadata, ensure strict read-only SELECT syntax, and include indexed filters.",
 		selfHealingAction:
-			"1. Call `ns_getSuiteQLMetadata` for referenced table(s) to verify columns. 2. Directly fix query based on the diagnostic and execute.",
+			"1. Call `netsuite_get_metadata` for referenced table(s) to verify columns. 2. Directly fix query based on the diagnostic and execute.",
 	};
 }
 

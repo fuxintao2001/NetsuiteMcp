@@ -59,7 +59,10 @@ export function cleanRecordPayload(val: unknown): unknown {
 /**
  * Formats JSON schema (from NetSuite record metadata) into a compact Markdown table.
  */
-export function formatMetadataToCompactMarkdown(schema: unknown): string {
+export function formatMetadataToCompactMarkdown(
+	schema: unknown,
+	keyword?: string,
+): string {
 	if (!schema || typeof schema !== "object") {
 		return String(schema);
 	}
@@ -80,7 +83,7 @@ export function formatMetadataToCompactMarkdown(schema: unknown): string {
 		if (first?.text && typeof first.text === "string") {
 			try {
 				const parsed = JSON.parse(first.text);
-				return formatMetadataToCompactMarkdown(parsed);
+				return formatMetadataToCompactMarkdown(parsed, keyword);
 			} catch {
 				// Not JSON text, return content as string
 				return first.text;
@@ -91,7 +94,7 @@ export function formatMetadataToCompactMarkdown(schema: unknown): string {
 	if (!properties || typeof properties !== "object") {
 		// If it's standard JSON but has a success status
 		if (schemaObj.success === true && schemaObj.metadata) {
-			return formatMetadataToCompactMarkdown(schemaObj.metadata);
+			return formatMetadataToCompactMarkdown(schemaObj.metadata, keyword);
 		}
 		return typeof schema === "string"
 			? schema
@@ -99,18 +102,28 @@ export function formatMetadataToCompactMarkdown(schema: unknown): string {
 	}
 
 	let output = "| Field | Type | Description | Nullable |\n|---|---|---|---|\n";
+	const kwLower = keyword ? keyword.toLowerCase().trim() : "";
 	for (const [key, value] of Object.entries(properties)) {
 		if (!value || typeof value !== "object") continue;
 		const valObj = value as Record<string, unknown>;
+		const desc = String(valObj.description || valObj.title || "")
+			.trim()
+			.replace(/\|/g, "\\|")
+			.replace(/\n/g, " ");
+
+		if (kwLower.length > 0) {
+			const keyMatch = key.toLowerCase().includes(kwLower);
+			const descMatch = desc.toLowerCase().includes(kwLower);
+			if (!keyMatch && !descMatch) {
+				continue;
+			}
+		}
+
 		const innerProps = valObj.properties as Record<string, unknown> | undefined;
 		const typeStr =
 			valObj.type === "object" && innerProps
 				? `object (${Object.keys(innerProps).join(", ")})`
 				: String(valObj.type || "string");
-		const desc = String(valObj.description || valObj.title || "")
-			.trim()
-			.replace(/\|/g, "\\|")
-			.replace(/\n/g, " ");
 		const nullable = valObj.nullable !== false ? "Yes" : "No";
 		output += `| ${key} | ${typeStr} | ${desc} | ${nullable} |\n`;
 	}

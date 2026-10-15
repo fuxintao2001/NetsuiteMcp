@@ -328,7 +328,7 @@ SPACED = trimmed
 				const result = parseNetSuiteError(mockError);
 				expect(result.message).toContain("Invalid Column 'docnum'");
 				expect(result.message).toContain(
-					"ns_getSuiteQLMetadata({ recordType: '<target_table>' })",
+					"netsuite_get_metadata({ table: '<target_table>' })",
 				);
 			});
 

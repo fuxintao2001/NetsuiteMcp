@@ -1,4 +1,5 @@
 import type { CallToolResult } from "@modelcontextprotocol/server";
+import pLimit from "p-limit";
 import type { NetSuiteMCPTools } from "../mcp/tools.js";
 import type { OAuthManager } from "../oauth/manager.js";
 import {
@@ -84,7 +85,9 @@ export async function resolveNaturalKeyToInternalId(
 					recordType: (rows[0].type as string)?.toLowerCase() || recordType,
 				};
 			}
-		} catch {
+		} catch (err: unknown) {
+			const msg = err instanceof Error ? err.message : String(err);
+			if (isPermissionError(msg)) throw err;
 			/* Lookup failed */
 		}
 		return null;
@@ -92,6 +95,9 @@ export async function resolveNaturalKeyToInternalId(
 
 	// 2. Custom record lookup by canonical name
 	if (recType.startsWith("customrecord")) {
+		if (!/^customrecord_[a-z0-9_]+$/i.test(recType)) {
+			return null;
+		}
 		try {
 			const upperKey = safeKey.toUpperCase();
 			const sql = `SELECT id, name FROM ${recType} WHERE UPPER(name) = '${upperKey}' ORDER BY id DESC FETCH FIRST 1 ROWS ONLY`;
@@ -102,7 +108,9 @@ export async function resolveNaturalKeyToInternalId(
 			if (rows.length > 0 && rows[0]?.id) {
 				return { id: String(rows[0].id), recordType: recType };
 			}
-		} catch {
+		} catch (err: unknown) {
+			const msg = err instanceof Error ? err.message : String(err);
+			if (isPermissionError(msg)) throw err;
 			/* Lookup failed */
 		}
 		return null;
@@ -120,7 +128,9 @@ export async function resolveNaturalKeyToInternalId(
 			if (rows.length > 0 && rows[0]?.id) {
 				return { id: String(rows[0].id), recordType: recType };
 			}
-		} catch {
+		} catch (err: unknown) {
+			const msg = err instanceof Error ? err.message : String(err);
+			if (isPermissionError(msg)) throw err;
 			/* Lookup failed */
 		}
 		return null;
@@ -138,7 +148,9 @@ export async function resolveNaturalKeyToInternalId(
 			if (rows.length > 0 && rows[0]?.id) {
 				return { id: String(rows[0].id), recordType: "item" };
 			}
-		} catch {
+		} catch (err: unknown) {
+			const msg = err instanceof Error ? err.message : String(err);
+			if (isPermissionError(msg)) throw err;
 			/* Lookup failed */
 		}
 		return null;
@@ -317,6 +329,9 @@ async function inspectSingleRecord(
 				return filteredRow;
 			});
 		}
+		processed = processed.map(
+			(row) => (cleanRecordPayload(row) || {}) as Record<string, unknown>,
+		);
 		sublistsDetail[sublistName] = processed;
 	}
 
@@ -383,7 +398,13 @@ async function inspectSingleRecord(
 	}
 
 	// Sublists & Line Details
-	if (includeSublists && Object.keys(sublistsDetail).length > 0) {
+	if (linesMode === "summary" && Object.keys(sublistsSummary).length > 0) {
+		md += `\n### 📦 Sublists Summary\n`;
+		md += `| Sublist Name | Line Count |\n|:---|:---|\n`;
+		for (const [sublistName, info] of Object.entries(sublistsSummary)) {
+			md += `| \`${sublistName}\` | ${info.count} |\n`;
+		}
+	} else if (includeSublists && Object.keys(sublistsDetail).length > 0) {
 		md += `\n### 📦 Sublists & Line Details\n`;
 		for (const [sublistName, rows] of Object.entries(sublistsDetail)) {
 			md += `#### 🔹 Sublist: \`${sublistName}\` (${rows.length} lines)\n\n`;
@@ -560,26 +581,29 @@ async function inspectSingleTableMetadata(
 	try {
 		const sqlMeta = await mcpTools.executeTool("ns_getSuiteQLMetadata", {
 			recordType: table,
-			keyword,
 		});
-		return textResult(formatMetadataToCompactMarkdown(sqlMeta));
+		return textResult(formatMetadataToCompactMarkdown(sqlMeta, keyword));
 	} catch (err: unknown) {
-		// Fallback to offline catalog if remote fails
-		const fallbackDef = recordsReferenceService.getRecordDefinition(
-			table,
-			keyword,
-		);
-		if (fallbackDef?.found && fallbackDef.fields.length > 0) {
-			let md = `## 📖 Official Records Definition: \`${table}\` (Offline Catalog)\n\n`;
-			md += `*Total Fields: ${fallbackDef.fields.length} standard fields identified.*\n\n`;
-			md += `| Field ID | Type | Label | Required |\n|:---|:---|:---|:---|\n`;
-			for (const f of fallbackDef.fields as RecordFieldMeta[]) {
-				md += `| \`${f.internalId}\` | ${f.type} | ${f.label} | ${f.required ? "Yes" : "No"} |\n`;
+		const msg = err instanceof Error ? err.message : String(err);
+		if (isPermissionError(msg)) throw err;
+
+		// Fallback to offline catalog if remote fails (unless source is explicitly remote)
+		if (source !== "remote") {
+			const fallbackDef = recordsReferenceService.getRecordDefinition(
+				table,
+				keyword,
+			);
+			if (fallbackDef?.found && fallbackDef.fields.length > 0) {
+				let md = `## 📖 Official Records Definition: \`${table}\` (Offline Catalog)\n\n`;
+				md += `*Total Fields: ${fallbackDef.fields.length} standard fields identified.*\n\n`;
+				md += `| Field ID | Type | Label | Required |\n|:---|:---|:---|:---|\n`;
+				for (const f of fallbackDef.fields as RecordFieldMeta[]) {
+					md += `| \`${f.internalId}\` | ${f.type} | ${f.label} | ${f.required ? "Yes" : "No"} |\n`;
+				}
+				return textResult(md);
 			}
-			return textResult(md);
 		}
 
-		const msg = err instanceof Error ? err.message : String(err);
 		return textResult(
 			`❌ Failed to inspect metadata for '${table}': ${msg}\n` +
 				`👉 Tip: Call with keyword to search across available tables, or verify table name in NetSuite Records Catalog.`,
@@ -696,6 +720,78 @@ const TRANSACTION_RECORD_TYPES = new Set([
 	"assemblyunbuild",
 ]);
 
+async function inspectSingleRecordSystemNotes(
+	rawRecordId: string,
+	recordType: string | undefined,
+	limit: number,
+	mcpTools: NetSuiteMCPTools,
+): Promise<string> {
+	let recordId = rawRecordId.trim();
+	let recordTypeId: number | undefined;
+
+	if (recordType && TRANSACTION_RECORD_TYPES.has(recordType.toLowerCase())) {
+		recordTypeId = -30;
+	}
+
+	const isNumeric = /^-?\d+$/.test(recordId);
+	if (!isNumeric) {
+		try {
+			const safeTranid = recordId.replace(/'/g, "''");
+			const upperTranid = safeTranid.toUpperCase();
+			const lookupSql = `SELECT id FROM transaction WHERE UPPER(tranid) = '${upperTranid}' FETCH FIRST 1 ROWS ONLY`;
+			const lookupRes = await mcpTools.executeTool("ns_runCustomSuiteQL", {
+				sqlQuery: lookupSql,
+			});
+			const rows = mcpTools.extractDataArray(lookupRes);
+			if (rows.length > 0 && rows[0]?.id) {
+				recordId = String(rows[0].id);
+				recordTypeId = -30;
+			} else {
+				return `❌ Record '${rawRecordId}' could not be resolved to a numeric internal ID. Please verify the document number (tranid) or provide the numeric internal ID directly.`;
+			}
+		} catch (err: unknown) {
+			const msg = err instanceof Error ? err.message : String(err);
+			if (isPermissionError(msg)) throw err;
+			return `❌ Failed to resolve document number '${rawRecordId}': ${msg}`;
+		}
+	}
+
+	const whereConditions: string[] = [];
+	if (recordTypeId !== undefined) {
+		whereConditions.push(`sn.recordtypeid = ${recordTypeId}`);
+	}
+	whereConditions.push(`sn.recordid = ${recordId}`);
+
+	const sql = `SELECT sn.id, TO_CHAR(sn.date, 'YYYY-MM-DD HH24:MI:SS') AS date, sn.field, sn.oldvalue, sn.newvalue, sn.name AS author_id, BUILTIN.DF(sn.name) AS author_name, BUILTIN.DF(sn.role) AS role_name FROM systemnote sn WHERE ${whereConditions.join(" AND ")} ORDER BY sn.id DESC FETCH FIRST ${limit} ROWS ONLY`;
+
+	const res = await mcpTools.executeTool("ns_runCustomSuiteQL", {
+		sqlQuery: sql,
+	});
+	const rows = mcpTools.extractDataArray(res);
+
+	if (rows.length === 0) {
+		return `ℹ️ No system notes found for record ID ${recordId}.`;
+	}
+
+	let md = `## 🕵️ System Notes Audit Trail (Record ID: \`${recordId}\`, ${rows.length} changes)\n\n`;
+	md += `| Timestamp | Author | Role | Field | Old Value | New Value |\n|:---|:---|:---|:---|:---|:---|\n`;
+
+	for (const r of rows) {
+		const author = r.author_name || r.author_id || "System";
+		const role = r.role_name || "-";
+		const field = r.field || "-";
+		const oldVal = (
+			r.oldvalue !== null && r.oldvalue !== undefined ? String(r.oldvalue) : ""
+		).slice(0, 30);
+		const newVal = (
+			r.newvalue !== null && r.newvalue !== undefined ? String(r.newvalue) : ""
+		).slice(0, 30);
+		md += `| ${r.date} | ${author} | ${role} | \`${field}\` | ${oldVal} | ${newVal} |\n`;
+	}
+
+	return md;
+}
+
 /**
  * netsuite_get_system_notes
  * Dedicated audit log query complying strictly with Oracle SAFE Guide Pitfall 11.
@@ -712,86 +808,65 @@ export async function handleGetSystemNotes(
 		);
 	}
 
-	let { recordId, recordType, limit } = parsed.data;
-	let recordTypeId: number | undefined;
+	const { recordType, limit } = parsed.data;
+	const targetIds = [
+		...(parsed.data.recordId ? [parsed.data.recordId.trim()] : []),
+		...(parsed.data.recordIds || []).map((id) => id.trim()),
+	];
 
-	if (recordType && TRANSACTION_RECORD_TYPES.has(recordType.toLowerCase())) {
-		recordTypeId = -30;
+	if (targetIds.length === 0) {
+		return textResult(
+			"❌ Either recordId or recordIds must be specified.",
+			true,
+		);
 	}
 
-	const isNumeric = /^-?\d+$/.test(recordId.trim());
-	if (!isNumeric) {
+	const firstId = targetIds[0];
+	if (targetIds.length === 1 && firstId) {
 		try {
-			const safeTranid = recordId.trim().replace(/'/g, "''");
-			const upperTranid = safeTranid.toUpperCase();
-			const lookupSql = `SELECT id FROM transaction WHERE UPPER(tranid) = '${upperTranid}' FETCH FIRST 1 ROWS ONLY`;
-			const lookupRes = await mcpTools.executeTool("ns_runCustomSuiteQL", {
-				sqlQuery: lookupSql,
-			});
-			const rows = mcpTools.extractDataArray(lookupRes);
-			if (rows.length > 0 && rows[0]?.id) {
-				recordId = String(rows[0].id);
-				recordTypeId = -30;
-			} else {
-				return textResult(
-					`❌ Record '${recordId}' could not be resolved to a numeric internal ID. Please verify the document number (tranid) or provide the numeric internal ID directly.`,
-					true,
-				);
-			}
+			const res = await inspectSingleRecordSystemNotes(
+				firstId,
+				recordType,
+				limit,
+				mcpTools,
+			);
+			return textResult(res, res.startsWith("❌"));
 		} catch (err: unknown) {
 			const msg = err instanceof Error ? err.message : String(err);
+			if (isPermissionError(msg)) throw err;
 			return textResult(
-				`❌ Failed to resolve document number '${recordId}': ${msg}`,
+				`❌ Failed to query system notes for record ID ${firstId}: ${msg}`,
 				true,
 			);
 		}
 	}
 
-	const whereConditions: string[] = [];
-	if (recordTypeId !== undefined) {
-		whereConditions.push(`sn.recordtypeid = ${recordTypeId}`);
-	}
-	whereConditions.push(`sn.recordid = ${recordId}`);
-
-	const sql = `SELECT sn.id, TO_CHAR(sn.date, 'YYYY-MM-DD HH24:MI:SS') AS date, sn.field, sn.oldvalue, sn.newvalue, sn.name AS author_id, BUILTIN.DF(sn.name) AS author_name, BUILTIN.DF(sn.role) AS role_name FROM systemnote sn WHERE ${whereConditions.join(" AND ")} ORDER BY sn.id DESC FETCH FIRST ${limit} ROWS ONLY`;
-
+	// Multi-record parallel execution with ConcurrencyLimiter(5)
+	const limiter = pLimit(5);
 	try {
-		const res = await mcpTools.executeTool("ns_runCustomSuiteQL", {
-			sqlQuery: sql,
-		});
-		const rows = mcpTools.extractDataArray(res);
-
-		if (rows.length === 0) {
-			return textResult(`ℹ️ No system notes found for record ID ${recordId}.`);
-		}
-
-		let md = `## 🕵️ System Notes Audit Trail (Record ID: \`${recordId}\`, ${rows.length} changes)\n\n`;
-		md += `| Timestamp | Author | Role | Field | Old Value | New Value |\n|:---|:---|:---|:---|:---|:---|\n`;
-
-		for (const r of rows) {
-			const author = r.author_name || r.author_id || "System";
-			const role = r.role_name || "-";
-			const field = r.field || "-";
-			const oldVal = (
-				r.oldvalue !== null && r.oldvalue !== undefined
-					? String(r.oldvalue)
-					: ""
-			).slice(0, 30);
-			const newVal = (
-				r.newvalue !== null && r.newvalue !== undefined
-					? String(r.newvalue)
-					: ""
-			).slice(0, 30);
-			md += `| ${r.date} | ${author} | ${role} | \`${field}\` | ${oldVal} | ${newVal} |\n`;
-		}
-
-		return textResult(md);
+		const results = await Promise.all(
+			targetIds.map((recId) =>
+				limiter(async () => {
+					try {
+						return await inspectSingleRecordSystemNotes(
+							recId,
+							recordType,
+							limit,
+							mcpTools,
+						);
+					} catch (err: unknown) {
+						const msg = err instanceof Error ? err.message : String(err);
+						if (isPermissionError(msg)) throw err;
+						return `❌ Failed to query system notes for record ID ${recId}: ${msg}`;
+					}
+				}),
+			),
+		);
+		return textResult(results.join("\n\n---\n\n"));
 	} catch (err: unknown) {
 		const msg = err instanceof Error ? err.message : String(err);
-		return textResult(
-			`❌ Failed to query system notes for record ID ${recordId}: ${msg}`,
-			true,
-		);
+		if (isPermissionError(msg)) throw err;
+		return textResult(`❌ Failed to query system notes: ${msg}`, true);
 	}
 }
 
@@ -842,6 +917,7 @@ export async function handleCreateRecord(
 		});
 	} catch (err: unknown) {
 		const msg = err instanceof Error ? err.message : String(err);
+		if (isPermissionError(msg)) throw err;
 		return textResult(`❌ NetSuite Record Creation Failed: ${msg}`, true);
 	}
 
@@ -955,6 +1031,7 @@ export async function handleUpdateRecord(
 		});
 	} catch (err: unknown) {
 		const msg = err instanceof Error ? err.message : String(err);
+		if (isPermissionError(msg)) throw err;
 		return textResult(`❌ NetSuite Record Update Failed: ${msg}`, true);
 	}
 

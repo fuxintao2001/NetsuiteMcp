@@ -1,5 +1,6 @@
 import type { CallToolResult } from "@modelcontextprotocol/server";
 import type { NetSuiteMCPTools } from "../mcp/tools.js";
+import { isPermissionError } from "../utils/errors.js";
 import { unwrapMcpContent } from "../utils/metadata.js";
 import { GetScriptLogsArgsSchema } from "./toolSchemas.js";
 import { textResult } from "./types.js";
@@ -21,9 +22,12 @@ export async function handleGetScriptLogs(
 	const {
 		recordType,
 		scriptId,
+		scriptIds,
 		type: logType,
 		dateFrom,
 		dateTo,
+		title,
+		detail,
 		keyword,
 		deploymentId,
 		limit,
@@ -49,18 +53,31 @@ export async function handleGetScriptLogs(
 		);
 	}
 
-	if (scriptId) {
-		const cleanScriptId = scriptId.trim();
-		if (!/^[a-zA-Z0-9_\-.]+$/.test(cleanScriptId)) {
-			return textResult(
-				"❌ Invalid scriptId format. Only alphanumeric characters, dashes, and underscores are permitted.",
-				true,
+	const targetScriptIds = [
+		...(scriptId ? [scriptId.trim()] : []),
+		...(scriptIds || []).map((s) => s.trim()),
+	];
+	if (targetScriptIds.length > 0) {
+		for (const id of targetScriptIds) {
+			if (!/^[a-zA-Z0-9_\-.]+$/.test(id)) {
+				return textResult(
+					"❌ Invalid scriptId format. Only alphanumeric characters, dashes, and underscores are permitted.",
+					true,
+				);
+			}
+		}
+		const escapedIds = targetScriptIds.map(
+			(id) => `'${id.replace(/'/g, "''")}'`,
+		);
+		if (escapedIds.length === 1) {
+			conditions.push(
+				`sn.scripttype = (SELECT s_sub.id FROM Script s_sub WHERE s_sub.scriptid = ${escapedIds[0]} FETCH FIRST 1 ROWS ONLY)`,
+			);
+		} else {
+			conditions.push(
+				`sn.scripttype IN (SELECT s_sub.id FROM Script s_sub WHERE s_sub.scriptid IN (${escapedIds.join(", ")}))`,
 			);
 		}
-		const escapedScriptId = cleanScriptId.replace(/'/g, "''");
-		conditions.push(
-			`sn.scripttype = (SELECT s_sub.id FROM Script s_sub WHERE s_sub.scriptid = '${escapedScriptId}' FETCH FIRST 1 ROWS ONLY)`,
-		);
 	}
 	if (deploymentId) {
 		const cleanDeploymentId = deploymentId.trim();
@@ -100,12 +117,12 @@ export async function handleGetScriptLogs(
 		}
 		conditions.push(`sn.date < TO_DATE('${dateTo}', 'YYYY-MM-DD') + 1`);
 	}
-	if (args.title && typeof args.title === "string") {
-		const escapedTitle = args.title.slice(0, 100).replace(/'/g, "''");
+	if (title) {
+		const escapedTitle = title.slice(0, 100).replace(/'/g, "''");
 		conditions.push(`UPPER(sn.title) LIKE UPPER('%${escapedTitle}%')`);
 	}
-	if (args.detail && typeof args.detail === "string") {
-		const escapedDetail = args.detail.slice(0, 100).replace(/'/g, "''");
+	if (detail) {
+		const escapedDetail = detail.slice(0, 100).replace(/'/g, "''");
 		conditions.push(`UPPER(sn.detail) LIKE UPPER('%${escapedDetail}%')`);
 	}
 	if (keyword) {
@@ -185,6 +202,7 @@ export async function handleGetScriptLogs(
 		);
 	} catch (err: unknown) {
 		const msg = err instanceof Error ? err.message : String(err);
+		if (isPermissionError(msg)) throw err;
 		return textResult(`❌ Failed to query script logs: ${msg}`, true);
 	}
 }

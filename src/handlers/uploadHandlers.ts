@@ -85,23 +85,26 @@ export async function handleUploadFile(
 		firstPathCandidate = firstPathCandidate.split(/[\s,]+/)[0];
 	}
 
-	let candidateStartDir = customProjectPath;
-	if (
-		!candidateStartDir &&
-		firstPathCandidate &&
-		path.isAbsolute(firstPathCandidate)
-	) {
-		candidateStartDir = path.dirname(firstPathCandidate);
-	}
-	if (!candidateStartDir) {
-		candidateStartDir = defaultProjectRoot;
-	}
+	let resolvedProjectRoot: string;
+	if (customProjectPath) {
+		resolvedProjectRoot =
+			suitecloudRunnerService.searchUpwards(customProjectPath) ||
+			path.resolve(customProjectPath);
+	} else {
+		let candidateStartDir: string | undefined;
+		if (firstPathCandidate && path.isAbsolute(firstPathCandidate)) {
+			candidateStartDir = path.dirname(firstPathCandidate);
+		}
+		if (!candidateStartDir) {
+			candidateStartDir = defaultProjectRoot;
+		}
 
-	const resolvedProjectRoot =
-		suitecloudRunnerService.findSdfProjectRoot(
-			candidateStartDir,
-			currentAccountId,
-		) || candidateStartDir;
+		resolvedProjectRoot =
+			suitecloudRunnerService.findSdfProjectRoot(
+				candidateStartDir,
+				currentAccountId,
+			) || candidateStartDir;
+	}
 
 	// 2. Resolve and inspect target files
 	const resolution = suitecloudRunnerService.resolveUploadFiles(
@@ -285,5 +288,3 @@ export async function handleUploadFile(
 
 	return textResult(successMd);
 }
-
-export { handleUploadFile as uploadFile };

@@ -4,11 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { suitecloudRunnerService } from "../utils/suitecloudRunner.js";
 import { registerResourceHandlers } from "./resources.js";
 import { registerToolHandlers } from "./tools.js";
-import {
-	formatTargetFileDisplay,
-	handleUploadFile,
-	uploadFile,
-} from "./uploadHandlers.js";
+import { formatTargetFileDisplay } from "./uploadHandlers.js";
 
 describe("MCP Handler Wires", () => {
 	let mockServer: any;
@@ -1804,10 +1800,6 @@ describe("MCP Handler Wires", () => {
 			expect(res.contents[0].text).toContain(
 				"Official 272 Records Definition Index",
 			);
-		});
-
-		it("should export uploadFile alias identical to handleUploadFile", () => {
-			expect(uploadFile).toBe(handleUploadFile);
 		});
 	});
 });

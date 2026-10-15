@@ -15,7 +15,7 @@ export class CacheService {
 		accountId: string,
 		key: string,
 		data: T,
-		ttlSeconds = 0,
+		ttlSeconds = 3600,
 	): Promise<void> {
 		if (this.provider) {
 			await this.provider.set(accountId, key, data, ttlSeconds);

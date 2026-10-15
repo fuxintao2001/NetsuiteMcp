@@ -69,6 +69,9 @@ export class SuiteCloudRunnerService {
 	 */
 	findSdfProjectRoot(startDir?: string, accountId?: string): string | null {
 		// 1. If startDir is specified and not the MCP server's own root, search upwards
+		if (startDir && path.resolve(startDir) !== path.resolve(process.cwd())) {
+			return this.searchUpwards(startDir);
+		}
 		if (startDir) {
 			const candidate = this.searchUpwards(startDir);
 			if (candidate) return candidate;
@@ -961,20 +964,6 @@ export class SuiteCloudRunnerService {
 				diagnostics,
 			};
 		}
-	}
-
-	/**
-	 * Upload files to NetSuite FileCabinet via SuiteCloud CLI (uploadFile method)
-	 */
-	async uploadFile(
-		projectRoot: string,
-		fileCabinetPaths: string | string[],
-		options?: {
-			targetAccountId?: string | undefined;
-			authId?: string | undefined;
-		},
-	): Promise<UploadExecutionResult> {
-		return this.executeUpload(projectRoot, fileCabinetPaths, options);
 	}
 }
 

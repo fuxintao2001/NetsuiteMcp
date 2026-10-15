@@ -1,13 +1,12 @@
 import type { Redis } from "ioredis";
-// @ts-expect-error
-import Redlock from "redlock";
+import Redlock, { type Lock } from "redlock";
 
 /**
  * Provides distributed locking capabilities using Redis.
  */
 export class RedisLockProvider {
-	private redlock: unknown;
-	private readonly keyPrefix = "nsmcp:lock:";
+	private readonly redlock: Redlock;
+	private readonly keyPrefix = "ns:lock:";
 
 	/**
 	 * Creates a new RedisLockProvider.
@@ -21,6 +20,9 @@ export class RedisLockProvider {
 			retryJitter: 200,
 			automaticExtensionThreshold: 500,
 		});
+		this.redlock.on("error", (err: unknown) => {
+			console.error("⚠️ [Redlock Error]", err);
+		});
 	}
 
 	/**
@@ -30,17 +32,10 @@ export class RedisLockProvider {
 	 * @param ttlMs Time to live for the lock in milliseconds (default: 10000ms).
 	 * @returns A promise that resolves to the lock object if successful, or null if the lock couldn't be acquired.
 	 */
-	async acquire(
-		resource: string,
-		ttlMs: number = 10000,
-	): Promise<unknown | null> {
+	async acquire(resource: string, ttlMs: number = 10000): Promise<Lock | null> {
 		const key = `${this.keyPrefix}${resource}`;
 		try {
-			const lockObj = await (
-				this.redlock as {
-					acquire: (keys: string[], ttl: number) => Promise<unknown>;
-				}
-			).acquire([key], ttlMs);
+			const lockObj = await this.redlock.acquire([key], ttlMs);
 			return lockObj;
 		} catch (_err) {
 			// redlock throws an error if it fails to acquire the lock after retries
@@ -51,14 +46,13 @@ export class RedisLockProvider {
 	/**
 	 * Releases a previously acquired lock.
 	 *
-	 * @param resource The identifier of the locked resource (ignored for redlock as lock handles its own key).
 	 * @param lock The lock object returned by acquire().
 	 * @returns A promise that resolves to true if the lock was successfully released, false otherwise.
 	 */
-	async release(_resource: string, lock: unknown): Promise<boolean> {
+	async release(lock: unknown): Promise<boolean> {
 		if (!lock || typeof lock !== "object") return false;
 		try {
-			await (lock as { release: () => Promise<void> }).release();
+			await (lock as { release: () => Promise<unknown> }).release();
 			return true;
 		} catch (_err) {
 			return false;

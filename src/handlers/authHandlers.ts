@@ -40,46 +40,39 @@ export async function handleStatus(
 	const sessionInfo = await oauthManager.getSessionInfo();
 	const cacheStats = await cacheService.getStats();
 
-	const status: Record<string, unknown> = {
-		server: "netsuite-mcp",
-		version: PKG_VERSION,
-		authenticated: sessionInfo.authenticated,
-		refreshSchedulerActive: sessionInfo.refreshSchedulerActive,
-		cache: cacheStats,
-	};
-
-	if (sessionInfo.authenticated) {
-		status.accountId = sessionInfo.accountId;
-		status.clientId = sessionInfo.clientId
-			? `${sessionInfo.clientId.substring(0, 8)}...`
-			: undefined;
-		status.tokenExpiresIn =
-			sessionInfo.tokenExpiresIn !== undefined
-				? `${sessionInfo.tokenExpiresIn}s`
-				: "unknown";
-		status.tokenExpiresAt = sessionInfo.tokenExpiresAt
-			? new Date(sessionInfo.tokenExpiresAt).toISOString()
+	const environment = sessionInfo.accountId
+		? isSandboxAccount(sessionInfo.accountId)
+			? "Sandbox/Test"
+			: "Production"
+		: "Unknown";
+	const writeOperations =
+		environment === "Sandbox/Test" ? "enabled" : "disabled";
+	const tokenExpiresIn =
+		sessionInfo.tokenExpiresIn !== undefined
+			? `${sessionInfo.tokenExpiresIn}s`
 			: "unknown";
+	const tokenExpiresAt = sessionInfo.tokenExpiresAt
+		? new Date(sessionInfo.tokenExpiresAt).toISOString()
+		: "unknown";
 
-		const sandbox = sessionInfo.accountId
-			? isSandboxAccount(sessionInfo.accountId)
-			: false;
-		status.environment = sandbox ? "Sandbox/Test" : "Production";
-		status.writeOperations = sandbox ? "enabled" : "disabled";
-	}
-
-	let output = JSON.stringify(status, null, 2);
+	let md = `## 🟢 NetSuite MCP Server Status (\`netsuite-mcp\` v${PKG_VERSION})\n\n`;
+	md += `| Component | Status | Details |\n|:---|:---|:---|\n`;
+	md += `| **Authentication** | ${sessionInfo.authenticated ? "✅ Authenticated" : "❌ Unauthenticated"} | Account: \`${sessionInfo.accountId || "None"}\` |\n`;
+	md += `| **Environment** | ${environment} | Write Operations: \`${writeOperations}\` |\n`;
+	md += `| **Token Expiry** | ${tokenExpiresIn} | Expires at: \`${tokenExpiresAt}\` |\n`;
+	md += `| **Scheduler** | ${sessionInfo.refreshSchedulerActive ? "🟢 Active" : "⚪ Inactive"} | Proactive token renewal |\n`;
+	md += `| **Redis Cache** | ${cacheStats.connected ? "🟢 Connected" : "⚪ Disconnected"} | Key count: ${cacheStats.keyCount} (provider: ${cacheStats.provider}) |\n`;
 
 	if (includeErrors) {
 		try {
 			const summary = await summarizeToolErrors({ days: 7 });
-			output += `\n\n---\n${formatSummaryToMarkdown(summary)}`;
+			md += `\n\n---\n${formatSummaryToMarkdown(summary)}`;
 		} catch {
 			/* non-fatal */
 		}
 	}
 
-	return textResult(output);
+	return textResult(md);
 }
 
 /**

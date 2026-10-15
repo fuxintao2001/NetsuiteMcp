@@ -17,7 +17,6 @@ import {
 	assertValidSuiteQL,
 	ensureSuiteQLPagination,
 	extractReferencedTables,
-	schemaReconnaissanceTracker,
 } from "../utils/suiteqlGuard.js";
 
 const logger = createLogger("mcp");
@@ -111,7 +110,6 @@ export class NetSuiteMCPTools {
 			if (typeof rawTable === "string" && rawTable.trim().length > 0) {
 				const targetTable = rawTable.toLowerCase().trim();
 				parameters.recordType = targetTable;
-				schemaReconnaissanceTracker.record(targetTable);
 			}
 			if (accountId) {
 				const cacheKey = this.metadataCacheKey(toolName, parameters);
@@ -130,12 +128,13 @@ export class NetSuiteMCPTools {
 			toolName === "ns_runCustomSuiteQL" ||
 			toolName === "netsuite_run_suiteql"
 		) {
-			let sqlQuery = (parameters.sqlQuery ||
-				parameters.query ||
-				parameters.sql ||
-				"") as string;
+			let sqlQuery = String(parameters.sqlQuery || "");
 			assertValidSuiteQL(sqlQuery);
-			sqlQuery = ensureSuiteQLPagination(sqlQuery, 100);
+			const rowLimit =
+				typeof parameters.limit === "number" && parameters.limit > 0
+					? parameters.limit
+					: 100;
+			sqlQuery = ensureSuiteQLPagination(sqlQuery, rowLimit);
 			parameters.sqlQuery = sqlQuery;
 		}
 

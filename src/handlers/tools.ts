@@ -25,7 +25,11 @@ import {
 	handleGetSystemNotes,
 	handleUpdateRecord,
 } from "./recordHandlers.js";
-import { LOCAL_TOOLS, SANDBOX_MUTATION_TOOLS } from "./toolSchemas.js";
+import {
+	LOCAL_TOOLS,
+	RunSuiteQLArgsSchema,
+	SANDBOX_MUTATION_TOOLS,
+} from "./toolSchemas.js";
 import { type ToolHandlerDeps, textResult } from "./types.js";
 import { handleUploadFile } from "./uploadHandlers.js";
 
@@ -242,11 +246,19 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
 
 				// 3. netsuite_run_suiteql — Single authoritative SuiteQL execution tool
 				if (name === "netsuite_run_suiteql") {
-					const rawQuery =
-						typeof safeArgs.sqlQuery === "string" ? safeArgs.sqlQuery : "";
+					const parsed = RunSuiteQLArgsSchema.safeParse(safeArgs);
+					if (!parsed.success) {
+						return textResult(
+							`❌ Invalid arguments: ${parsed.error.issues[0]?.message}`,
+							true,
+						);
+					}
+					const { sqlQuery, sqlQueries, limit, customRecordMappings } =
+						parsed.data;
+					const rawQuery = sqlQuery || "";
 					let queriesToRun = splitSuiteQLStatements(rawQuery);
-					if (queriesToRun.length === 0 && Array.isArray(safeArgs.sqlQueries)) {
-						queriesToRun = (safeArgs.sqlQueries as unknown[])
+					if (queriesToRun.length === 0 && Array.isArray(sqlQueries)) {
+						queriesToRun = sqlQueries
 							.filter(
 								(q): q is string =>
 									typeof q === "string" && q.trim().length > 0,
@@ -269,11 +281,11 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
 					}
 
 					// Custom record rectype resolution if provided
-					if (Array.isArray(safeArgs.customRecordMappings)) {
-						for (const mapping of safeArgs.customRecordMappings as Array<{
-							rectype: unknown;
-							scriptId?: string;
-						}>) {
+					const resolvedMappings = customRecordMappings
+						? [...customRecordMappings]
+						: undefined;
+					if (resolvedMappings) {
+						for (const mapping of resolvedMappings) {
 							if (mapping && typeof mapping.rectype === "string") {
 								const resolvedId = await resolveCustomRecordRectype(
 									mapping.rectype,
@@ -300,9 +312,18 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
 						const parallelResults = await Promise.all(
 							queriesToRun.map(async (queryStr, index) => {
 								try {
+									const queryParams: Record<string, unknown> = {
+										sqlQuery: queryStr,
+									};
+									if (limit !== undefined) {
+										queryParams.limit = limit;
+									}
+									if (resolvedMappings) {
+										queryParams.customRecordMappings = resolvedMappings;
+									}
 									const queryRes = await mcpTools.executeTool(
 										"ns_runCustomSuiteQL",
-										{ sqlQuery: queryStr },
+										queryParams,
 									);
 									const formatted = formatSuiteQLToCompactMarkdown(queryRes);
 									return {
@@ -314,6 +335,9 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
 								} catch (err: unknown) {
 									const errorMsg =
 										err instanceof Error ? err.message : String(err);
+									if (isPermissionError(errorMsg)) {
+										throw err;
+									}
 									return {
 										index: index + 1,
 										query: queryStr,
@@ -350,8 +374,11 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
 					const queryParams: Record<string, unknown> = {
 						sqlQuery: queriesToRun[0],
 					};
-					if (safeArgs.customRecordMappings) {
-						queryParams.customRecordMappings = safeArgs.customRecordMappings;
+					if (limit !== undefined) {
+						queryParams.limit = limit;
+					}
+					if (resolvedMappings) {
+						queryParams.customRecordMappings = resolvedMappings;
 					}
 					const queryRes = await mcpTools.executeTool(
 						"ns_runCustomSuiteQL",

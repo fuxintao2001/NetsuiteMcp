@@ -160,6 +160,14 @@ export const GetScriptLogsArgsSchema = z.object({
 		.describe(
 			"Filter by script's Script ID (e.g. customscript_my_ue). Matches against Script.scriptid.",
 		),
+	scriptIds: z
+		.array(z.string().trim().min(1, "scriptId is required"))
+		.min(1)
+		.max(10, "A maximum of 10 script IDs can be queried concurrently.")
+		.optional()
+		.describe(
+			"Optional array of script Script IDs (e.g. ['customscript_a', 'customscript_b']) to query concurrently in parallel (max 10).",
+		),
 	type: z
 		.enum(["DEBUG", "AUDIT", "ERROR", "EMERGENCY"])
 		.optional()
@@ -174,6 +182,12 @@ export const GetScriptLogsArgsSchema = z.object({
 		.regex(/^\d{4}-\d{2}-\d{2}$/, "Invalid dateTo format. Use YYYY-MM-DD.")
 		.optional()
 		.describe("End date filter in YYYY-MM-DD format (inclusive)."),
+	title: z.string().trim().optional().describe("Filter by log title keyword."),
+	detail: z
+		.string()
+		.trim()
+		.optional()
+		.describe("Filter by log detail keyword."),
 	keyword: z
 		.string()
 		.trim()
@@ -214,8 +228,17 @@ export const GetSystemNotesArgsSchema = z.object({
 		.string()
 		.trim()
 		.min(1, "recordId is required")
+		.optional()
 		.describe(
 			"Numeric internal ID (e.g. '12345') or document number (tranid).",
+		),
+	recordIds: z
+		.array(z.string().trim().min(1, "recordId is required"))
+		.min(1)
+		.max(10, "A maximum of 10 records can be queried in parallel.")
+		.optional()
+		.describe(
+			"Optional array of numeric internal IDs or document numbers (tranid) to inspect audit trails concurrently in parallel in a single turn (max 10).",
 		),
 	limit: z
 		.number()
@@ -294,6 +317,25 @@ export const AuthArgsSchema = z.object({
 		.enum(["login", "logout", "refresh_cache"])
 		.describe(
 			"Authentication action: 'login' (browser PKCE auth), 'logout' (revoke session), or 'refresh_cache' (clear Redis cache).",
+		),
+	accountId: z
+		.string()
+		.trim()
+		.optional()
+		.describe(
+			"Optional NetSuite account ID (e.g. '123456', '9260916_SB1') for target session.",
+		),
+	clientId: z
+		.string()
+		.trim()
+		.optional()
+		.describe("Optional NetSuite OAuth 2.0 Client ID."),
+	table: z
+		.string()
+		.trim()
+		.optional()
+		.describe(
+			"Optional table name to clear cache for when action is 'refresh_cache'.",
 		),
 });
 export type AuthArgs = z.infer<typeof AuthArgsSchema>;
@@ -414,6 +456,12 @@ export const GET_METADATA_TOOL = {
 				description:
 					"Optional search keyword to filter column names, labels, or descriptions.",
 			},
+			source: {
+				type: "string",
+				enum: ["auto", "offline", "remote"],
+				description:
+					"Metadata source strategy: 'auto' (default, checks offline catalog first for standard records, remote SuiteQL for custom records), 'offline' (strictly use bundled 272 records catalog), or 'remote' (strictly query live NetSuite SuiteQL).",
+			},
 		},
 	},
 };
@@ -444,7 +492,24 @@ export const GET_RECORD_TOOL = {
 			includeSublists: {
 				type: "boolean",
 				description:
-					"Whether to include line items / sublists (default false).",
+					"Whether to include line items / sublists (default: true).",
+			},
+			linesMode: {
+				type: "string",
+				enum: ["all", "summary"],
+				description:
+					"Sublist line rendering mode: 'all' (default, full line details) or 'summary' (concise summary table of line counts).",
+			},
+			maxLines: {
+				type: "number",
+				description:
+					"Maximum number of sublist lines to return per sublist (default: 100, max: 500).",
+			},
+			lineFields: {
+				type: "array",
+				items: { type: "string" },
+				description:
+					"Optional array of specific sublist field IDs to include (e.g. ['item', 'quantity', 'amount']).",
 			},
 			format: {
 				type: "string",
@@ -473,6 +538,12 @@ export const SCRIPT_LOGS_TOOL = {
 				description:
 					"Filter by script's Script ID (e.g. customscript_my_ue). Matches against Script.scriptid.",
 			},
+			scriptIds: {
+				type: "array",
+				items: { type: "string" },
+				description:
+					"Optional array of script Script IDs to query concurrently in parallel (max 10).",
+			},
 			type: {
 				type: "string",
 				enum: ["DEBUG", "AUDIT", "ERROR", "EMERGENCY"],
@@ -485,6 +556,14 @@ export const SCRIPT_LOGS_TOOL = {
 			dateTo: {
 				type: "string",
 				description: "End date in YYYY-MM-DD format (inclusive).",
+			},
+			title: {
+				type: "string",
+				description: "Filter by log title keyword.",
+			},
+			detail: {
+				type: "string",
+				description: "Filter by log detail keyword.",
 			},
 			keyword: {
 				type: "string",
@@ -505,7 +584,7 @@ export const SCRIPT_LOGS_TOOL = {
 export const SYSTEM_NOTES_TOOL = {
 	name: "netsuite_get_system_notes",
 	description:
-		"Query system audit trail and field change history (SystemNote) for a specific record. Standalone indexed query preventing SAFE Pitfall 11 timeouts.",
+		"Query system audit trail and field change history (SystemNote) for one or multiple records concurrently. Standalone indexed query preventing SAFE Pitfall 11 timeouts.",
 	inputSchema: {
 		type: "object" as const,
 		properties: {
@@ -517,12 +596,17 @@ export const SYSTEM_NOTES_TOOL = {
 				type: "string",
 				description: "Numeric internal ID or document number (tranid).",
 			},
+			recordIds: {
+				type: "array",
+				items: { type: "string" },
+				description:
+					"Optional array of numeric internal IDs or document numbers (tranid) to inspect audit trails concurrently in parallel in a single turn (max 10).",
+			},
 			limit: {
 				type: "number",
 				description: "Max audit entries to return (default: 50).",
 			},
 		},
-		required: ["recordId"],
 	},
 };
 
@@ -557,6 +641,11 @@ export const UPLOAD_FILE_TOOL = {
 				description:
 					"Explicit confirmation required if uploading to a production account.",
 			},
+			authId: {
+				type: "string",
+				description:
+					"Optional SuiteCloud CLI authentication ID (authID) to use for upload.",
+			},
 		},
 		required: ["paths"],
 	},
@@ -590,6 +679,20 @@ export const AUTH_TOOL = {
 				enum: ["login", "logout", "refresh_cache"],
 				description:
 					"Action: 'login' (browser auth), 'logout' (revoke session), or 'refresh_cache' (clear Redis cache).",
+			},
+			accountId: {
+				type: "string",
+				description:
+					"Optional NetSuite account ID (e.g. '123456', '9260916_SB1') for target session.",
+			},
+			clientId: {
+				type: "string",
+				description: "Optional NetSuite OAuth 2.0 Client ID.",
+			},
+			table: {
+				type: "string",
+				description:
+					"Optional table name to clear cache for when action is 'refresh_cache'.",
 			},
 		},
 		required: ["action"],
