@@ -131,10 +131,47 @@ export function splitSuiteQLStatements(rawSql: string): string[] {
 
 /**
  * Extracts referenced table names from a SuiteQL query.
+ * Excludes virtual Common Table Expressions (CTE) defined via WITH <name> AS (...).
  */
 export function extractReferencedTables(sqlQuery: string): string[] {
+	const cteNames = new Set<string>();
+
+	// 1. Try AST parsing via node-sql-parser to extract CTE table names
+	try {
+		const ast = sqlParser.astify(sqlQuery, { database: "postgresql" });
+		if (ast && typeof ast === "object") {
+			const astObj = ast as unknown as Record<string, unknown>;
+			if (Array.isArray(astObj.with)) {
+				for (const item of astObj.with) {
+					const cteName =
+						item?.name?.value ||
+						(typeof item?.name === "string" ? item.name : undefined);
+					if (typeof cteName === "string") {
+						cteNames.add(cteName.toLowerCase());
+					}
+				}
+			}
+		}
+	} catch {
+		// Fall through to regex extraction
+	}
+
 	const { maskedSql } = maskStringLiterals(sqlQuery);
 	const cleanSql = stripSqlComments(maskedSql);
+
+	// Extract CTE names via regex fallback: WITH name AS ( ... ), name2 AS ( ... )
+	const withMatch = cleanSql.match(/\bWITH\s+([a-zA-Z0-9_]+)\s+AS\s*\(/i);
+	if (withMatch?.[1]) {
+		cteNames.add(withMatch[1].toLowerCase());
+		const subsequentCteRegex = /,\s*([a-zA-Z0-9_]+)\s+AS\s*\(/gi;
+		let subMatch: RegExpExecArray | null;
+		while (true) {
+			subMatch = subsequentCteRegex.exec(cleanSql);
+			if (!subMatch) break;
+			if (subMatch[1]) cteNames.add(subMatch[1].toLowerCase());
+		}
+	}
+
 	const tableSet = new Set<string>();
 
 	// 1. Match JOIN clauses: JOIN <table> [AS <alias>]
@@ -144,7 +181,11 @@ export function extractReferencedTables(sqlQuery: string): string[] {
 		match = joinRegex.exec(cleanSql);
 		if (!match) break;
 		const tableName = match[1]?.toLowerCase().trim();
-		if (tableName && !tableName.startsWith("__str_literal")) {
+		if (
+			tableName &&
+			!tableName.startsWith("__str_literal") &&
+			!cteNames.has(tableName)
+		) {
 			tableSet.add(tableName);
 		}
 	}
@@ -166,6 +207,7 @@ export function extractReferencedTables(sqlQuery: string): string[] {
 					firstToken &&
 					/^[a-zA-Z0-9_]+$/.test(firstToken) &&
 					!firstToken.startsWith("__str_literal") &&
+					!cteNames.has(firstToken) &&
 					![
 						"select",
 						"where",
@@ -203,6 +245,31 @@ export function hasPaginationClause(sqlQuery: string): boolean {
 }
 
 /**
+ * Strips trailing comments (-- ... or /* ... * /) and whitespace/semicolons from the end of a SQL query.
+ */
+export function stripTrailingCommentsAndWhitespace(sql: string): string {
+	let result = sql.trim().replace(/;+$/, "").trim();
+	while (true) {
+		// Strip trailing block comment /* ... */
+		const blockMatch = result.match(/\/\*[\s\S]*?\*\/$/);
+		if (blockMatch) {
+			result = result.slice(0, -blockMatch[0].length).trim();
+			continue;
+		}
+		// Strip trailing line comment -- ... or # ...
+		// Ensure we don't accidentally match inside string literal
+		const { maskedSql } = maskStringLiterals(result);
+		const lineMatch = maskedSql.match(/(?:--|#)[^\r\n]*$/);
+		if (lineMatch) {
+			result = result.slice(0, -lineMatch[0].length).trim();
+			continue;
+		}
+		break;
+	}
+	return result.replace(/;+$/, "").trim();
+}
+
+/**
  * Ensures a SuiteQL query has pagination.
  * If missing:
  * - For UNION / compound queries: wraps safely in outer query `SELECT * FROM (...) WHERE ROWNUM <= N`
@@ -212,7 +279,7 @@ export function ensureSuiteQLPagination(
 	sqlQuery: string,
 	defaultLimit = 100,
 ): string {
-	const trimmed = sqlQuery.trim().replace(/;+$/, "");
+	const trimmed = stripTrailingCommentsAndWhitespace(sqlQuery);
 	if (hasPaginationClause(trimmed)) {
 		return trimmed;
 	}
@@ -240,21 +307,85 @@ export function ensureSuiteQLPagination(
 }
 
 /**
+ * Extracts SELECT projection expressions, respecting nested parenthesis depth
+ * so that FROM keywords inside functions (e.g. EXTRACT(YEAR FROM date)) or subqueries
+ * do not prematurely terminate the projection clause.
+ */
+function extractSelectProjections(maskedSql: string): string[] {
+	const projections: string[] = [];
+	const selectRegex = /\bSELECT\b/gi;
+	let match: RegExpExecArray | null;
+
+	while (true) {
+		match = selectRegex.exec(maskedSql);
+		if (!match) break;
+
+		// Ensure SELECT is not part of a larger identifier (e.g. my_select)
+		if (
+			match.index > 0 &&
+			/[a-zA-Z0-9_]/.test(maskedSql[match.index - 1] ?? "")
+		) {
+			continue;
+		}
+
+		let cursor = match.index + match[0].length;
+		// Skip optional DISTINCT or ALL keyword
+		const rest = maskedSql.slice(cursor);
+		const distinctMatch = rest.match(/^\s+(?:DISTINCT|ALL)\b/i);
+		if (distinctMatch) {
+			cursor += distinctMatch[0].length;
+		}
+
+		// Track parenthesis depth starting from cursor
+		let depth = 0;
+		const projStart = cursor;
+		let projEnd = -1;
+
+		for (let i = cursor; i < maskedSql.length; i++) {
+			const char = maskedSql[i];
+			if (char === "(") {
+				depth++;
+			} else if (char === ")") {
+				if (depth > 0) {
+					depth--;
+				} else {
+					// Closing parenthesis of an outer expression/subquery
+					projEnd = i;
+					break;
+				}
+			} else if (depth === 0) {
+				// At depth 0, check if we encountered FROM keyword
+				const slice = maskedSql.slice(i);
+				if (/^\s+FROM\b/i.test(slice)) {
+					projEnd = i;
+					break;
+				}
+			}
+		}
+
+		if (projEnd === -1) {
+			projEnd = maskedSql.length;
+		}
+
+		const projection = maskedSql.slice(projStart, projEnd).trim();
+		if (projection.length > 0) {
+			projections.push(projection);
+		}
+	}
+
+	return projections;
+}
+
+/**
  * Detects whether a SuiteQL query contains any wildcard column projection (* or alias.*),
- * while correctly ignoring COUNT(*) aggregate functions and arithmetic multiplication (a * b).
+ * while correctly ignoring COUNT(*) aggregate functions, arithmetic multiplication (a * b),
+ * and FROM clauses inside functions like EXTRACT(YEAR FROM trandate).
  */
 function hasWildcardSelection(maskedSql: string): boolean {
-	const selectBlocks = maskedSql.match(
-		/(?:^|\s|\()SELECT\s+(?:DISTINCT\s+)?([\s\S]+?)\s+FROM\b/gi,
-	);
-	if (!selectBlocks) return false;
+	const projections = extractSelectProjections(maskedSql);
+	if (projections.length === 0) return false;
 
-	for (const block of selectBlocks) {
-		const projMatch =
-			/(?:^|\s|\()SELECT\s+(?:DISTINCT\s+)?([\s\S]+?)\s+FROM\b/i.exec(block);
-		if (!projMatch?.[1]) continue;
-		const projection = projMatch[1];
-
+	for (const projection of projections) {
 		// Check for standalone * or alias.* not enclosed as a function parameter (e.g. not COUNT(*))
 		if (/(?:^|\s|,)(?:\w+\.)?\*\s*(?:,|$)/.test(projection.trim())) {
 			return true;

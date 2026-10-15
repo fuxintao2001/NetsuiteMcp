@@ -6,6 +6,10 @@ import { fileURLToPath } from "node:url";
 import { Server } from "@modelcontextprotocol/server";
 import { StdioServerTransport } from "@modelcontextprotocol/server/stdio";
 import { cacheService } from "./cache/cache.js";
+import {
+	NoOpCacheProvider,
+	TieredCacheProvider,
+} from "./cache/cacheProvider.js";
 import { RedisCacheProvider } from "./cache/redisCacheProvider.js";
 import { registerPromptHandlers } from "./handlers/prompts.js";
 import { registerResourceHandlers } from "./handlers/resources.js";
@@ -25,7 +29,12 @@ import { resolveCustomRecordRectype as resolveRectypeHelper } from "./utils/meta
 // ---------------------------------------------------------------------------
 // Global error handlers
 // ---------------------------------------------------------------------------
-installGlobalErrorHandlers();
+let globalShutdownHandler: (() => Promise<void>) | undefined;
+installGlobalErrorHandlers(process, console, () => {
+	if (globalShutdownHandler) {
+		void globalShutdownHandler();
+	}
+});
 
 // ---------------------------------------------------------------------------
 // Project root
@@ -51,9 +60,11 @@ class NetSuiteMCPServer {
 	private readonly oauthManager: OAuthManager;
 	private readonly mcpTools: NetSuiteMCPTools;
 	private readonly cacheProvider: RedisCacheProvider;
+	private readonly tieredCacheProvider: TieredCacheProvider;
 	private readonly server: Server;
 	private readonly enablePrompts: boolean;
 	private isAuthenticated = false;
+	private isShuttingDown = false;
 
 	constructor() {
 		// Validate environment variables at startup
@@ -71,10 +82,11 @@ class NetSuiteMCPServer {
 			);
 		}
 
-		// Configure cache provider with Redis URL
+		// Configure cache provider with Redis URL and Tiered Cache (L1 LRU + L2 Redis)
 		const redisUrl = envConfig.REDIS_URL;
 		this.cacheProvider = new RedisCacheProvider(redisUrl);
-		cacheService.configure(this.cacheProvider);
+		this.tieredCacheProvider = new TieredCacheProvider(this.cacheProvider);
+		cacheService.configure(this.tieredCacheProvider);
 
 		const sessionsPath = resolveSessionPath(
 			envConfig.NETSUITE_ACCOUNT_ID,
@@ -253,9 +265,9 @@ class NetSuiteMCPServer {
 	async start(): Promise<void> {
 		logger.info("NetSuite MCP Server starting...");
 
-		// Connect to Redis
+		// Connect to Redis with graceful degradation to NoOpCacheProvider
 		try {
-			await this.cacheProvider.connect();
+			await this.tieredCacheProvider.connect();
 			// Initialize Redis lock provider now that Redis is connected
 			const lockProvider = this.cacheProvider.createLockProvider();
 			if (lockProvider) {
@@ -263,8 +275,19 @@ class NetSuiteMCPServer {
 				logger.info("Redis distributed lock provider initialized");
 			}
 		} catch (err) {
-			logger.error({ err }, "Failed to connect to Redis on startup");
-			throw err;
+			logger.warn(
+				{ err },
+				"Failed to connect to Redis on startup. Running in degraded no-cache mode.",
+			);
+			cacheService.configure(new NoOpCacheProvider());
+		}
+
+		// Load custom record mappings cache from storage after cache provider is ready
+		try {
+			await this.mcpTools.loadCustomRecordMappingsCache();
+		} catch (err: unknown) {
+			const msg = err instanceof Error ? err.message : String(err);
+			logger.warn(`Failed to load custom record mappings cache: ${msg}`);
 		}
 
 		// Check for existing authentication and log diagnostics
@@ -316,9 +339,19 @@ class NetSuiteMCPServer {
 	}
 
 	async shutdown(): Promise<void> {
+		if (this.isShuttingDown) return;
+		this.isShuttingDown = true;
+
 		logger.info("Shutting down NetSuite MCP Server...");
 		this.oauthManager.stopProactiveRefresh();
-		await this.cacheProvider.disconnect();
+		try {
+			await this.tieredCacheProvider.disconnect();
+		} catch (err) {
+			logger.warn(
+				{ err },
+				"Error disconnecting cache provider during shutdown",
+			);
+		}
 		await flushToolErrorLogger();
 	}
 }
@@ -346,8 +379,21 @@ async function main(): Promise<void> {
 	try {
 		const server = new NetSuiteMCPServer();
 
-		const shutdown = async () => {
+		let isShuttingDownProcess = false;
+		const shutdown = async (signal?: string) => {
+			if (isShuttingDownProcess) return;
+			isShuttingDownProcess = true;
+
+			// Fallback 3s watchdog timer to prevent process hang
+			const forceExitTimer = setTimeout(() => {
+				process.exit(0);
+			}, 3000);
+			forceExitTimer.unref();
+
 			try {
+				logger.info(
+					`Initiating graceful shutdown (trigger: ${signal ?? "unknown"})...`,
+				);
 				await server.shutdown();
 			} catch (err) {
 				logger.error({ err }, "Error during shutdown");
@@ -355,19 +401,21 @@ async function main(): Promise<void> {
 			process.exit(0);
 		};
 
-		process.on("SIGINT", shutdown);
-		process.on("SIGTERM", shutdown);
+		globalShutdownHandler = shutdown;
+
+		process.on("SIGINT", () => void shutdown("SIGINT"));
+		process.on("SIGTERM", () => void shutdown("SIGTERM"));
 
 		// Prevent zombie processes when parent client closes stdio connection
 		process.stdin.on("close", () => {
-			void shutdown();
+			void shutdown("stdin.close");
 		});
 		process.stdin.on("end", () => {
-			void shutdown();
+			void shutdown("stdin.end");
 		});
 		process.stdout.on("error", (err: unknown) => {
 			if ((err as { code?: string })?.code === "EPIPE") {
-				void shutdown();
+				void shutdown("stdout.EPIPE");
 			}
 		});
 

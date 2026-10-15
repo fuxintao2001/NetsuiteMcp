@@ -12,6 +12,26 @@ const defaultLevel =
 const rootLogger = pino(
 	{
 		level: defaultLevel,
+		redact: {
+			paths: [
+				"password",
+				"*.password",
+				"token",
+				"*.token",
+				"refresh_token",
+				"*.refresh_token",
+				"access_token",
+				"*.access_token",
+				"client_secret",
+				"*.client_secret",
+				"consumer_secret",
+				"*.consumer_secret",
+				"authorization",
+				"headers.authorization",
+				"*.headers.authorization",
+			],
+			censor: "[REDACTED]",
+		},
 		formatters: {
 			log(object) {
 				const sanitized: Record<string, unknown> = {};
@@ -20,9 +40,9 @@ const rootLogger = pino(
 						sanitized[k] = sanitizeMessage(v);
 					} else if (v instanceof Error) {
 						sanitized[k] = {
+							name: v.name,
 							message: sanitizeMessage(v.message),
 							stack: v.stack ? sanitizeMessage(v.stack) : undefined,
-							name: v.name,
 						};
 					} else {
 						sanitized[k] = v;
@@ -36,12 +56,6 @@ const rootLogger = pino(
 				const sanitizedArgs = inputArgs.map((arg) => {
 					if (typeof arg === "string") {
 						return sanitizeMessage(arg);
-					}
-					if (arg instanceof Error) {
-						arg.message = sanitizeMessage(arg.message);
-						if (arg.stack) {
-							arg.stack = sanitizeMessage(arg.stack);
-						}
 					}
 					return arg;
 				});

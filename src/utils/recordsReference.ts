@@ -8,14 +8,542 @@ export interface RecordFieldMeta {
 	type: string;
 	required: boolean;
 	help?: string;
+	foreignKey?: { table: string; field?: string };
 }
 
-interface RecordTypeMeta {
+export interface RecordSublistMeta {
+	name: string;
+	label?: string;
+	fields?: RecordFieldMeta[];
+}
+
+export interface RecordRelationMeta {
+	field: string;
+	targetTable: string;
+	targetField?: string;
+	type: "foreignKey" | "primaryKey" | "oneToMany" | "manyToOne";
+	description?: string;
+}
+
+export interface RecordTypeMeta {
 	internalId: string;
 	label?: string;
+	description?: string;
 	fields: RecordFieldMeta[];
-	sublists?: Array<{ name: string; label?: string }>;
+	sublists?: RecordSublistMeta[];
+	relations?: RecordRelationMeta[];
+	primaryKey?: string;
 }
+
+export interface RecordDefinitionResult {
+	recordType: string;
+	found: boolean;
+	totalFields: number;
+	fields: RecordFieldMeta[];
+	sublists?: RecordSublistMeta[];
+	relations?: RecordRelationMeta[];
+	primaryKey?: string;
+	description?: string;
+}
+
+export const TRANSACTION_ACCOUNTING_LINE_FIELDS: RecordFieldMeta[] = [
+	{
+		internalId: "transaction",
+		label: "Transaction ID",
+		type: "integer",
+		required: true,
+		help: "Internal ID of parent transaction header.",
+		foreignKey: { table: "transaction", field: "id" },
+	},
+	{
+		internalId: "transactionline",
+		label: "Transaction Line ID",
+		type: "integer",
+		required: true,
+		help: "Line sequence identifier on the transaction.",
+		foreignKey: { table: "transactionline", field: "id" },
+	},
+	{
+		internalId: "account",
+		label: "Account ID",
+		type: "select",
+		required: true,
+		help: "General Ledger account posted by this line.",
+		foreignKey: { table: "account", field: "id" },
+	},
+	{
+		internalId: "amount",
+		label: "Net Amount",
+		type: "currency",
+		required: true,
+		help: "Net monetary impact in transaction currency.",
+	},
+	{
+		internalId: "debit",
+		label: "Debit Amount",
+		type: "currency",
+		required: false,
+		help: "Debit amount posted to GL.",
+	},
+	{
+		internalId: "credit",
+		label: "Credit Amount",
+		type: "currency",
+		required: false,
+		help: "Credit amount posted to GL.",
+	},
+	{
+		internalId: "netamount",
+		label: "Net Transaction Amount",
+		type: "currency",
+		required: false,
+	},
+	{
+		internalId: "posting",
+		label: "Posting Flag",
+		type: "checkbox",
+		required: true,
+		help: "Must be 'T' to post to General Ledger.",
+	},
+	{
+		internalId: "accountingbook",
+		label: "Accounting Book",
+		type: "select",
+		required: false,
+		foreignKey: { table: "accountingbook", field: "id" },
+	},
+	{
+		internalId: "subsidiary",
+		label: "Subsidiary",
+		type: "select",
+		required: false,
+		foreignKey: { table: "subsidiary", field: "id" },
+	},
+	{
+		internalId: "department",
+		label: "Department",
+		type: "select",
+		required: false,
+		foreignKey: { table: "department", field: "id" },
+	},
+	{
+		internalId: "class",
+		label: "Class",
+		type: "select",
+		required: false,
+		foreignKey: { table: "classification", field: "id" },
+	},
+	{
+		internalId: "location",
+		label: "Location",
+		type: "select",
+		required: false,
+		foreignKey: { table: "location", field: "id" },
+	},
+];
+
+export const TRANSACTION_LINE_FIELDS: RecordFieldMeta[] = [
+	{
+		internalId: "id",
+		label: "Line Internal ID",
+		type: "integer",
+		required: true,
+		help: "Unique internal ID of the transaction line.",
+	},
+	{
+		internalId: "transaction",
+		label: "Transaction ID",
+		type: "integer",
+		required: true,
+		help: "Internal ID of the parent transaction header.",
+		foreignKey: { table: "transaction", field: "id" },
+	},
+	{
+		internalId: "linesequencenumber",
+		label: "Line Sequence Number",
+		type: "integer",
+		required: true,
+	},
+	{
+		internalId: "item",
+		label: "Item ID",
+		type: "select",
+		required: false,
+		foreignKey: { table: "item", field: "id" },
+	},
+	{
+		internalId: "quantity",
+		label: "Quantity",
+		type: "float",
+		required: false,
+	},
+	{
+		internalId: "rate",
+		label: "Unit Rate",
+		type: "currency",
+		required: false,
+	},
+	{
+		internalId: "amount",
+		label: "Line Total Amount",
+		type: "currency",
+		required: false,
+	},
+	{
+		internalId: "mainline",
+		label: "Mainline Flag",
+		type: "checkbox",
+		required: true,
+		help: "Must filter tl.mainline = 'F' for line items or 'T' for summary line.",
+	},
+	{
+		internalId: "taxline",
+		label: "Tax Line Flag",
+		type: "checkbox",
+		required: false,
+	},
+	{
+		internalId: "createdfrom",
+		label: "Created From (Lineage)",
+		type: "select",
+		required: false,
+		help: "Upstream source transaction (e.g. Sales Order for Item Fulfillment).",
+		foreignKey: { table: "transaction", field: "id" },
+	},
+	{
+		internalId: "location",
+		label: "Location",
+		type: "select",
+		required: false,
+		foreignKey: { table: "location", field: "id" },
+	},
+	{
+		internalId: "department",
+		label: "Department",
+		type: "select",
+		required: false,
+		foreignKey: { table: "department", field: "id" },
+	},
+	{
+		internalId: "class",
+		label: "Class",
+		type: "select",
+		required: false,
+		foreignKey: { table: "classification", field: "id" },
+	},
+	{
+		internalId: "subsidiary",
+		label: "Subsidiary",
+		type: "select",
+		required: false,
+		foreignKey: { table: "subsidiary", field: "id" },
+	},
+	{
+		internalId: "units",
+		label: "Units of Measure",
+		type: "select",
+		required: false,
+	},
+	{
+		internalId: "memo",
+		label: "Line Memo",
+		type: "text",
+		required: false,
+	},
+];
+
+export const BILLING_REVENUE_EVENT_FIELDS: RecordFieldMeta[] = [
+	{
+		internalId: "id",
+		label: "Internal ID",
+		type: "integer",
+		required: true,
+	},
+	{
+		internalId: "eventtype",
+		label: "Event Type",
+		type: "select",
+		required: true,
+	},
+	{
+		internalId: "transaction",
+		label: "Transaction ID",
+		type: "select",
+		required: true,
+		foreignKey: { table: "transaction", field: "id" },
+	},
+	{
+		internalId: "transactionline",
+		label: "Transaction Line ID",
+		type: "select",
+		required: false,
+		foreignKey: { table: "transactionline", field: "id" },
+	},
+	{
+		internalId: "revenueelement",
+		label: "Revenue Element",
+		type: "select",
+		required: false,
+		foreignKey: { table: "revenueelement", field: "id" },
+	},
+	{
+		internalId: "amount",
+		label: "Revenue Amount",
+		type: "currency",
+		required: true,
+	},
+	{
+		internalId: "quantity",
+		label: "Quantity",
+		type: "float",
+		required: false,
+	},
+	{
+		internalId: "eventdate",
+		label: "Event Date",
+		type: "date",
+		required: true,
+	},
+	{
+		internalId: "createddate",
+		label: "Date Created",
+		type: "datetime",
+		required: false,
+	},
+	{
+		internalId: "subsidiary",
+		label: "Subsidiary",
+		type: "select",
+		required: true,
+		foreignKey: { table: "subsidiary", field: "id" },
+	},
+	{
+		internalId: "customform",
+		label: "Custom Form",
+		type: "select",
+		required: false,
+	},
+];
+
+export const SYSTEM_NOTE_FIELDS: RecordFieldMeta[] = [
+	{
+		internalId: "id",
+		label: "Internal ID",
+		type: "integer",
+		required: true,
+	},
+	{
+		internalId: "recordid",
+		label: "Target Record Internal ID",
+		type: "integer",
+		required: true,
+	},
+	{
+		internalId: "recordtypeid",
+		label: "Record Type Numeric ID",
+		type: "integer",
+		required: true,
+	},
+	{
+		internalId: "name",
+		label: "User / Employee ID",
+		type: "select",
+		required: true,
+		foreignKey: { table: "employee", field: "id" },
+	},
+	{
+		internalId: "date",
+		label: "Date & Time",
+		type: "datetime",
+		required: true,
+	},
+	{
+		internalId: "field",
+		label: "Field Name Changed",
+		type: "text",
+		required: false,
+	},
+	{
+		internalId: "standardfield",
+		label: "Standard Field Identifier",
+		type: "text",
+		required: false,
+	},
+	{
+		internalId: "oldvalue",
+		label: "Previous Value",
+		type: "text",
+		required: false,
+	},
+	{
+		internalId: "newvalue",
+		label: "New Value",
+		type: "text",
+		required: false,
+	},
+	{
+		internalId: "role",
+		label: "Role ID",
+		type: "integer",
+		required: false,
+	},
+	{
+		internalId: "context",
+		label: "Execution Context",
+		type: "text",
+		required: false,
+	},
+];
+
+export const COMMON_TRANSACTION_RELATIONS: RecordRelationMeta[] = [
+	{
+		field: "entity",
+		targetTable: "customer",
+		targetField: "id",
+		type: "foreignKey",
+		description: "Customer or Entity associated with this transaction",
+	},
+	{
+		field: "subsidiary",
+		targetTable: "subsidiary",
+		targetField: "id",
+		type: "foreignKey",
+		description: "Operating subsidiary",
+	},
+	{
+		field: "currency",
+		targetTable: "currency",
+		targetField: "id",
+		type: "foreignKey",
+		description: "Transaction currency",
+	},
+	{
+		field: "location",
+		targetTable: "location",
+		targetField: "id",
+		type: "foreignKey",
+		description: "Primary fulfillment or receiving location",
+	},
+	{
+		field: "department",
+		targetTable: "department",
+		targetField: "id",
+		type: "foreignKey",
+		description: "Cost center department",
+	},
+	{
+		field: "class",
+		targetTable: "classification",
+		targetField: "id",
+		type: "foreignKey",
+		description: "Line of business / class",
+	},
+	{
+		field: "terms",
+		targetTable: "term",
+		targetField: "id",
+		type: "foreignKey",
+		description: "Payment terms",
+	},
+	{
+		field: "postingperiod",
+		targetTable: "accountingperiod",
+		targetField: "id",
+		type: "foreignKey",
+		description: "Accounting posting period",
+	},
+];
+
+export const COMMON_ENTITY_RELATIONS: RecordRelationMeta[] = [
+	{
+		field: "subsidiary",
+		targetTable: "subsidiary",
+		targetField: "id",
+		type: "foreignKey",
+		description: "Primary entity subsidiary",
+	},
+	{
+		field: "currency",
+		targetTable: "currency",
+		targetField: "id",
+		type: "foreignKey",
+		description: "Primary transaction currency",
+	},
+	{
+		field: "terms",
+		targetTable: "term",
+		targetField: "id",
+		type: "foreignKey",
+		description: "Standard payment terms",
+	},
+	{
+		field: "salesrep",
+		targetTable: "employee",
+		targetField: "id",
+		type: "foreignKey",
+		description: "Assigned sales representative",
+	},
+];
+
+export const COMMON_ITEM_RELATIONS: RecordRelationMeta[] = [
+	{
+		field: "subsidiary",
+		targetTable: "subsidiary",
+		targetField: "id",
+		type: "foreignKey",
+		description: "Owning subsidiary",
+	},
+	{
+		field: "incomeaccount",
+		targetTable: "account",
+		targetField: "id",
+		type: "foreignKey",
+		description: "GL Revenue / Income account",
+	},
+	{
+		field: "assetaccount",
+		targetTable: "account",
+		targetField: "id",
+		type: "foreignKey",
+		description: "GL Inventory Asset account",
+	},
+	{
+		field: "cogsaccount",
+		targetTable: "account",
+		targetField: "id",
+		type: "foreignKey",
+		description: "GL Cost of Goods Sold account",
+	},
+	{
+		field: "expenseaccount",
+		targetTable: "account",
+		targetField: "id",
+		type: "foreignKey",
+		description: "GL Expense account",
+	},
+];
+
+export const COMMON_TRANSACTION_SUBLISTS: RecordSublistMeta[] = [
+	{ name: "item", label: "Line Items" },
+	{ name: "accountingbookdetail", label: "Accounting Books" },
+	{ name: "partners", label: "Sales Partners" },
+	{ name: "salesteam", label: "Sales Team" },
+	{ name: "billing", label: "Billing Schedules" },
+	{ name: "shipping", label: "Shipment Packages" },
+];
+
+export const COMMON_ENTITY_SUBLISTS: RecordSublistMeta[] = [
+	{ name: "addressbook", label: "Address Book" },
+	{ name: "contactroles", label: "Contact Roles" },
+	{ name: "currency", label: "Currencies" },
+	{ name: "itempricing", label: "Item Pricing" },
+];
+
+export const COMMON_ITEM_SUBLISTS: RecordSublistMeta[] = [
+	{ name: "itemvendor", label: "Preferred Vendors" },
+	{ name: "pricing", label: "Price Matrix" },
+	{ name: "locations", label: "Location Inventory" },
+];
 
 const COMMON_TRANSACTION_FIELDS: RecordFieldMeta[] = [
 	{ internalId: "id", label: "Internal ID", type: "integer", required: false },
@@ -863,8 +1391,187 @@ const STANDARD_272_RECORD_TYPES: string[] = [
 	"zone",
 ].map((s) => s.trim().toLowerCase());
 
+export const CORE_ANALYTIC_VIEWS: Record<
+	string,
+	{
+		label: string;
+		description: string;
+		fields: RecordFieldMeta[];
+		relations: RecordRelationMeta[];
+		sublists?: RecordSublistMeta[];
+	}
+> = {
+	transactionaccountingline: {
+		label: "Transaction Accounting Line (GL Posting Impact)",
+		description:
+			"General Ledger (GL) posting impact lines generated by transactions. Contains debit, credit, net amount, and posting accounts.",
+		fields: TRANSACTION_ACCOUNTING_LINE_FIELDS,
+		relations: [
+			{
+				field: "transaction",
+				targetTable: "transaction",
+				targetField: "id",
+				type: "foreignKey",
+				description: "Parent transaction header",
+			},
+			{
+				field: "transactionline",
+				targetTable: "transactionline",
+				targetField: "id",
+				type: "foreignKey",
+				description: "Related transaction line item",
+			},
+			{
+				field: "account",
+				targetTable: "account",
+				targetField: "id",
+				type: "foreignKey",
+				description: "Target General Ledger Account",
+			},
+			{
+				field: "subsidiary",
+				targetTable: "subsidiary",
+				targetField: "id",
+				type: "foreignKey",
+				description: "Posting subsidiary",
+			},
+			{
+				field: "accountingbook",
+				targetTable: "accountingbook",
+				targetField: "id",
+				type: "foreignKey",
+				description: "Secondary accounting book",
+			},
+		],
+		sublists: [],
+	},
+	transactionline: {
+		label: "Transaction Line Items",
+		description:
+			"Transaction line details (items, expenses, taxes, shipping, upstream lineage). Requires mainline filter.",
+		fields: TRANSACTION_LINE_FIELDS,
+		relations: [
+			{
+				field: "transaction",
+				targetTable: "transaction",
+				targetField: "id",
+				type: "foreignKey",
+				description: "Parent transaction header",
+			},
+			{
+				field: "item",
+				targetTable: "item",
+				targetField: "id",
+				type: "foreignKey",
+				description: "Referenced Item master",
+			},
+			{
+				field: "createdfrom",
+				targetTable: "transaction",
+				targetField: "id",
+				type: "foreignKey",
+				description: "Upstream order / transaction lineage",
+			},
+			{
+				field: "location",
+				targetTable: "location",
+				targetField: "id",
+				type: "foreignKey",
+				description: "Inventory fulfillment location",
+			},
+		],
+		sublists: [],
+	},
+	billingrevenueevent: {
+		label: "Billing Revenue Event (ARM)",
+		description:
+			"Advanced Revenue Management (ARM) billing revenue event record for revenue recognition.",
+		fields: BILLING_REVENUE_EVENT_FIELDS,
+		relations: [
+			{
+				field: "transaction",
+				targetTable: "transaction",
+				targetField: "id",
+				type: "foreignKey",
+				description: "Source transaction",
+			},
+			{
+				field: "transactionline",
+				targetTable: "transactionline",
+				targetField: "id",
+				type: "foreignKey",
+				description: "Source transaction line",
+			},
+			{
+				field: "revenueelement",
+				targetTable: "revenueelement",
+				targetField: "id",
+				type: "foreignKey",
+				description: "ARM revenue element",
+			},
+			{
+				field: "subsidiary",
+				targetTable: "subsidiary",
+				targetField: "id",
+				type: "foreignKey",
+				description: "Revenue subsidiary",
+			},
+		],
+		sublists: [],
+	},
+	systemnote: {
+		label: "System Note Audit Trail",
+		description:
+			"NetSuite system audit trail logging field modifications, users, dates, and previous/new values.",
+		fields: SYSTEM_NOTE_FIELDS,
+		relations: [
+			{
+				field: "name",
+				targetTable: "employee",
+				targetField: "id",
+				type: "foreignKey",
+				description: "User modifying record",
+			},
+		],
+		sublists: [],
+	},
+};
+
+const TRANSACTION_TYPES_LIST = [
+	"salesorder",
+	"invoice",
+	"purchaseorder",
+	"estimate",
+	"opportunity",
+	"creditmemo",
+	"cashsale",
+	"cashrefund",
+	"vendorbill",
+	"vendorpayment",
+	"vendorcredit",
+	"customerpayment",
+	"customerdeposit",
+	"customerrefund",
+	"itemfulfillment",
+	"itemreceipt",
+	"returnauthorization",
+	"vendorreturnauthorization",
+	"journalentry",
+	"transferorder",
+	"workorder",
+	"assemblybuild",
+	"assemblyunbuild",
+	"inventoryadjustment",
+	"inventorytransfer",
+	"check",
+	"deposit",
+	"expensereport",
+	"transaction",
+];
+
 /**
- * Service to access Oracle NetSuite official 272 SuiteScript Records Reference definitions.
+ * Service to access Oracle NetSuite official 272 SuiteScript Records Reference definitions & core views.
+ * Acts as the authoritative L0 local static cache reflection base.
  */
 class RecordsReferenceService {
 	private recordsCache: Map<string, RecordTypeMeta> | null = null;
@@ -883,54 +1590,48 @@ class RecordsReferenceService {
 		this.recordsCache = new Map();
 		this.recordNamesCache = [];
 
+		// 1. Register Core Analytical Views
+		for (const [viewName, viewMeta] of Object.entries(CORE_ANALYTIC_VIEWS)) {
+			this.recordsCache.set(viewName, {
+				internalId: viewName,
+				label: viewMeta.label,
+				description: viewMeta.description,
+				fields: viewMeta.fields,
+				relations: viewMeta.relations,
+				sublists: viewMeta.sublists || [],
+				primaryKey: "id",
+			});
+			this.recordNamesCache.push(viewName);
+		}
+
+		// 2. Register Standard 272 Record Types
 		for (const recType of STANDARD_272_RECORD_TYPES) {
 			if (this.recordsCache.has(recType)) continue;
+
 			let fields = COMMON_ENTITY_FIELDS;
-			if (
-				[
-					"salesorder",
-					"invoice",
-					"purchaseorder",
-					"estimate",
-					"opportunity",
-					"creditmemo",
-					"cashsale",
-					"cashrefund",
-					"vendorbill",
-					"vendorpayment",
-					"vendorcredit",
-					"customerpayment",
-					"customerdeposit",
-					"customerrefund",
-					"itemfulfillment",
-					"itemreceipt",
-					"returnauthorization",
-					"vendorreturnauthorization",
-					"journalentry",
-					"transferorder",
-					"workorder",
-					"assemblybuild",
-					"assemblyunbuild",
-					"inventoryadjustment",
-					"inventorytransfer",
-					"check",
-					"deposit",
-					"expensereport",
-					"transaction",
-				].includes(recType)
-			) {
+			let sublists = COMMON_ENTITY_SUBLISTS;
+			let relations = COMMON_ENTITY_RELATIONS;
+
+			if (TRANSACTION_TYPES_LIST.includes(recType)) {
 				fields = COMMON_TRANSACTION_FIELDS;
+				sublists = COMMON_TRANSACTION_SUBLISTS;
+				relations = COMMON_TRANSACTION_RELATIONS;
 			} else if (
 				recType.includes("item") ||
 				recType === "bom" ||
 				recType === "bomrevision"
 			) {
 				fields = COMMON_ITEM_FIELDS;
+				sublists = COMMON_ITEM_SUBLISTS;
+				relations = COMMON_ITEM_RELATIONS;
 			}
+
 			this.recordsCache.set(recType, {
 				internalId: recType,
 				fields,
-				sublists: [{ name: "item", label: "Items" }],
+				sublists,
+				relations,
+				primaryKey: "id",
 			});
 			this.recordNamesCache.push(recType);
 		}
@@ -973,8 +1674,25 @@ class RecordsReferenceService {
 			this.recordsCache = new Map();
 			this.recordNamesCache = [];
 
+			// 1. Populate Core Analytical Views
+			for (const [viewName, viewMeta] of Object.entries(CORE_ANALYTIC_VIEWS)) {
+				this.recordsCache.set(viewName, {
+					internalId: viewName,
+					label: viewMeta.label,
+					description: viewMeta.description,
+					fields: viewMeta.fields,
+					relations: viewMeta.relations,
+					sublists: viewMeta.sublists || [],
+					primaryKey: "id",
+				});
+				this.recordNamesCache.push(viewName);
+			}
+
+			// 2. Populate Records from JSON
 			for (const [key, val] of Object.entries(parsed.records)) {
 				const lowerKey = key.toLowerCase();
+				if (this.recordsCache.has(lowerKey)) continue;
+
 				const fields: RecordFieldMeta[] = (val.fields || []).map((f) => ({
 					internalId: f.internalId,
 					label: f.label || f.internalId,
@@ -983,12 +1701,61 @@ class RecordsReferenceService {
 					help: f.help || "",
 				}));
 
+				let sublists: RecordSublistMeta[] = (val.sublists || []).map(
+					(s: { name?: string; internalId?: string; label?: string }) => ({
+						name: s.name || s.internalId || "",
+						label: s.label || s.name || s.internalId || "",
+					}),
+				);
+				let relations: RecordRelationMeta[] = [];
+
+				if (TRANSACTION_TYPES_LIST.includes(lowerKey)) {
+					relations = COMMON_TRANSACTION_RELATIONS;
+					if (sublists.length === 0) sublists = COMMON_TRANSACTION_SUBLISTS;
+				} else if (lowerKey.includes("item") || lowerKey === "bom") {
+					relations = COMMON_ITEM_RELATIONS;
+					if (sublists.length === 0) sublists = COMMON_ITEM_SUBLISTS;
+				} else {
+					relations = COMMON_ENTITY_RELATIONS;
+					if (sublists.length === 0) sublists = COMMON_ENTITY_SUBLISTS;
+				}
+
 				this.recordsCache.set(lowerKey, {
 					internalId: val.internalId || key,
 					fields,
-					sublists: val.sublists || [],
+					sublists,
+					relations,
+					primaryKey: "id",
 				});
 				this.recordNamesCache.push(lowerKey);
+			}
+
+			// 3. Ensure any missing types from STANDARD_272_RECORD_TYPES are present
+			for (const recType of STANDARD_272_RECORD_TYPES) {
+				if (!this.recordsCache.has(recType)) {
+					let fields = COMMON_ENTITY_FIELDS;
+					let sublists = COMMON_ENTITY_SUBLISTS;
+					let relations = COMMON_ENTITY_RELATIONS;
+
+					if (TRANSACTION_TYPES_LIST.includes(recType)) {
+						fields = COMMON_TRANSACTION_FIELDS;
+						sublists = COMMON_TRANSACTION_SUBLISTS;
+						relations = COMMON_TRANSACTION_RELATIONS;
+					} else if (recType.includes("item") || recType === "bom") {
+						fields = COMMON_ITEM_FIELDS;
+						sublists = COMMON_ITEM_SUBLISTS;
+						relations = COMMON_ITEM_RELATIONS;
+					}
+
+					this.recordsCache.set(recType, {
+						internalId: recType,
+						fields,
+						sublists,
+						relations,
+						primaryKey: "id",
+					});
+					this.recordNamesCache.push(recType);
+				}
 			}
 
 			this.recordNamesCache.sort();
@@ -1000,7 +1767,7 @@ class RecordsReferenceService {
 		}
 	}
 
-	/** List all supported standard record types (272 types) */
+	/** List all supported standard record types & core views */
 	listRecordTypes(): string[] {
 		if (!this.ensureLoaded() || !this.recordNamesCache) {
 			return [];
@@ -1008,17 +1775,11 @@ class RecordsReferenceService {
 		return [...this.recordNamesCache];
 	}
 
-	/** Get definition for a standard record type */
+	/** Get definition for a standard record type or analytical view */
 	getRecordDefinition(
 		recordType: string,
 		keyword?: string,
-	): {
-		recordType: string;
-		found: boolean;
-		totalFields: number;
-		fields: RecordFieldMeta[];
-		sublists?: Array<{ name: string; label?: string }>;
-	} | null {
+	): RecordDefinitionResult | null {
 		if (!this.ensureLoaded() || !this.recordsCache) {
 			return null;
 		}
@@ -1051,6 +1812,9 @@ class RecordsReferenceService {
 			totalFields: rec.fields.length,
 			fields: filteredFields,
 			...(rec.sublists ? { sublists: rec.sublists } : {}),
+			...(rec.relations ? { relations: rec.relations } : {}),
+			primaryKey: rec.primaryKey || "id",
+			...(rec.description ? { description: rec.description } : {}),
 		};
 	}
 }

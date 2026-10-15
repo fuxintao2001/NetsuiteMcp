@@ -1,13 +1,16 @@
-import { exec, execSync } from "node:child_process";
+import { execFile, execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import vm from "node:vm";
+import * as acorn from "acorn";
+import { isSandboxAccount } from "./environment.js";
+import { createLogger } from "./logger.js";
 
+const logger = createLogger("suitecloud");
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 interface FileInspectionResult {
 	exists: boolean;
@@ -141,6 +144,7 @@ export class SuiteCloudRunnerService {
 	 * Search workspaces.json for project matching the account ID
 	 */
 	private findProjectFromWorkspacesConfig(accountId: string): string | null {
+		const targetIsSandbox = isSandboxAccount(accountId);
 		const normTarget = accountId.toLowerCase().replace(/[-_]/g, "");
 		const searchDirs = [
 			process.cwd(),
@@ -160,15 +164,17 @@ export class SuiteCloudRunnerService {
 						workspaces?: Array<{ accountId: string; projectPath: string }>;
 					};
 					if (Array.isArray(data.workspaces)) {
-						// 1. Exact match first (prevents Sandbox sb1 matching Prod)
+						// 1. Exact normalized match first (strictly same environment)
 						for (const ws of data.workspaces) {
+							if (isSandboxAccount(ws.accountId) !== targetIsSandbox) continue;
 							const normWs = ws.accountId.toLowerCase().replace(/[-_]/g, "");
 							if (normWs === normTarget && fs.existsSync(ws.projectPath)) {
 								return ws.projectPath;
 							}
 						}
-						// 2. Prefix match fallback (only if ws starts with full target)
+						// 2. Prefix match fallback (strictly same environment)
 						for (const ws of data.workspaces) {
+							if (isSandboxAccount(ws.accountId) !== targetIsSandbox) continue;
 							const normWs = ws.accountId.toLowerCase().replace(/[-_]/g, "");
 							if (
 								normWs.startsWith(normTarget) &&
@@ -188,6 +194,7 @@ export class SuiteCloudRunnerService {
 	 * Search sibling directories matching accountId
 	 */
 	private findProjectFromSiblingDirectories(accountId: string): string | null {
+		const targetIsSandbox = isSandboxAccount(accountId);
 		const normTarget = accountId.toLowerCase().replace(/[-_]/g, "");
 		const parentDirs = [
 			path.dirname(process.cwd()),
@@ -198,9 +205,10 @@ export class SuiteCloudRunnerService {
 			if (!fs.existsSync(parentDir)) continue;
 			try {
 				const entries = fs.readdirSync(parentDir, { withFileTypes: true });
-				// 1. Exact match first
+				// 1. Exact match first (strictly same environment)
 				for (const entry of entries) {
 					if (!entry.isDirectory()) continue;
+					if (isSandboxAccount(entry.name) !== targetIsSandbox) continue;
 					const normEntry = entry.name.toLowerCase().replace(/[-_]/g, "");
 					if (normEntry === normTarget) {
 						const dirPath = path.join(parentDir, entry.name);
@@ -208,9 +216,10 @@ export class SuiteCloudRunnerService {
 						if (found) return found;
 					}
 				}
-				// 2. Prefix match fallback (e.g. 9260916-sb1 matching 9260916_sb1)
+				// 2. Prefix match fallback (strictly same environment)
 				for (const entry of entries) {
 					if (!entry.isDirectory()) continue;
+					if (isSandboxAccount(entry.name) !== targetIsSandbox) continue;
 					const normEntry = entry.name.toLowerCase().replace(/[-_]/g, "");
 					if (normEntry.startsWith(normTarget)) {
 						const dirPath = path.join(parentDir, entry.name);
@@ -312,23 +321,19 @@ export class SuiteCloudRunnerService {
 			);
 		}
 
-		// 3. Syntax validation for JS files
-		if (filePath.endsWith(".js") || filePath.endsWith(".cjs")) {
+		// 3. Syntax validation for JS files via Acorn parser
+		if (
+			filePath.endsWith(".js") ||
+			filePath.endsWith(".cjs") ||
+			filePath.endsWith(".mjs")
+		) {
 			try {
-				new vm.Script(content, { filename: filePath });
+				acorn.parse(content, { ecmaVersion: "latest", sourceType: "module" });
 			} catch (err: unknown) {
 				const msg = err instanceof Error ? err.message : String(err);
-				// Allow ES module export/import syntax without marking as syntax failure
-				if (
-					msg.includes("Cannot use import statement") ||
-					msg.includes("Unexpected token 'export'")
-				) {
-					syntaxValid = true;
-				} else {
-					syntaxValid = false;
-					syntaxError = msg;
-					warnings.push(`❌ JavaScript 语法错误: ${msg}`);
-				}
+				syntaxValid = false;
+				syntaxError = msg;
+				warnings.push(`❌ JavaScript 语法错误: ${msg}`);
 			}
 		}
 
@@ -611,23 +616,29 @@ export class SuiteCloudRunnerService {
 		};
 	}
 
+	private resolveSuiteCloudCli(): { bin: string; baseArgs: string[] } {
+		if (fs.existsSync("/opt/homebrew/bin/suitecloud")) {
+			return { bin: "/opt/homebrew/bin/suitecloud", baseArgs: [] };
+		}
+		if (fs.existsSync("/usr/local/bin/suitecloud")) {
+			return { bin: "/usr/local/bin/suitecloud", baseArgs: [] };
+		}
+		if (fs.existsSync("/opt/homebrew/bin/npx")) {
+			return { bin: "/opt/homebrew/bin/npx", baseArgs: ["suitecloud"] };
+		}
+		return { bin: "npx", baseArgs: ["suitecloud"] };
+	}
+
 	/**
 	 * Retrieve all configured SuiteCloud authentication IDs using 'suitecloud account:manageauth --list'
 	 */
 	async getAvailableAuthIds(): Promise<AuthInfo[]> {
-		let cliBin = "suitecloud";
-		if (fs.existsSync("/opt/homebrew/bin/suitecloud")) {
-			cliBin = "/opt/homebrew/bin/suitecloud";
-		} else if (fs.existsSync("/usr/local/bin/suitecloud")) {
-			cliBin = "/usr/local/bin/suitecloud";
-		} else {
-			cliBin = "npx suitecloud";
-		}
-
+		const { bin, baseArgs } = this.resolveSuiteCloudCli();
 		const env = this.resolveEnvironment();
 		try {
-			const { stdout } = await execAsync(
-				`${cliBin} account:manageauth --list`,
+			const { stdout } = await execFileAsync(
+				bin,
+				[...baseArgs, "account:manageauth", "--list"],
 				{
 					timeout: 10000,
 					env,
@@ -697,35 +708,34 @@ export class SuiteCloudRunnerService {
 			};
 		}
 
+		const targetIsSandbox = isSandboxAccount(targetAccountId);
 		const normTarget = targetAccountId.toLowerCase().replace(/[-_]/g, "");
 
 		// Check if current defaultAuthId in project.json already matches target account ID
 		if (currentConfiguredAuthId) {
-			const normCurrent = currentConfiguredAuthId
-				.toLowerCase()
-				.replace(/[-_]/g, "");
-			if (
-				normCurrent === normTarget ||
-				normCurrent.startsWith(normTarget) ||
-				normTarget.startsWith(normCurrent)
-			) {
-				return {
-					configuredAuthId: currentConfiguredAuthId,
-					matchedAuthId: currentConfiguredAuthId,
-					autoUpdated: false,
-					availableAuthIds: availableIds,
-				};
+			const currentIsSandbox = isSandboxAccount(currentConfiguredAuthId);
+			if (currentIsSandbox === targetIsSandbox) {
+				const normCurrent = currentConfiguredAuthId
+					.toLowerCase()
+					.replace(/[-_]/g, "");
+				if (normCurrent === normTarget) {
+					return {
+						configuredAuthId: currentConfiguredAuthId,
+						matchedAuthId: currentConfiguredAuthId,
+						autoUpdated: false,
+						availableAuthIds: availableIds,
+					};
+				}
 			}
 		}
 
 		// Find best match among available auth IDs
+		// Strictly enforce matching environment (sandbox vs production) and avoid cross-environment matching
 		const matched = available.find((a) => {
+			if (isSandboxAccount(a.authId) !== targetIsSandbox) return false;
 			const normAuth = a.authId.toLowerCase().replace(/[-_]/g, "");
-			return (
-				normAuth === normTarget ||
-				normAuth.startsWith(normTarget) ||
-				normTarget.startsWith(normAuth)
-			);
+			const normAccount = a.account.toLowerCase().replace(/[-_]/g, "");
+			return normAuth === normTarget || normAccount === normTarget;
 		});
 
 		if (matched) {
@@ -899,29 +909,19 @@ export class SuiteCloudRunnerService {
 		},
 	): Promise<UploadExecutionResult> {
 		const startTime = Date.now();
-		let cliBin = "suitecloud";
-		if (fs.existsSync("/opt/homebrew/bin/suitecloud")) {
-			cliBin = "/opt/homebrew/bin/suitecloud";
-		} else if (fs.existsSync("/usr/local/bin/suitecloud")) {
-			cliBin = "/usr/local/bin/suitecloud";
-		} else if (fs.existsSync("/opt/homebrew/bin/npx")) {
-			cliBin = "/opt/homebrew/bin/npx suitecloud";
-		} else {
-			cliBin = "npx suitecloud";
-		}
+		const { bin, baseArgs } = this.resolveSuiteCloudCli();
 
 		const pathsArray = Array.isArray(fileCabinetPaths)
 			? fileCabinetPaths
 			: [fileCabinetPaths];
-		const joinedPaths = pathsArray.join(" ");
-		const command = `${cliBin} file:upload --paths "${joinedPaths}"`;
+		const uploadArgs = [...baseArgs, "file:upload", "--paths", ...pathsArray];
 
 		try {
 			const env = this.resolveEnvironment();
-			console.error(
-				`[SuiteCloudRunner] Executing: ${command} in ${projectRoot}`,
+			logger.info(
+				`Executing SuiteCloud upload: ${bin} ${uploadArgs.join(" ")} in ${projectRoot}`,
 			);
-			const { stdout, stderr } = await execAsync(command, {
+			const { stdout, stderr } = await execFileAsync(bin, uploadArgs, {
 				cwd: projectRoot,
 				timeout: 120000, // 120 seconds
 				env,
@@ -944,7 +944,7 @@ export class SuiteCloudRunnerService {
 				.map((s) => String(s).trim())
 				.filter(Boolean)
 				.join("\n");
-			console.error("[SuiteCloudRunner Error]:", outputText);
+			logger.error(`[SuiteCloudRunner Error]: ${outputText}`);
 
 			const diagnostics = this.diagnoseUploadError(
 				execErr.stderr || "",

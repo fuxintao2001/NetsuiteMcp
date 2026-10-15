@@ -210,8 +210,8 @@ export function generateRecommendations(
 			title: "沉淀 SuiteQL 黄金查询模板与预检机制 (Golden Templates)",
 			description: `SuiteQL 执行出现 ${suiteqlCount} 次语法或表/字段不存在报错。典型错误：${sampleSqlErr || "字段或表名无效"}。`,
 			actionableFix:
-				"在 `src/utils/suiteqlTemplates.ts` 中补强常用业务查询模板；提醒 AI 在执行未知表的查询前，优先调用 `ns_getSuiteQLMetadata` 完成表结构勘探（Reconnaissance First）。",
-			affectedTools: ["ns_runCustomSuiteQL", "ns_getSuiteQLMetadata"],
+				"在 `src/utils/suiteqlTemplates.ts` 中补强常用业务查询模板；提醒 AI 在执行未知表的查询前，优先调用 `netsuite_get_metadata` 完成表结构勘探（Reconnaissance First）。",
+			affectedTools: ["netsuite_run_suiteql", "netsuite_get_metadata"],
 			occurrences: suiteqlCount,
 		});
 	}
@@ -245,7 +245,7 @@ export function generateRecommendations(
 			description: `检测到 ${prodBlockCount} 次生产环境写入拦截（双门禁防护已成功阻断危险操作）。`,
 			actionableFix:
 				"确认当前账号 ID 是否正确。如需执行创建或修改记录，请切换至含有 `_SB` 或 `TSTDRV` 的 Sandbox 沙箱环境。",
-			affectedTools: ["ns_createRecord", "ns_updateRecord"],
+			affectedTools: ["netsuite_create_record", "netsuite_update_record"],
 			occurrences: prodBlockCount,
 		});
 	}
@@ -260,7 +260,7 @@ export function generateRecommendations(
 			description: `检测到 ${netCount} 次网络断连或网关超时报错。`,
 			actionableFix:
 				"检查 `src/utils/resilience.ts` 中的重试退避配置与并发控制器 `ConcurrencyLimiter`，针对耗时较长的报表查询适当放大超时等待上限。",
-			affectedTools: ["ns_runReport", "ns_runCustomSuiteQL"],
+			affectedTools: ["netsuite_run_suiteql"],
 			occurrences: netCount,
 		});
 	}
@@ -274,8 +274,8 @@ export function generateRecommendations(
 			title: "记录检索前置存在性校验 (Pre-Lookup Verification)",
 			description: `检测到 ${notFoundCount} 次指定主键/RecordId 查无数据报错。`,
 			actionableFix:
-				"引导 AI 代理在调用 `ns_getRecord` 之前，先利用 SuiteQL 确认主键 ID 的有效性，避免盲目检索已删除记录。",
-			affectedTools: ["ns_getRecord", "ns_updateRecord"],
+				"引导 AI 代理在调用 `netsuite_get_record` 之前，先利用 SuiteQL 确认主键 ID 的有效性，避免盲目检索已删除记录。",
+			affectedTools: ["netsuite_get_record", "netsuite_update_record"],
 			occurrences: notFoundCount,
 		});
 	}

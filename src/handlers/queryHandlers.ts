@@ -30,8 +30,11 @@ export async function handleGetScriptLogs(
 		detail,
 		keyword,
 		deploymentId,
-		limit,
+		limit: rawLimit,
+		format,
 	} = parsed.data;
+
+	const limit = Math.min(Math.max(rawLimit ?? 50, 1), 200);
 
 	// Build SELECT with Script info joined for complete visibility
 	let sql = `SELECT TO_CHAR(sn.date, 'YYYY-MM-DD HH24:MI:SS') AS date, sn.type, sn.title, sn.detail, s.scriptid AS scriptScriptId, s.name AS scriptName FROM ScriptNote AS sn LEFT JOIN Script AS s ON sn.scripttype = s.id`;
@@ -67,15 +70,15 @@ export async function handleGetScriptLogs(
 			}
 		}
 		const escapedIds = targetScriptIds.map(
-			(id) => `'${id.replace(/'/g, "''")}'`,
+			(id) => `'${id.toUpperCase().replace(/'/g, "''")}'`,
 		);
 		if (escapedIds.length === 1) {
 			conditions.push(
-				`sn.scripttype = (SELECT s_sub.id FROM Script s_sub WHERE s_sub.scriptid = ${escapedIds[0]} FETCH FIRST 1 ROWS ONLY)`,
+				`sn.scripttype = (SELECT s_sub.id FROM Script s_sub WHERE UPPER(s_sub.scriptid) = ${escapedIds[0]} FETCH FIRST 1 ROWS ONLY)`,
 			);
 		} else {
 			conditions.push(
-				`sn.scripttype IN (SELECT s_sub.id FROM Script s_sub WHERE s_sub.scriptid IN (${escapedIds.join(", ")}))`,
+				`sn.scripttype IN (SELECT s_sub.id FROM Script s_sub WHERE UPPER(s_sub.scriptid) IN (${escapedIds.join(", ")}))`,
 			);
 		}
 	}
@@ -87,9 +90,11 @@ export async function handleGetScriptLogs(
 				true,
 			);
 		}
-		const escapedDeploymentId = cleanDeploymentId.replace(/'/g, "''");
+		const escapedDeploymentId = cleanDeploymentId
+			.toUpperCase()
+			.replace(/'/g, "''");
 		conditions.push(
-			`sn.scripttype IN (SELECT sd.script FROM ScriptDeployment sd WHERE sd.scriptid = '${escapedDeploymentId}')`,
+			`sn.scripttype IN (SELECT sd.script FROM ScriptDeployment sd WHERE UPPER(sd.scriptid) = '${escapedDeploymentId}')`,
 		);
 	}
 	if (logType) {
@@ -188,18 +193,62 @@ export async function handleGetScriptLogs(
 			};
 		}
 
-		return textResult(
-			JSON.stringify(
-				{
-					totalResults: data.length,
-					...(diagnosticSummary ? { diagnosticSummary } : {}),
-					query: sql,
-					data,
-				},
-				null,
-				2,
-			),
-		);
+		if (format === "compact_json") {
+			return textResult(
+				JSON.stringify(
+					{
+						totalResults: data.length,
+						...(diagnosticSummary ? { diagnosticSummary } : {}),
+						query: sql,
+						data,
+					},
+					null,
+					2,
+				),
+			);
+		}
+
+		if (data.length === 0) {
+			return textResult(
+				"No script logs found matching the specified criteria.",
+			);
+		}
+
+		let md = `## 📜 SuiteScript Execution Logs (${data.length} entries)\n\n`;
+
+		if (diagnosticSummary) {
+			md += `> [!WARNING] **Diagnostic Alert**: ${diagnosticSummary.errorCount} error/emergency log(s) found.\n`;
+			md += `> - Latest Script: \`${diagnosticSummary.latestScript}\`\n`;
+			md += `> - Latest Time: \`${diagnosticSummary.latestTimestamp}\`\n`;
+			md += `> - Title: ${diagnosticSummary.latestTitle}\n`;
+			if (diagnosticSummary.latestDetailSnippet) {
+				md += `> - Detail: ${diagnosticSummary.latestDetailSnippet}\n`;
+			}
+			md += "\n";
+		}
+
+		md += "| Date | Type | Script | Title | Detail |\n";
+		md += "| :--- | :--- | :--- | :--- | :--- |\n";
+
+		for (const row of data) {
+			const date = String(row.date || "").trim();
+			const type = String(row.type || "").trim();
+			const script = String(row.scriptScriptId || row.scriptName || "-").trim();
+			const title = String(row.title || "-")
+				.replace(/\|/g, "\\|")
+				.replace(/[\r\n]+/g, " ")
+				.trim();
+			let detail = String(row.detail || "-")
+				.replace(/\|/g, "\\|")
+				.replace(/[\r\n]+/g, " ")
+				.trim();
+			if (detail.length > 200) {
+				detail = `${detail.slice(0, 197)}...`;
+			}
+			md += `| ${date} | ${type} | ${script} | ${title} | ${detail} |\n`;
+		}
+
+		return textResult(md.trim());
 	} catch (err: unknown) {
 		const msg = err instanceof Error ? err.message : String(err);
 		if (isPermissionError(msg)) throw err;

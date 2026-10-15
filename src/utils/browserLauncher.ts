@@ -1,23 +1,17 @@
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
-
-const execFileAsync = promisify(execFile);
+import open from "open";
 
 /**
  * Open URL in default browser (cross-platform).
- * Uses execFile instead of exec to prevent command injection.
+ * Uses the mature, industry-standard 'open' library to safely handle URL arguments,
+ * escape special characters (such as '&' query parameters in OAuth flows),
+ * and prevent command injection across Windows, macOS, and Linux.
  */
-export async function openBrowser(url: string): Promise<void> {
-	const platform = process.platform;
-
+export async function openBrowser(
+	url: string,
+	launcher: (target: string) => Promise<unknown> = open,
+): Promise<void> {
 	try {
-		if (platform === "darwin") {
-			await execFileAsync("open", [url]);
-		} else if (platform === "win32") {
-			await execFileAsync("cmd", ["/c", "start", "", url]);
-		} else {
-			await execFileAsync("xdg-open", [url]);
-		}
+		await launcher(url);
 		console.error("🌐 Browser opened automatically");
 	} catch (error: unknown) {
 		const message = error instanceof Error ? error.message : String(error);

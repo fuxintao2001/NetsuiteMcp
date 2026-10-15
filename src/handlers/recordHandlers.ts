@@ -15,6 +15,7 @@ import {
 } from "../utils/metadata.js";
 import { generateNetSuiteUrl } from "../utils/netsuiteUrls.js";
 import {
+	type RecordDefinitionResult,
 	type RecordFieldMeta,
 	recordsReferenceService,
 } from "../utils/recordsReference.js";
@@ -160,6 +161,123 @@ export async function resolveNaturalKeyToInternalId(
 }
 
 /**
+ * Resolves an array of natural keys concurrently in a single batch SuiteQL query.
+ */
+export async function resolveNaturalKeysBatch(
+	recordType: string,
+	naturalKeys: string[],
+	mcpTools: NetSuiteMCPTools,
+): Promise<Map<string, { id: string; recordType?: string | undefined }>> {
+	const resultMap = new Map<
+		string,
+		{ id: string; recordType?: string | undefined }
+	>();
+	const safeKeys = naturalKeys
+		.map((k) => k.trim())
+		.filter((k) => k.length > 0 && !/^-?\d+$/.test(k));
+
+	if (safeKeys.length === 0 || !recordType) return resultMap;
+
+	const recType = recordType.toLowerCase().trim();
+	const isTransaction = [
+		"salesorder",
+		"invoice",
+		"purchaseorder",
+		"estimate",
+		"opportunity",
+		"customerpayment",
+		"vendorbill",
+		"vendorpayment",
+		"creditmemo",
+		"itemfulfillment",
+		"itemreceipt",
+		"returnauthorization",
+		"journalentry",
+		"transferorder",
+		"transaction",
+	].includes(recType);
+
+	if (isTransaction) {
+		try {
+			const typeFilter =
+				recType !== "transaction" ? `AND LOWER(type) = '${recType}'` : "";
+			const inList = safeKeys
+				.map((k) => `'${k.replace(/'/g, "''").toUpperCase()}'`)
+				.join(", ");
+			const sql = `SELECT id, type, tranid FROM transaction WHERE UPPER(tranid) IN (${inList}) ${typeFilter}`;
+			const res = await mcpTools.executeTool("ns_runCustomSuiteQL", {
+				sqlQuery: sql,
+			});
+			const rows = mcpTools.extractDataArray(res);
+			for (const row of rows) {
+				const tranid = (row.tranid as string)?.toUpperCase();
+				if (tranid && row.id) {
+					resultMap.set(tranid, {
+						id: String(row.id),
+						recordType: (row.type as string)?.toLowerCase() || recordType,
+					});
+				}
+			}
+		} catch (err: unknown) {
+			const msg = err instanceof Error ? err.message : String(err);
+			if (isPermissionError(msg)) throw err;
+		}
+		return resultMap;
+	}
+
+	if (
+		recType.startsWith("customrecord") &&
+		/^customrecord_[a-z0-9_]+$/i.test(recType)
+	) {
+		try {
+			const inList = safeKeys
+				.map((k) => `'${k.replace(/'/g, "''").toUpperCase()}'`)
+				.join(", ");
+			const sql = `SELECT id, name FROM ${recType} WHERE UPPER(name) IN (${inList})`;
+			const res = await mcpTools.executeTool("ns_runCustomSuiteQL", {
+				sqlQuery: sql,
+			});
+			const rows = mcpTools.extractDataArray(res);
+			for (const row of rows) {
+				const name = (row.name as string)?.toUpperCase();
+				if (name && row.id) {
+					resultMap.set(name, { id: String(row.id), recordType: recType });
+				}
+			}
+		} catch (err: unknown) {
+			const msg = err instanceof Error ? err.message : String(err);
+			if (isPermissionError(msg)) throw err;
+		}
+		return resultMap;
+	}
+
+	if (recType === "customer" || recType === "vendor" || recType === "entity") {
+		try {
+			const inList = safeKeys
+				.map((k) => `'${k.replace(/'/g, "''").toUpperCase()}'`)
+				.join(", ");
+			const sql = `SELECT id, entityid FROM entity WHERE UPPER(entityid) IN (${inList})`;
+			const res = await mcpTools.executeTool("ns_runCustomSuiteQL", {
+				sqlQuery: sql,
+			});
+			const rows = mcpTools.extractDataArray(res);
+			for (const row of rows) {
+				const entityid = (row.entityid as string)?.toUpperCase();
+				if (entityid && row.id) {
+					resultMap.set(entityid, { id: String(row.id), recordType: recType });
+				}
+			}
+		} catch (err: unknown) {
+			const msg = err instanceof Error ? err.message : String(err);
+			if (isPermissionError(msg)) throw err;
+		}
+		return resultMap;
+	}
+
+	return resultMap;
+}
+
+/**
  * Appends a clickable NetSuite Web UI link to the response text.
  */
 export async function appendRecordLink(
@@ -198,25 +316,30 @@ async function inspectSingleRecord(
 	mcpTools: NetSuiteMCPTools,
 	oauthManager: OAuthManager,
 	resolveRectype: (type: string) => number | null | Promise<number | null>,
+	preResolved?: { id: string; recordType?: string | undefined },
 ): Promise<ToolResponse> {
 	const { includeSublists, linesMode, maxLines, lineFields, format } = options;
 	let targetId = rawId.trim();
 
 	// Auto-resolve document number (tranid) to numeric internal ID if needed
 	if (!/^-?\d+$/.test(targetId)) {
-		const resolved = await resolveNaturalKeyToInternalId(
-			recordType,
-			targetId,
-			mcpTools,
-		);
-		if (resolved?.id) {
-			targetId = resolved.id;
+		if (preResolved?.id) {
+			targetId = preResolved.id;
 		} else {
-			return textResult(
-				`❌ [Record Not Found] Could not resolve document number / name '${rawId}' for record type '${recordType}'.\n` +
-					`👉 Please verify the document number (tranid) or provide the numeric internal ID directly.`,
-				true,
+			const resolved = await resolveNaturalKeyToInternalId(
+				recordType,
+				targetId,
+				mcpTools,
 			);
+			if (resolved?.id) {
+				targetId = resolved.id;
+			} else {
+				return textResult(
+					`❌ [Record Not Found] Could not resolve document number / name '${rawId}' for record type '${recordType}'.\n` +
+						`👉 Please verify the document number (tranid) or provide the numeric internal ID directly.`,
+					true,
+				);
+			}
 		}
 	}
 
@@ -408,14 +531,28 @@ async function inspectSingleRecord(
 		md += `\n### 📦 Sublists & Line Details\n`;
 		for (const [sublistName, rows] of Object.entries(sublistsDetail)) {
 			md += `#### 🔹 Sublist: \`${sublistName}\` (${rows.length} lines)\n\n`;
-			if (rows.length > 0 && rows[0]) {
-				const headers = Object.keys(rows[0]);
-				md += `| ${headers.join(" | ")} |\n`;
-				md += `| ${headers.map(() => "---").join(" | ")} |\n`;
+			if (rows.length > 0) {
+				const headerSet = new Set<string>();
 				for (const r of rows) {
-					md += `| ${headers.map((h) => String(r[h] ?? "").replace(/\|/g, "\\|")).join(" | ")} |\n`;
+					for (const k of Object.keys(r)) {
+						headerSet.add(k);
+					}
 				}
-				md += "\n";
+				const headers = Array.from(headerSet);
+				if (headers.length > 0) {
+					md += `| ${headers.join(" | ")} |\n`;
+					md += `| ${headers.map(() => "---").join(" | ")} |\n`;
+					for (const r of rows) {
+						md += `| ${headers
+							.map((h) =>
+								String(r[h] ?? "")
+									.replace(/\|/g, "\\|")
+									.replace(/\n/g, " "),
+							)
+							.join(" | ")} |\n`;
+					}
+					md += "\n";
+				}
 			}
 		}
 	}
@@ -504,6 +641,19 @@ export async function handleGetRecord(
 		);
 	}
 
+	// Pre-resolve natural keys in batch if multiple IDs contain non-numeric keys
+	let preResolvedMap = new Map<
+		string,
+		{ id: string; recordType?: string | undefined }
+	>();
+	if (targetIds.some((id) => !/^-?\d+$/.test(id))) {
+		preResolvedMap = await resolveNaturalKeysBatch(
+			recordType,
+			targetIds,
+			mcpTools,
+		);
+	}
+
 	const parallelResults = await Promise.all(
 		targetIds.map(async (itemId, index) => {
 			try {
@@ -514,6 +664,7 @@ export async function handleGetRecord(
 					mcpTools,
 					oauthManager,
 					resolveRectype,
+					preResolvedMap.get(itemId.toUpperCase()),
 				);
 				const firstContent = res.content?.[0];
 				const text =
@@ -553,6 +704,42 @@ export async function handleGetRecord(
 }
 
 /**
+ * Formats offline record metadata into structured Markdown including sublists and relationships.
+ */
+function formatOfflineRecordMetadata(
+	def: RecordDefinitionResult,
+	table: string,
+): string {
+	let md = `## 📖 Official Records Definition: \`${table}\` (Offline Catalog)\n\n`;
+	if (def.description) {
+		md += `> **Description**: ${def.description}\n\n`;
+	}
+	md += `*Total Fields: ${def.fields.length} standard fields identified.*\n\n`;
+	md += `| Field ID | Type | Label | Required |\n|:---|:---|:---|:---|\n`;
+	for (const f of def.fields as RecordFieldMeta[]) {
+		md += `| \`${f.internalId}\` | ${f.type} | ${f.label} | ${f.required ? "Yes" : "No"} |\n`;
+	}
+
+	if (def.sublists && def.sublists.length > 0) {
+		md += `\n### 📦 Official Sublists (${def.sublists.length})\n\n`;
+		md += `| Sublist ID | Label |\n|:---|:---|\n`;
+		for (const s of def.sublists) {
+			md += `| \`${s.name}\` | ${s.label || s.name} |\n`;
+		}
+	}
+
+	if (def.relations && def.relations.length > 0) {
+		md += `\n### 🔗 Key Relationships (Primary & Foreign Keys)\n\n`;
+		md += `| Field ID | Target Table | Type | Description |\n|:---|:---|:---|:---|\n`;
+		for (const r of def.relations) {
+			md += `| \`${r.field}\` | \`${r.targetTable}\` | ${r.type} | ${r.description || "-"} |\n`;
+		}
+	}
+
+	return md;
+}
+
+/**
  * Core helper to inspect metadata for a single NetSuite table or record type.
  */
 async function inspectSingleTableMetadata(
@@ -567,13 +754,7 @@ async function inspectSingleTableMetadata(
 	if (source === "offline" || (source === "auto" && !isCustom)) {
 		const def = recordsReferenceService.getRecordDefinition(table, keyword);
 		if (def?.found && def.fields.length > 0) {
-			let md = `## 📖 Official Records Definition: \`${table}\` (Offline Catalog)\n\n`;
-			md += `*Total Fields: ${def.fields.length} standard fields identified.*\n\n`;
-			md += `| Field ID | Type | Label | Required |\n|:---|:---|:---|:---|\n`;
-			for (const f of def.fields as RecordFieldMeta[]) {
-				md += `| \`${f.internalId}\` | ${f.type} | ${f.label} | ${f.required ? "Yes" : "No"} |\n`;
-			}
-			return textResult(md);
+			return textResult(formatOfflineRecordMetadata(def, table));
 		}
 	}
 
@@ -594,13 +775,7 @@ async function inspectSingleTableMetadata(
 				keyword,
 			);
 			if (fallbackDef?.found && fallbackDef.fields.length > 0) {
-				let md = `## 📖 Official Records Definition: \`${table}\` (Offline Catalog)\n\n`;
-				md += `*Total Fields: ${fallbackDef.fields.length} standard fields identified.*\n\n`;
-				md += `| Field ID | Type | Label | Required |\n|:---|:---|:---|:---|\n`;
-				for (const f of fallbackDef.fields as RecordFieldMeta[]) {
-					md += `| \`${f.internalId}\` | ${f.type} | ${f.label} | ${f.required ? "Yes" : "No"} |\n`;
-				}
-				return textResult(md);
+				return textResult(formatOfflineRecordMetadata(fallbackDef, table));
 			}
 		}
 
@@ -808,7 +983,8 @@ export async function handleGetSystemNotes(
 		);
 	}
 
-	const { recordType, limit } = parsed.data;
+	const { recordType } = parsed.data;
+	const limit = Math.min(Math.max(parsed.data.limit ?? 50, 1), 100);
 	const targetIds = [
 		...(parsed.data.recordId ? [parsed.data.recordId.trim()] : []),
 		...(parsed.data.recordIds || []).map((id) => id.trim()),

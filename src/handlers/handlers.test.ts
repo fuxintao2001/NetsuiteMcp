@@ -633,7 +633,7 @@ describe("MCP Handler Wires", () => {
 				const res = await callFn?.({
 					params: {
 						name: "netsuite_get_script_logs",
-						arguments: {},
+						arguments: { format: "compact_json" },
 					},
 				});
 
@@ -653,6 +653,38 @@ describe("MCP Handler Wires", () => {
 				expect(parsed.query).toContain("FETCH FIRST 50 ROWS ONLY");
 				// SAFE Guide performance optimization: partition pruning defaults to last 7 days
 				expect(parsed.query).toContain("sn.date >= SYSDATE - 7");
+			});
+
+			it("should format script logs as compact markdown table by default", async () => {
+				const callFn = registeredHandlers.get("tools/call");
+
+				mockMCPTools.executeTool.mockResolvedValueOnce({
+					data: [
+						{
+							date: "2026-08-01 12:00:00",
+							type: "ERROR",
+							title: "Test Error",
+							detail: "Something failed",
+							scriptScriptId: "customscript_test",
+							scriptName: "Test Script",
+						},
+					],
+				});
+
+				const res = await callFn?.({
+					params: {
+						name: "netsuite_get_script_logs",
+						arguments: {},
+					},
+				});
+
+				expect(res.content[0].text).toContain(
+					"## 📜 SuiteScript Execution Logs (1 entries)",
+				);
+				expect(res.content[0].text).toContain(
+					"| Date | Type | Script | Title | Detail |",
+				);
+				expect(res.content[0].text).toContain("Test Error");
 			});
 
 			it("should generate query with all filters applied", async () => {
@@ -685,10 +717,10 @@ describe("MCP Handler Wires", () => {
 					"LEFT JOIN Script AS s ON sn.scripttype = s.id",
 				);
 				expect(sqlArg).toContain(
-					"sn.scripttype = (SELECT s_sub.id FROM Script s_sub WHERE s_sub.scriptid = 'customscript_my_ue' FETCH FIRST 1 ROWS ONLY)",
+					"sn.scripttype = (SELECT s_sub.id FROM Script s_sub WHERE UPPER(s_sub.scriptid) = 'CUSTOMSCRIPT_MY_UE' FETCH FIRST 1 ROWS ONLY)",
 				);
 				expect(sqlArg).toContain(
-					"sn.scripttype IN (SELECT sd.script FROM ScriptDeployment sd WHERE sd.scriptid = 'customdeploy_my_ue')",
+					"sn.scripttype IN (SELECT sd.script FROM ScriptDeployment sd WHERE UPPER(sd.scriptid) = 'CUSTOMDEPLOY_MY_UE')",
 				);
 				expect(sqlArg).toContain("sn.type = 'ERROR'");
 				expect(sqlArg).toContain("TO_DATE('2026-07-01', 'YYYY-MM-DD')");
@@ -754,7 +786,7 @@ describe("MCP Handler Wires", () => {
 				const res = await callFn?.({
 					params: {
 						name: "netsuite_get_script_logs",
-						arguments: { limit: 500 },
+						arguments: { limit: 500, format: "compact_json" },
 					},
 				});
 
@@ -1144,6 +1176,39 @@ describe("MCP Handler Wires", () => {
 				expect(res.content[0].text).toContain("salesorder");
 			});
 
+			it("should inspect offline metadata for core view transactionaccountingline and billingrevenueevent", async () => {
+				const callFn = registeredHandlers.get("tools/call");
+
+				const resTal = (await callFn?.({
+					params: {
+						name: "netsuite_get_metadata",
+						arguments: {
+							table: "transactionaccountingline",
+							source: "offline",
+						},
+					},
+				})) as any;
+
+				expect(resTal.isError).toBeFalsy();
+				expect(resTal.content[0].text).toContain("transactionaccountingline");
+				expect(resTal.content[0].text).toContain("account");
+				expect(resTal.content[0].text).toContain("Key Relationships");
+
+				const resBre = (await callFn?.({
+					params: {
+						name: "netsuite_get_metadata",
+						arguments: {
+							table: "billingrevenueevent",
+							source: "offline",
+						},
+					},
+				})) as any;
+
+				expect(resBre.isError).toBeFalsy();
+				expect(resBre.content[0].text).toContain("billingrevenueevent");
+				expect(resBre.content[0].text).toContain("revenueelement");
+			});
+
 			it("should execute SuiteQL query as-is without auto-rewriting", async () => {
 				const callFn = registeredHandlers.get("tools/call");
 
@@ -1327,6 +1392,56 @@ describe("MCP Handler Wires", () => {
 				expect(res.content[0].text).toContain("SO-101");
 				expect(res.content[0].text).toContain("SO-102");
 				expect(mockMCPTools.executeTool).toHaveBeenCalledTimes(2);
+			});
+
+			it("should resolve batch natural keys using a single IN query and extract sublist header union", async () => {
+				const callFn = registeredHandlers.get("tools/call");
+				mockMCPTools.executeTool.mockImplementation(
+					async (toolName: string, args: any) => {
+						if (toolName === "ns_runCustomSuiteQL") {
+							return {
+								data: [
+									{ id: "201", type: "salesorder", tranid: "SO10023" },
+									{ id: "202", type: "salesorder", tranid: "SO10024" },
+								],
+							};
+						}
+						if (toolName === "ns_getRecord") {
+							return {
+								id: args.recordId,
+								item: [
+									{ item: "ItemA", quantity: 2 },
+									{ item: "ItemB", quantity: 5, discount: "10%", rate: 100 },
+								],
+							};
+						}
+						return {};
+					},
+				);
+
+				const res = (await callFn?.({
+					params: {
+						name: "netsuite_get_record",
+						arguments: {
+							recordType: "salesorder",
+							ids: ["SO10023", "SO10024"],
+						},
+					},
+				})) as any;
+
+				expect(res.isError).toBeFalsy();
+				// Assert that batch resolution query was called with IN clause
+				expect(mockMCPTools.executeTool).toHaveBeenCalledWith(
+					"ns_runCustomSuiteQL",
+					expect.objectContaining({
+						sqlQuery: expect.stringContaining(
+							"UPPER(tranid) IN ('SO10023', 'SO10024')",
+						),
+					}),
+				);
+				// Assert sublist header union includes discount and rate even though row 0 lacked them
+				expect(res.content[0].text).toContain("discount");
+				expect(res.content[0].text).toContain("rate");
 			});
 
 			it("should allow negative numeric internal IDs for netsuite_get_record", async () => {
@@ -1709,7 +1824,7 @@ describe("MCP Handler Wires", () => {
 				await fs.writeFile(sourceFile, "console.log('external');");
 				await fs.writeFile(
 					path.join(targetProject, "project.json"),
-					JSON.stringify({ defaultAuthId: "target-auth" }),
+					JSON.stringify({ defaultAuthId: "target-auth-sb1" }),
 				);
 				await fs.writeFile(
 					path.join(targetProject, "manifest.xml"),
@@ -1754,6 +1869,82 @@ describe("MCP Handler Wires", () => {
 					"SuiteCloud File Upload Succeeded",
 				);
 				execSpy.mockRestore();
+			});
+
+			it("should block upload if project defaultAuthId points to production even when session is sandbox", async () => {
+				const callFn = registeredHandlers.get("tools/call");
+				mockOAuthManager.getAccountId.mockResolvedValueOnce("9260916_sb1");
+
+				const prodProject = path.join(testRoot, "prod_auth_proj");
+				const prodFile = path.join(
+					prodProject,
+					"src/FileCabinet/SuiteScripts/test.js",
+				);
+				await fs.mkdir(path.dirname(prodFile), { recursive: true });
+				await fs.writeFile(prodFile, "console.log('test');");
+				await fs.writeFile(
+					path.join(prodProject, "project.json"),
+					JSON.stringify({ defaultAuthId: "9260916" }),
+				);
+
+				const res = await callFn?.({
+					params: {
+						name: "netsuite_upload_file",
+						arguments: {
+							paths: prodFile,
+							projectPath: prodProject,
+						},
+					},
+				});
+
+				expect(res.isError).toBe(true);
+				expect(res.content[0].text).toContain("生产环境安全拦截");
+				expect(res.content[0].text).toContain("指向**生产环境**");
+			});
+
+			it("should block directory traversal attempt in upload file cabinet path", async () => {
+				const callFn = registeredHandlers.get("tools/call");
+				mockOAuthManager.getAccountId.mockResolvedValueOnce("9260916_sb1");
+
+				const traversalProject = path.join(testRoot, "traversal_proj");
+				const testFile = path.join(testRoot, "secret.js");
+				await fs.mkdir(path.join(traversalProject, "src/FileCabinet"), {
+					recursive: true,
+				});
+				await fs.writeFile(testFile, "console.log('secret');");
+
+				vi.spyOn(
+					suitecloudRunnerService,
+					"resolveUploadFiles",
+				).mockReturnValueOnce({
+					projectRoot: traversalProject,
+					files: [
+						{
+							exists: true,
+							localFullPath: testFile,
+							fileCabinetPath: "/../../../etc/passwd",
+							sizeBytes: 100,
+							syntaxValid: true,
+						},
+					],
+					totalBytes: 100,
+					invalidCount: 0,
+					missingCount: 0,
+					warnings: [],
+				});
+
+				const res = await callFn?.({
+					params: {
+						name: "netsuite_upload_file",
+						arguments: {
+							paths: testFile,
+							projectPath: traversalProject,
+						},
+					},
+				});
+
+				expect(res.isError).toBe(true);
+				expect(res.content[0].text).toContain("路径安全拦截");
 			});
 		});
 	});
@@ -1800,6 +1991,54 @@ describe("MCP Handler Wires", () => {
 			expect(res.contents[0].text).toContain(
 				"Official 272 Records Definition Index",
 			);
+		});
+
+		it("should list standard reference resources including permissions, builtins, and governance-units", async () => {
+			const listFn = registeredHandlers.get("resources/list");
+			const res = await listFn?.();
+			const uris = res.resources.map((r: any) => r.uri);
+			expect(uris).toContain("netsuite://reference/permissions");
+			expect(uris).toContain("netsuite://reference/suiteql-builtins");
+			expect(uris).toContain("netsuite://safe/governance-units");
+		});
+
+		it("should read permissions reference resource successfully", async () => {
+			const readFn = registeredHandlers.get("resources/read");
+			const res = await readFn?.({
+				params: { uri: "netsuite://reference/permissions" },
+			});
+
+			expect(res.contents[0].uri).toBe("netsuite://reference/permissions");
+			expect(res.contents[0].text).toContain(
+				"Official Standard Permissions Matrix",
+			);
+			expect(res.contents[0].text).toContain("TRAN_SALESORD");
+			expect(res.contents[0].text).toContain(
+				"403 Permission Denied Self-Healing Diagnostic",
+			);
+		});
+
+		it("should read suiteql-builtins resource successfully", async () => {
+			const readFn = registeredHandlers.get("resources/read");
+			const res = await readFn?.({
+				params: { uri: "netsuite://reference/suiteql-builtins" },
+			});
+
+			expect(res.contents[0].uri).toBe("netsuite://reference/suiteql-builtins");
+			expect(res.contents[0].text).toContain("BUILTIN.DF");
+			expect(res.contents[0].text).toContain("BUILTIN.CONSOLIDATE");
+			expect(res.contents[0].text).toContain("SAFE Pitfalls");
+		});
+
+		it("should read governance-units resource successfully", async () => {
+			const readFn = registeredHandlers.get("resources/read");
+			const res = await readFn?.({
+				params: { uri: "netsuite://safe/governance-units" },
+			});
+
+			expect(res.contents[0].uri).toBe("netsuite://safe/governance-units");
+			expect(res.contents[0].text).toContain("Script Type Governance Limits");
+			expect(res.contents[0].text).toContain("SAFE-GOV-001");
 		});
 	});
 });

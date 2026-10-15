@@ -500,7 +500,7 @@ SPACED = trimmed
 			};
 		});
 
-		it("should register listeners on startup", () => {
+		it("should register uncaughtException and unhandledRejection listeners on startup", () => {
 			installGlobalErrorHandlers(mockProcess, mockLogger);
 			expect(mockProcess.on).toHaveBeenCalledWith(
 				"uncaughtException",
@@ -510,16 +510,8 @@ SPACED = trimmed
 				"unhandledRejection",
 				expect.any(Function),
 			);
-			expect(mockProcess.on).toHaveBeenCalledWith(
+			expect(mockProcess.on).not.toHaveBeenCalledWith(
 				"SIGTERM",
-				expect.any(Function),
-			);
-			expect(mockProcess.stdin.on).toHaveBeenCalledWith(
-				"close",
-				expect.any(Function),
-			);
-			expect(mockProcess.stdin.on).toHaveBeenCalledWith(
-				"end",
 				expect.any(Function),
 			);
 		});
@@ -537,25 +529,17 @@ SPACED = trimmed
 			expect(mockProcess.exit).not.toHaveBeenCalled();
 		});
 
-		it("should set exitCode to 0 and swallow on broken stdio error (EPIPE/ECONNRESET)", () => {
-			installGlobalErrorHandlers(mockProcess, mockLogger);
+		it("should set exitCode to 0 and trigger onShutdown on broken stdio error (EPIPE/ECONNRESET)", () => {
+			const onShutdown = vi.fn();
+			installGlobalErrorHandlers(mockProcess, mockLogger, onShutdown);
 
 			const brokenStdioError = { code: "EPIPE" };
 			eventListeners.uncaughtException(brokenStdioError);
 
 			expect(mockProcess.exitCode).toBe(0);
 			expect(mockLogger.error).not.toHaveBeenCalled();
+			expect(onShutdown).toHaveBeenCalledTimes(1);
 			expect(mockProcess.exit).not.toHaveBeenCalled();
-		});
-
-		it("should exit with 0 on SIGTERM or stdin close", () => {
-			installGlobalErrorHandlers(mockProcess, mockLogger);
-
-			eventListeners.SIGTERM();
-			expect(mockProcess.exit).toHaveBeenCalledWith(0);
-
-			stdinListeners.close();
-			expect(mockProcess.exit).toHaveBeenCalledWith(0);
 		});
 	});
 
@@ -753,6 +737,19 @@ Assertion status system-wide:
 
 				sleepingScheduler.stop();
 			});
+		});
+	});
+
+	describe("browserLauncher", () => {
+		it("should invoke open with complete url containing multiple query parameters without truncation", async () => {
+			const { openBrowser } = await import("./browserLauncher.js");
+			const mockLauncher = vi.fn().mockResolvedValue({});
+
+			const complexUrl =
+				"https://123456.app.netsuite.com/app/login/oauth2/authorize.nl?response_type=code&client_id=my_client&scope=mcp&redirect_uri=http%3A%2F%2Flocalhost%3A8080%2Fcallback";
+			await openBrowser(complexUrl, mockLauncher);
+
+			expect(mockLauncher).toHaveBeenCalledWith(complexUrl);
 		});
 	});
 });

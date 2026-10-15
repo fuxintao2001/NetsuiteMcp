@@ -8,6 +8,8 @@ interface NetSuiteErrorDetail {
 	o_errorCode?: string;
 }
 
+import { permissionsReferenceService } from "./permissionsReference.js";
+
 /**
  * Hard-stop instruction banner appended to permission error responses.
  * Instructs the AI agent to stop all tasks immediately and avoid hallucinating data.
@@ -17,7 +19,10 @@ export const PERMISSION_HARD_STOP_ADVICE = `
 🛑 CRITICAL AGENT INSTRUCTION (ZERO HALLUCINATION & IMMEDIATE HALT):
   1. STOP ALL TASKS IMMEDIATELY: Do NOT retry, do NOT attempt self-healing loops, and do NOT test alternative queries. NetSuite permission restrictions cannot be bypassed or self-healed by rewriting queries.
   2. STRICTLY ZERO HALLUCINATION: You MUST NOT guess, invent, simulate, or fabricate any record data, schema, or query results.
-  3. REPORT TO USER & WAIT: Clearly report the failed record type/table name and specify the required NetSuite permission configuration path (e.g., Setup > Users/Roles > Manage Roles > Permissions > Transactions/Lists/Setup with appropriate Access Level such as View/Full). Explicitly wait for the user to configure permissions before proceeding.`;
+  3. REPORT TO USER & WAIT: Clearly report the failed record type/table name and specify the required NetSuite permission configuration path (e.g., Setup > Users/Roles > Manage Roles > Permissions > Transactions/Lists/Setup with appropriate Access Level such as View/Full). Explicitly wait for the user to configure permissions before proceeding.
+📖 OFFICIAL PERMISSION MATRIX REFERENCE:
+  Access authoritative NetSuite standard permissions matrix dictionary at:
+  netsuite://reference/permissions (covers ADMI_*, LIST_*, TRAN_*, REPO_*, REGT_* permissions)`;
 
 /**
  * Checks if an error code, message, or HTTP status indicates a NetSuite permission/authorization error.
@@ -136,7 +141,21 @@ function getActionableAdvice(code: string, message: string): string {
 
 	// Permissions / Access errors
 	if (isPermissionError(code, 0) || isPermissionError(message, 0)) {
-		return PERMISSION_HARD_STOP_ADVICE;
+		let advice = PERMISSION_HARD_STOP_ADVICE;
+		const recMatch = /(?:record|type|table)\s*['"]?([a-zA-Z0-9_]+)['"]?/i.exec(
+			message,
+		);
+		if (recMatch?.[1]) {
+			const candidatePerms =
+				permissionsReferenceService.lookupPermissionForRecordType(recMatch[1]);
+			if (candidatePerms.length > 0) {
+				advice += `\n\n🎯 Likely Required Permission(s) for '${recMatch[1]}':\n`;
+				for (const p of candidatePerms) {
+					advice += `  - \`${p.id}\` (${p.name}) in Category: ${p.categoryLabel} [${p.category}]\n`;
+				}
+			}
+		}
+		return advice;
 	}
 
 	// Concurrency / Rate limit errors
@@ -282,7 +301,7 @@ export function sanitizeMessage(message: string): string {
 	if (!message) return message;
 	let sanitized = message;
 
-	// 正则过滤各种凭证敏感串
+	// Filter various credential patterns
 	sanitized = sanitized.replace(
 		/Bearer\s+[a-zA-Z0-9_\-.]+/gi,
 		"Bearer [REDACTED]",
@@ -308,7 +327,7 @@ export function sanitizeMessage(message: string): string {
 		'"refresh_token":"[REDACTED]"',
 	);
 
-	// 正则过滤操作系统的绝对工作目录与用户物理路径
+	// Filter absolute working directory and user home paths
 	const cwd = process.cwd();
 	if (cwd) {
 		const registrySafe = cwd.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -328,16 +347,16 @@ export function sanitizeMessage(message: string): string {
 }
 
 /**
- * 脱敏错误信息：优先提取 NetSuite 具体的 API 返回体（如 INVALID_SQL 详情），
- * 然后对其做脱敏，同时避免 Axios 大对象泄露敏感 config 凭证。
+ * Sanitize error object: prioritize extracting detailed NetSuite API responses (e.g. INVALID_SQL details),
+ * then mask sensitive information, avoiding leaking sensitive Axios config credentials.
  */
 export function sanitizeError(error: unknown): Error {
 	if (!error) return new Error("Unknown error");
 
-	// 1. 提取 NetSuite 精确内部报错详情以防止 INVALID_SQL 等信息流失
+	// 1. Extract precise NetSuite internal error details to prevent losing details like INVALID_SQL
 	const parsedError = parseNetSuiteError(error);
 
-	// 2. 对返回的报错 message 进行敏感路径与 credential 脱敏
+	// 2. Sanitize sensitive paths and credentials in error message
 	const cleanMsg = sanitizeMessage(parsedError.message);
 	const cleanErr = new Error(cleanMsg);
 

@@ -1,5 +1,6 @@
 import type { CallToolResult, Tool } from "@modelcontextprotocol/server";
 import { ProtocolError } from "@modelcontextprotocol/server";
+import type { z } from "zod";
 import {
 	classifyError,
 	recordToolError,
@@ -26,9 +27,18 @@ import {
 	handleUpdateRecord,
 } from "./recordHandlers.js";
 import {
+	AuthArgsSchema,
+	CreateRecordArgsSchema,
+	GetMetadataArgsSchema,
+	GetRecordArgsSchema,
+	GetScriptLogsArgsSchema,
+	GetSystemNotesArgsSchema,
 	LOCAL_TOOLS,
 	RunSuiteQLArgsSchema,
 	SANDBOX_MUTATION_TOOLS,
+	StatusArgsSchema,
+	UpdateRecordArgsSchema,
+	UploadFileArgsSchema,
 } from "./toolSchemas.js";
 import { type ToolHandlerDeps, textResult } from "./types.js";
 import { handleUploadFile } from "./uploadHandlers.js";
@@ -90,19 +100,327 @@ function enhanceDescription(
 const telemetryLogger = createLogger("telemetry");
 
 // ---------------------------------------------------------------------------
+// Declarative Tool Definition Registry
+// ---------------------------------------------------------------------------
+
+export interface ToolExecutionContext {
+	deps: ToolHandlerDeps;
+	reportProgress: (
+		progress: number,
+		total: number,
+		message?: string,
+	) => Promise<void>;
+	accountId?: string | undefined;
+	isSandbox: boolean;
+}
+
+export interface ToolDefinition<TSchema extends z.ZodTypeAny = z.ZodTypeAny> {
+	name: string;
+	schema: TSchema;
+	requiresAuth?: boolean;
+	sandboxOnly?: boolean;
+	execute: (
+		args: z.infer<TSchema>,
+		ctx: ToolExecutionContext,
+	) => Promise<CallToolResult>;
+}
+
+export interface AnyToolDefinition {
+	name: string;
+	schema: z.ZodTypeAny;
+	requiresAuth?: boolean | undefined;
+	sandboxOnly?: boolean | undefined;
+	execute: (
+		args: unknown,
+		ctx: ToolExecutionContext,
+	) => Promise<CallToolResult>;
+}
+
+export function defineTool<TSchema extends z.ZodTypeAny>(
+	def: ToolDefinition<TSchema>,
+): AnyToolDefinition {
+	return {
+		name: def.name,
+		schema: def.schema,
+		requiresAuth: def.requiresAuth,
+		sandboxOnly: def.sandboxOnly,
+		execute: (args: unknown, ctx: ToolExecutionContext) =>
+			def.execute(args as z.infer<TSchema>, ctx),
+	};
+}
+
+const TOOL_DEFINITIONS: AnyToolDefinition[] = [
+	defineTool({
+		name: "netsuite_auth",
+		schema: AuthArgsSchema,
+		requiresAuth: false,
+		execute: async (args, ctx) =>
+			handleAuth(
+				args as unknown as Record<string, unknown>,
+				ctx.deps.handleAuthentication,
+				ctx.deps.handleLogout,
+				ctx.deps.handleCacheRefresh,
+			),
+	}),
+	defineTool({
+		name: "netsuite_status",
+		schema: StatusArgsSchema,
+		requiresAuth: false,
+		execute: async (args, ctx) =>
+			handleStatus(
+				ctx.deps.oauthManager,
+				args as unknown as Record<string, unknown>,
+			),
+	}),
+	defineTool({
+		name: "netsuite_run_suiteql",
+		schema: RunSuiteQLArgsSchema,
+		requiresAuth: true,
+		execute: async (args, ctx) => {
+			const { sqlQuery, sqlQueries, limit, customRecordMappings } = args;
+			const queriesFromSingle = sqlQuery
+				? splitSuiteQLStatements(sqlQuery)
+				: [];
+			const queriesFromArray = Array.isArray(sqlQueries)
+				? sqlQueries
+						.filter(
+							(q): q is string => typeof q === "string" && q.trim().length > 0,
+						)
+						.flatMap((q) => splitSuiteQLStatements(q))
+				: [];
+			const queriesToRun = [...queriesFromSingle, ...queriesFromArray];
+
+			if (queriesToRun.length === 0) {
+				return textResult(
+					"❌ 'sqlQuery' or 'sqlQueries' parameter is required and cannot be empty.",
+					true,
+				);
+			}
+
+			if (queriesToRun.length > 10) {
+				return textResult(
+					`❌ [Batch Limit Exceeded] A maximum of 10 queries can be executed in parallel (received ${queriesToRun.length}).`,
+					true,
+				);
+			}
+
+			// Custom record rectype resolution if provided
+			const resolvedMappings = customRecordMappings
+				? structuredClone(customRecordMappings)
+				: undefined;
+			if (resolvedMappings) {
+				await Promise.all(
+					resolvedMappings.map(
+						async (mapping: {
+							rectype: string | number;
+							scriptId?: string | undefined;
+						}) => {
+							if (mapping && typeof mapping.rectype === "string") {
+								const resolvedId = await ctx.deps.resolveCustomRecordRectype(
+									mapping.rectype,
+								);
+								if (resolvedId !== null && resolvedId !== undefined) {
+									mapping.rectype = resolvedId;
+								} else {
+									throw new Error(
+										`Could not resolve rectype ID for custom record: ${mapping.rectype}`,
+									);
+								}
+							}
+						},
+					),
+				);
+			}
+
+			// Parallel multi-query execution
+			if (queriesToRun.length > 1) {
+				await ctx.reportProgress(
+					1,
+					queriesToRun.length + 1,
+					`Executing ${queriesToRun.length} SuiteQL queries in parallel...`,
+				);
+
+				const parallelResults = await Promise.all(
+					queriesToRun.map(async (queryStr, index) => {
+						try {
+							const queryParams: Record<string, unknown> = {
+								sqlQuery: queryStr,
+							};
+							if (limit !== undefined) {
+								queryParams.limit = limit;
+							}
+							if (resolvedMappings) {
+								queryParams.customRecordMappings = resolvedMappings;
+							}
+							const queryRes = await ctx.deps.mcpTools.executeTool(
+								"ns_runCustomSuiteQL",
+								queryParams,
+							);
+							const formatted = formatSuiteQLToCompactMarkdown(queryRes);
+							return {
+								index: index + 1,
+								query: queryStr,
+								success: true,
+								formatted,
+							};
+						} catch (err: unknown) {
+							const errorMsg = err instanceof Error ? err.message : String(err);
+							if (isPermissionError(errorMsg)) {
+								throw err;
+							}
+							return {
+								index: index + 1,
+								query: queryStr,
+								success: false,
+								error: formatSuiteQLErrorResponse(errorMsg, queryStr),
+							};
+						}
+					}),
+				);
+
+				let combinedMarkdown = `## 📊 Parallel SuiteQL Batch Execution (${queriesToRun.length} Queries)\n\n`;
+				let failCount = 0;
+				for (const res of parallelResults) {
+					combinedMarkdown += `### 🔹 Query #${res.index}\n\`\`\`sql\n${res.query}\n\`\`\`\n\n`;
+					if (res.success) {
+						combinedMarkdown += `${res.formatted}\n\n`;
+					} else {
+						failCount++;
+						combinedMarkdown += `${res.error}\n\n`;
+					}
+				}
+
+				if (failCount > 0 && failCount < parallelResults.length) {
+					telemetryLogger.warn(
+						{
+							tool: "netsuite_run_suiteql",
+							totalQueries: parallelResults.length,
+							failCount,
+							successCount: parallelResults.length - failCount,
+						},
+						"Partial batch failure in SuiteQL execution",
+					);
+				}
+
+				return textResult(
+					combinedMarkdown.trim(),
+					failCount === parallelResults.length,
+				);
+			}
+
+			// Single query execution (faithful execution, no auto-rewriting)
+			await ctx.reportProgress(
+				1,
+				2,
+				"Executing SuiteQL query against NetSuite...",
+			);
+			const queryParams: Record<string, unknown> = {
+				sqlQuery: queriesToRun[0],
+			};
+			if (limit !== undefined) {
+				queryParams.limit = limit;
+			}
+			if (resolvedMappings) {
+				queryParams.customRecordMappings = resolvedMappings;
+			}
+			const queryRes = await ctx.deps.mcpTools.executeTool(
+				"ns_runCustomSuiteQL",
+				queryParams,
+			);
+			return textResult(formatSuiteQLToCompactMarkdown(queryRes));
+		},
+	}),
+	defineTool({
+		name: "netsuite_get_metadata",
+		schema: GetMetadataArgsSchema,
+		requiresAuth: true,
+		execute: async (args, ctx) =>
+			handleGetMetadata(
+				args as unknown as Record<string, unknown>,
+				ctx.deps.mcpTools,
+			),
+	}),
+	defineTool({
+		name: "netsuite_get_record",
+		schema: GetRecordArgsSchema,
+		requiresAuth: true,
+		execute: async (args, ctx) =>
+			handleGetRecord(
+				args as unknown as Record<string, unknown>,
+				ctx.deps.mcpTools,
+				ctx.deps.oauthManager,
+				ctx.deps.resolveCustomRecordRectype,
+			),
+	}),
+	defineTool({
+		name: "netsuite_get_script_logs",
+		schema: GetScriptLogsArgsSchema,
+		requiresAuth: true,
+		execute: async (args, ctx) =>
+			handleGetScriptLogs(
+				args as unknown as Record<string, unknown>,
+				ctx.deps.mcpTools,
+			),
+	}),
+	defineTool({
+		name: "netsuite_get_system_notes",
+		schema: GetSystemNotesArgsSchema,
+		requiresAuth: true,
+		execute: async (args, ctx) =>
+			handleGetSystemNotes(
+				args as unknown as Record<string, unknown>,
+				ctx.deps.mcpTools,
+			),
+	}),
+	defineTool({
+		name: "netsuite_upload_file",
+		schema: UploadFileArgsSchema,
+		requiresAuth: true,
+		execute: async (args, ctx) =>
+			handleUploadFile(
+				args as unknown as Record<string, unknown>,
+				ctx.deps.oauthManager,
+				ctx.deps.projectRoot,
+			),
+	}),
+	defineTool({
+		name: "netsuite_create_record",
+		schema: CreateRecordArgsSchema,
+		requiresAuth: true,
+		sandboxOnly: true,
+		execute: async (args, ctx) =>
+			handleCreateRecord(
+				args as unknown as Record<string, unknown>,
+				ctx.deps.mcpTools,
+				ctx.deps.oauthManager,
+				ctx.deps.resolveCustomRecordRectype,
+			),
+	}),
+	defineTool({
+		name: "netsuite_update_record",
+		schema: UpdateRecordArgsSchema,
+		requiresAuth: true,
+		sandboxOnly: true,
+		execute: async (args, ctx) =>
+			handleUpdateRecord(
+				args as unknown as Record<string, unknown>,
+				ctx.deps.mcpTools,
+				ctx.deps.oauthManager,
+				ctx.deps.resolveCustomRecordRectype,
+			),
+	}),
+];
+
+const TOOL_MAP = new Map<string, AnyToolDefinition>(
+	TOOL_DEFINITIONS.map((def) => [def.name, def]),
+);
+
+// ---------------------------------------------------------------------------
 // Handler Registration (8 Authoritative Tools)
 // ---------------------------------------------------------------------------
 
 export function registerToolHandlers(deps: ToolHandlerDeps): void {
-	const {
-		server,
-		oauthManager,
-		mcpTools,
-		handleAuthentication,
-		handleLogout,
-		handleCacheRefresh,
-		resolveCustomRecordRectype,
-	} = deps;
+	const { server, oauthManager } = deps;
 
 	// --- tools/list handler ---
 	server.setRequestHandler("tools/list", async () => {
@@ -219,235 +537,72 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
 		};
 
 		try {
-			const result = await (async (): Promise<CallToolResult> => {
-				// 1. netsuite_auth — Login, Logout & Cache Refresh
-				if (name === "netsuite_auth") {
-					return await handleAuth(
-						safeArgs,
-						handleAuthentication,
-						handleLogout,
-						handleCacheRefresh,
-					);
-				}
+			const tool = TOOL_MAP.get(name);
+			if (!tool) {
+				return await recordErrorIfPresent(
+					textResult(
+						`❌ Unknown tool: '${name}'. Available tools: ${LOCAL_TOOLS.map((t) => t.name).join(", ")}`,
+						true,
+					),
+				);
+			}
 
-				// 2. netsuite_status — Comprehensive diagnostic health dashboard
-				if (name === "netsuite_status") {
-					return await handleStatus(oauthManager, safeArgs);
-				}
-
-				// All other tools require an authenticated NetSuite session
+			// Pre-flight authentication check
+			if (tool.requiresAuth !== false) {
 				const isAuthenticated = await oauthManager.hasValidSession();
 				if (!isAuthenticated) {
-					return textResult(
-						"❌ Not authenticated. Please use the 'netsuite_auth' tool to log in first.",
+					return await recordErrorIfPresent(
+						textResult(
+							"❌ Not authenticated. Please use the 'netsuite_auth' tool to log in first.",
+							true,
+						),
+					);
+				}
+			}
+
+			// Dual-gate production write protection for sandbox-only mutation tools
+			let detectedId: string | undefined;
+			let isSandbox = false;
+
+			if (tool.sandboxOnly) {
+				try {
+					detectedId =
+						(await oauthManager.getAccountId()) ||
+						process.env.NETSUITE_ACCOUNT_ID;
+				} catch {
+					// Non-fatal
+				}
+				isSandbox = detectedId ? isSandboxAccount(detectedId) : false;
+
+				if (!isSandbox) {
+					return await recordErrorIfPresent(
+						textResult(
+							`⛔ [Production Safety Violation] Tool '${name}' is restricted strictly to Sandbox environments. Writing to Production via MCP mutation tools is physically prohibited.`,
+							true,
+						),
+					);
+				}
+			}
+
+			// Zod schema parsing
+			const parsed = tool.schema.safeParse(safeArgs);
+			if (!parsed.success) {
+				return await recordErrorIfPresent(
+					textResult(
+						`❌ Invalid arguments: ${parsed.error.issues[0]?.message}`,
 						true,
-					);
-				}
-
-				// 3. netsuite_run_suiteql — Single authoritative SuiteQL execution tool
-				if (name === "netsuite_run_suiteql") {
-					const parsed = RunSuiteQLArgsSchema.safeParse(safeArgs);
-					if (!parsed.success) {
-						return textResult(
-							`❌ Invalid arguments: ${parsed.error.issues[0]?.message}`,
-							true,
-						);
-					}
-					const { sqlQuery, sqlQueries, limit, customRecordMappings } =
-						parsed.data;
-					const rawQuery = sqlQuery || "";
-					let queriesToRun = splitSuiteQLStatements(rawQuery);
-					if (queriesToRun.length === 0 && Array.isArray(sqlQueries)) {
-						queriesToRun = sqlQueries
-							.filter(
-								(q): q is string =>
-									typeof q === "string" && q.trim().length > 0,
-							)
-							.map((q) => q.trim());
-					}
-
-					if (queriesToRun.length === 0) {
-						return textResult(
-							"❌ 'sqlQuery' parameter is required and cannot be empty.",
-							true,
-						);
-					}
-
-					if (queriesToRun.length > 10) {
-						return textResult(
-							`❌ [Batch Limit Exceeded] A maximum of 10 queries can be executed in parallel (received ${queriesToRun.length}).`,
-							true,
-						);
-					}
-
-					// Custom record rectype resolution if provided
-					const resolvedMappings = customRecordMappings
-						? [...customRecordMappings]
-						: undefined;
-					if (resolvedMappings) {
-						for (const mapping of resolvedMappings) {
-							if (mapping && typeof mapping.rectype === "string") {
-								const resolvedId = await resolveCustomRecordRectype(
-									mapping.rectype,
-								);
-								if (resolvedId !== null && resolvedId !== undefined) {
-									mapping.rectype = resolvedId;
-								} else {
-									throw new Error(
-										`Could not resolve rectype ID for custom record: ${mapping.rectype}`,
-									);
-								}
-							}
-						}
-					}
-
-					// Parallel multi-query execution
-					if (queriesToRun.length > 1) {
-						await reportProgress(
-							1,
-							queriesToRun.length + 1,
-							`Executing ${queriesToRun.length} SuiteQL queries in parallel...`,
-						);
-
-						const parallelResults = await Promise.all(
-							queriesToRun.map(async (queryStr, index) => {
-								try {
-									const queryParams: Record<string, unknown> = {
-										sqlQuery: queryStr,
-									};
-									if (limit !== undefined) {
-										queryParams.limit = limit;
-									}
-									if (resolvedMappings) {
-										queryParams.customRecordMappings = resolvedMappings;
-									}
-									const queryRes = await mcpTools.executeTool(
-										"ns_runCustomSuiteQL",
-										queryParams,
-									);
-									const formatted = formatSuiteQLToCompactMarkdown(queryRes);
-									return {
-										index: index + 1,
-										query: queryStr,
-										success: true,
-										formatted,
-									};
-								} catch (err: unknown) {
-									const errorMsg =
-										err instanceof Error ? err.message : String(err);
-									if (isPermissionError(errorMsg)) {
-										throw err;
-									}
-									return {
-										index: index + 1,
-										query: queryStr,
-										success: false,
-										error: formatSuiteQLErrorResponse(errorMsg, queryStr),
-									};
-								}
-							}),
-						);
-
-						let combinedMarkdown = `## 📊 Parallel SuiteQL Batch Execution (${queriesToRun.length} Queries)\n\n`;
-						let failCount = 0;
-						for (const res of parallelResults) {
-							combinedMarkdown += `### 🔹 Query #${res.index}\n\`\`\`sql\n${res.query}\n\`\`\`\n\n`;
-							if (res.success) {
-								combinedMarkdown += `${res.formatted}\n\n`;
-							} else {
-								failCount++;
-								combinedMarkdown += `${res.error}\n\n`;
-							}
-						}
-						return textResult(
-							combinedMarkdown.trim(),
-							failCount === parallelResults.length,
-						);
-					}
-
-					// Single query execution (faithful execution, no auto-rewriting)
-					await reportProgress(
-						1,
-						2,
-						"Executing SuiteQL query against NetSuite...",
-					);
-					const queryParams: Record<string, unknown> = {
-						sqlQuery: queriesToRun[0],
-					};
-					if (limit !== undefined) {
-						queryParams.limit = limit;
-					}
-					if (resolvedMappings) {
-						queryParams.customRecordMappings = resolvedMappings;
-					}
-					const queryRes = await mcpTools.executeTool(
-						"ns_runCustomSuiteQL",
-						queryParams,
-					);
-					return textResult(formatSuiteQLToCompactMarkdown(queryRes));
-				}
-
-				// 4. netsuite_get_metadata — Single authoritative table & schema reconnaissance
-				if (name === "netsuite_get_metadata") {
-					return await handleGetMetadata(safeArgs, mcpTools);
-				}
-
-				// 5. netsuite_get_record — Single authoritative record fetch & inspection
-				if (name === "netsuite_get_record") {
-					return await handleGetRecord(
-						safeArgs,
-						mcpTools,
-						oauthManager,
-						resolveCustomRecordRectype,
-					);
-				}
-
-				// 6. netsuite_get_script_logs — SuiteScript logs debugging
-				if (name === "netsuite_get_script_logs") {
-					return await handleGetScriptLogs(safeArgs, mcpTools);
-				}
-
-				// 7. netsuite_get_system_notes — Standalone audit trail (Pitfall 11)
-				if (name === "netsuite_get_system_notes") {
-					return await handleGetSystemNotes(safeArgs, mcpTools);
-				}
-
-				// 8. netsuite_upload_file — SuiteCloud file upload with syntax pre-flight
-				if (name === "netsuite_upload_file") {
-					return await handleUploadFile(
-						safeArgs,
-						oauthManager,
-						deps.projectRoot,
-					);
-				}
-
-				// 9. netsuite_create_record — Record creation in Sandbox
-				if (name === "netsuite_create_record") {
-					return await handleCreateRecord(
-						safeArgs,
-						mcpTools,
-						oauthManager,
-						resolveCustomRecordRectype,
-					);
-				}
-
-				// 10. netsuite_update_record — Record update in Sandbox
-				if (name === "netsuite_update_record") {
-					return await handleUpdateRecord(
-						safeArgs,
-						mcpTools,
-						oauthManager,
-						resolveCustomRecordRectype,
-					);
-				}
-
-				// Unknown tool rejection
-				return textResult(
-					`❌ Unknown tool: '${name}'. Available tools: ${LOCAL_TOOLS.map((t) => t.name).join(", ")}`,
-					true,
+					),
 				);
-			})();
+			}
 
+			const context: ToolExecutionContext = {
+				deps,
+				reportProgress,
+				accountId: detectedId,
+				isSandbox,
+			};
+
+			const result = await tool.execute(parsed.data, context);
 			return await recordErrorIfPresent(result);
 		} catch (error: unknown) {
 			if (error instanceof ProtocolError) {

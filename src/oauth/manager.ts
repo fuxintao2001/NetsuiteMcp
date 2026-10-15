@@ -3,6 +3,7 @@ import type { RedisLockProvider } from "../cache/redisLock.js";
 import { openBrowser } from "../utils/browserLauncher.js";
 import { getKnownClientId } from "../utils/constants.js";
 import { formatNetSuiteAccountHost } from "../utils/environment.js";
+import { createLogger } from "../utils/logger.js";
 import { TokenRefreshScheduler } from "../utils/resilience.js";
 import { CallbackServer } from "./callbackServer.js";
 import type { PKCEChallenge } from "./pkce.js";
@@ -14,6 +15,8 @@ import {
 	shouldRefreshToken,
 	TokenRefreshError,
 } from "./tokenExchange.js";
+
+const logger = createLogger("oauth");
 
 interface OAuthManagerConfig {
 	storagePath?: string;
@@ -231,13 +234,35 @@ export class OAuthManager {
 		const accountId =
 			session?.config?.accountId || session?.tokens?.accountId || "unknown";
 		const lockResource = `token_refresh:${formatNetSuiteAccountHost(accountId)}`;
-		let lockId: unknown = null;
+		let redisLock: unknown = null;
+		let releaseFileLock: (() => Promise<void>) | null = null;
 
 		try {
-			// Acquire Redis distributed lock
+			// 1. Acquire local cross-process file lock (barrier for multi-instance / daemons)
+			try {
+				releaseFileLock = await this.storage.acquireLock(20000);
+			} catch (fileLockErr) {
+				logger.warn(
+					`File lock acquisition warning: ${fileLockErr instanceof Error ? fileLockErr.message : String(fileLockErr)}`,
+				);
+			}
+
+			// 2. Acquire Redis distributed lock
 			if (this.lockProvider) {
-				lockId = await this.lockProvider.acquire(lockResource);
-				if (!lockId) {
+				redisLock = await this.lockProvider.acquire(lockResource, 25000);
+				if (!redisLock) {
+					// Wait-Reload-Reuse: Before giving up, re-check session if another process refreshed it
+					const checkedSession = await this.storage.load(true);
+					if (
+						checkedSession?.tokens &&
+						(checkedSession.tokens.access_token !== tokenToRefresh ||
+							!shouldRefreshToken(checkedSession.tokens))
+					) {
+						logger.info(
+							"Token was refreshed by another process while waiting for Redis lock. Reusing new token.",
+						);
+						return checkedSession.tokens.access_token;
+					}
 					throw new TokenRefreshError(
 						"Failed to acquire Redis lock for token refresh",
 						true,
@@ -245,8 +270,8 @@ export class OAuthManager {
 				}
 			}
 
-			// Reload session from disk after lock is acquired to check for concurrent updates
-			const currentSession = await this.storage.load();
+			// 3. Reload session from disk after lock is acquired to check for concurrent updates (Wait-Reload-Reuse)
+			const currentSession = await this.storage.load(true);
 			if (currentSession?.tokens) {
 				const currentToken = currentSession.tokens.access_token;
 				// If the token has already been refreshed by another process, reuse it
@@ -254,9 +279,7 @@ export class OAuthManager {
 					tokenToRefresh !== currentToken &&
 					!shouldRefreshToken(currentSession.tokens)
 				) {
-					console.error(
-						"🔄 Token was refreshed by another process concurrently.",
-					);
+					logger.info("Token was refreshed by another process concurrently.");
 					return currentToken;
 				}
 				// Also check if refresh_token changed (rotation by another process)
@@ -264,12 +287,11 @@ export class OAuthManager {
 					session.tokens?.refresh_token &&
 					currentSession.tokens.refresh_token !== session.tokens.refresh_token
 				) {
-					console.error(
-						"🔄 Refresh token was rotated by another process. Using their result.",
+					logger.info(
+						"Refresh token was rotated by another process. Using their result.",
 					);
 					return currentSession.tokens.access_token;
 				}
-				// Update the session in our scope
 				session = currentSession;
 			}
 
@@ -283,19 +305,17 @@ export class OAuthManager {
 			const oldRT = session.tokens.refresh_token?.slice(-8) || "unknown";
 			const newTokens = await refreshAccessToken(session.tokens);
 			const newRT = newTokens.refresh_token?.slice(-8) || "unchanged";
-			console.error(
-				`🔄 Token rotation: old_rt=...${oldRT} → new_rt=...${newRT}`,
-			);
+			logger.info(`Token rotation: old_rt=...${oldRT} → new_rt=...${newRT}`);
 
 			// Token Rotation safety: verify refresh_token hasn't been rotated during our HTTP request
-			const preWriteSession = await this.storage.load();
+			const preWriteSession = await this.storage.load(true);
 			if (
 				preWriteSession?.tokens?.refresh_token &&
 				session.tokens?.refresh_token &&
 				preWriteSession.tokens.refresh_token !== session.tokens.refresh_token
 			) {
-				console.error(
-					"⚠️ Refresh token was rotated by another process during our refresh. Using their result.",
+				logger.warn(
+					"Refresh token was rotated by another process during our refresh. Using their result.",
 				);
 				return preWriteSession.tokens.access_token;
 			}
@@ -310,22 +330,26 @@ export class OAuthManager {
 			return newTokens.access_token;
 		} catch (error: unknown) {
 			if (error instanceof TokenRefreshError && !error.recoverable) {
-				console.error(
-					"🔒 Refresh token expired — marking session unauthenticated",
+				logger.warn(
+					"Refresh token expired or invalid — marking session unauthenticated and unrecoverable",
 				);
-				// Mark session as unauthenticated while preserving config for potential re-auth
-				const current = await this.storage.load();
-				if (current && current.authenticated !== false) {
+				// Mark session as unauthenticated and unrecoverable while preserving config
+				const current = await this.storage.load(true);
+				if (current) {
 					await this.storage.save({
 						...current,
 						authenticated: false,
+						unrecoverable: true,
 					});
 				}
 			}
 			throw error;
 		} finally {
-			if (lockId && this.lockProvider) {
-				await this.lockProvider.release(lockId);
+			if (redisLock && this.lockProvider) {
+				await this.lockProvider.release(redisLock).catch(() => {});
+			}
+			if (releaseFileLock) {
+				await releaseFileLock().catch(() => {});
 			}
 		}
 	}
@@ -356,25 +380,28 @@ export class OAuthManager {
 		}
 
 		try {
-			console.error(
-				`🔄 [OAuthManager] Attempting silent browser re-authentication for account ${accountId}...`,
+			logger.info(
+				`Attempting silent browser re-authentication for account ${accountId}...`,
 			);
 			await this.startAuthFlow({ accountId, clientId }, timeoutMs);
 			const refreshed = await this.storage.load();
 			return !!(refreshed?.authenticated && refreshed?.tokens);
 		} catch (err: unknown) {
 			const message = err instanceof Error ? err.message : String(err);
-			console.error(
-				`⚠️ [OAuthManager] Silent re-authentication did not complete: ${message}`,
-			);
+			logger.warn(`Silent re-authentication did not complete: ${message}`);
 			return false;
 		}
 	}
 
 	/**
-	 * Ensure token is valid, auto-refresh if expiring soon
+	 * Ensure token is valid, auto-refresh if expiring soon.
+	 * When allowInteractive is false, background tasks will never trigger browser windows.
 	 */
-	async ensureValidToken(): Promise<string> {
+	async ensureValidToken(options?: {
+		allowInteractive?: boolean;
+	}): Promise<string> {
+		const allowInteractive = options?.allowInteractive ?? true;
+
 		// 1. Instantly return running promise to resolve concurrent race condition
 		if (this.refreshPromise) {
 			return this.refreshPromise;
@@ -385,14 +412,16 @@ export class OAuthManager {
 			try {
 				let session = await this.storage.load();
 
-				// If not authenticated or no tokens, attempt silent re-authentication before failing
+				// If not authenticated or no tokens, attempt silent re-authentication before failing (only if interactive allowed)
 				if (!session?.tokens || !session.authenticated) {
-					console.error(
-						"⚠️ No active authenticated session, attempting silent re-authentication...",
-					);
-					const silentSuccess = await this.trySilentReauth(60000);
-					if (silentSuccess) {
-						session = await this.storage.load();
+					if (allowInteractive && !session?.unrecoverable) {
+						logger.info(
+							"No active authenticated session, attempting silent re-authentication...",
+						);
+						const silentSuccess = await this.trySilentReauth(60000);
+						if (silentSuccess) {
+							session = await this.storage.load();
+						}
 					}
 				}
 
@@ -403,7 +432,7 @@ export class OAuthManager {
 				}
 
 				if (shouldRefreshToken(session.tokens)) {
-					console.error("⚠️ Token expiring soon, refreshing...");
+					logger.info("Token expiring soon, refreshing...");
 					try {
 						return await this.executeTokenRefresh(
 							session,
@@ -411,11 +440,12 @@ export class OAuthManager {
 						);
 					} catch (refreshError: unknown) {
 						if (
+							allowInteractive &&
 							refreshError instanceof TokenRefreshError &&
 							!refreshError.recoverable
 						) {
-							console.error(
-								"🔄 Refresh token expired/invalid, attempting silent re-authentication via browser SSO...",
+							logger.info(
+								"Refresh token expired/invalid, attempting silent re-authentication via browser SSO...",
 							);
 							const silentSuccess = await this.trySilentReauth(60000);
 							if (silentSuccess) {
@@ -458,7 +488,7 @@ export class OAuthManager {
 
 		// If the token was already refreshed by another concurrent request, return it immediately
 		if (failedToken && currentToken !== failedToken) {
-			console.error("🔄 Token was already refreshed by another request.");
+			logger.info("Token was already refreshed by another request.");
 			return currentToken;
 		}
 
@@ -467,7 +497,7 @@ export class OAuthManager {
 			return this.refreshPromise;
 		}
 
-		console.error("🔄 Force-refreshing access token...");
+		logger.info("Force-refreshing access token...");
 		this.refreshPromise = this.executeTokenRefresh(
 			session,
 			currentToken,
@@ -484,7 +514,7 @@ export class OAuthManager {
 		const isAuth = await this.storage.isAuthenticated();
 		if (isAuth) return true;
 
-		// If tokens exist with refresh_token, attempt quick auto-recovery
+		// If tokens exist with refresh_token and session is not unrecoverable, attempt quick auto-recovery
 		const session = await this.storage.load();
 		if (session?.tokens?.refresh_token && !session.unrecoverable) {
 			try {
@@ -561,99 +591,55 @@ export class OAuthManager {
 	 * already refreshed the token while we were waiting.
 	 */
 	async tryAutoRecover(maxRetries = 8): Promise<void> {
-		let session = await this.storage.load();
-		if (!session?.tokens?.refresh_token) return;
-
-		let lockId: unknown = null;
-		const accountId =
-			session?.config?.accountId || session?.tokens?.accountId || "unknown";
-		const lockResource = `token_refresh:${formatNetSuiteAccountHost(accountId)}`;
+		const initialSession = await this.storage.load();
+		if (
+			!initialSession?.tokens?.refresh_token ||
+			initialSession.unrecoverable
+		) {
+			return;
+		}
 
 		for (let attempt = 1; attempt <= maxRetries; attempt++) {
 			try {
-				console.error(`🔄 Auto-recovery attempt ${attempt}/${maxRetries}...`);
-
-				if (this.lockProvider) {
-					lockId = await this.lockProvider.acquire(lockResource);
-					if (!lockId) {
-						throw new TokenRefreshError(
-							"Failed to acquire Redis lock for auto-recovery",
-							true,
-						);
-					}
-				}
-
-				// Reload session from disk after lock is acquired to check if another process recovered it
-				const currentSession = await this.storage.load();
-				if (currentSession?.tokens && currentSession.authenticated) {
-					if (!shouldRefreshToken(currentSession.tokens)) {
-						console.error(
-							"🔄 Session was already recovered by another process concurrently.",
-						);
-						return;
-					}
-					// Update the session in our scope
-					session = currentSession;
-				}
-
-				const tokensToRefresh = currentSession?.tokens || session.tokens;
-				if (!tokensToRefresh) return;
-
-				const oldRT = tokensToRefresh.refresh_token?.slice(-8) || "unknown";
-				const newTokens = await refreshAccessToken(tokensToRefresh);
-				const newRT = newTokens.refresh_token?.slice(-8) || "unchanged";
-				console.error(
-					`🔄 Auto-recovery token rotation: old_rt=...${oldRT} → new_rt=...${newRT}`,
-				);
-
-				// Token Rotation safety: verify refresh_token hasn't been rotated during our HTTP request
-				const preWriteSession = await this.storage.load();
+				logger.info(`Auto-recovery attempt ${attempt}/${maxRetries}...`);
+				const latestSession = await this.storage.load();
 				if (
-					preWriteSession?.tokens?.refresh_token &&
-					tokensToRefresh.refresh_token &&
-					preWriteSession.tokens.refresh_token !== tokensToRefresh.refresh_token
+					!latestSession?.tokens?.refresh_token ||
+					latestSession.unrecoverable
 				) {
-					console.error(
-						"⚠️ Refresh token was rotated by another process during our auto-recovery. Using their result.",
+					return;
+				}
+				if (
+					latestSession.authenticated &&
+					!shouldRefreshToken(latestSession.tokens)
+				) {
+					logger.info(
+						"Session was already recovered by another process concurrently.",
 					);
 					return;
 				}
 
-				await this.storage.save({
-					...(currentSession || session),
-					previous_tokens: (currentSession || session).tokens,
-					tokens: newTokens,
-					authenticated: true,
-					unrecoverable: false,
-				});
-				console.error("✅ Auto-recovery successful");
+				await this.executeTokenRefresh(
+					latestSession,
+					latestSession.tokens.access_token,
+				);
+				logger.info("Auto-recovery successful");
 				return;
 			} catch (error: unknown) {
 				// Unrecoverable: refresh token itself is expired/invalid — don't retry in this loop
 				if (error instanceof TokenRefreshError && !error.recoverable) {
-					console.error(
-						"🔒 Refresh token expired or invalid — auto-recovery stopped",
+					logger.warn(
+						"Refresh token expired or invalid — auto-recovery stopped",
 					);
-					const current = await this.storage.load();
-					if (current && current.authenticated !== false) {
-						await this.storage.save({
-							...current,
-							authenticated: false,
-						});
-					}
 					throw error;
 				}
+
 				// Transient: network timeout, DNS failure, etc. — retry after exponential backoff
 				if (attempt < maxRetries) {
-					// Exponential backoff: 3s, 6s, 12s, capped at 15s
 					const delay = Math.min(3000 * 2 ** (attempt - 1), 15000);
-					console.error(
-						`⚠️ Auto-recovery attempt ${attempt} failed (transient error), retrying in ${delay / 1000}s...`,
+					logger.warn(
+						`Auto-recovery attempt ${attempt} failed (transient error), retrying in ${delay / 1000}s...`,
 					);
-					if (lockId && this.lockProvider) {
-						await this.lockProvider.release(lockId);
-						lockId = null;
-					}
 					await new Promise((resolve) => setTimeout(resolve, delay));
 
 					// Re-check session before next attempt — daemon may have refreshed it
@@ -663,19 +649,14 @@ export class OAuthManager {
 						refreshedSession.tokens &&
 						!shouldRefreshToken(refreshedSession.tokens)
 					) {
-						console.error(
-							"🔄 Session recovered by keepalive daemon during backoff wait.",
+						logger.info(
+							"Session recovered by keepalive daemon during backoff wait.",
 						);
 						return;
 					}
 				} else {
-					console.error(`⚠️ Auto-recovery failed after ${maxRetries} attempts`);
+					logger.warn(`Auto-recovery failed after ${maxRetries} attempts`);
 					throw error;
-				}
-			} finally {
-				if (lockId && this.lockProvider) {
-					await this.lockProvider.release(lockId);
-					lockId = null;
 				}
 			}
 		}

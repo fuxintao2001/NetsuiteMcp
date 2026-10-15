@@ -375,6 +375,125 @@ describe("OAuth Module", () => {
 				expect(token).toBe("refreshed-access-token");
 				expect(httpPostSpy).toHaveBeenCalled();
 			});
+
+			it("should handle 5 concurrent OAuthManager instances refreshing at the same time without duplicate HTTP requests (file lock barrier)", async () => {
+				const mockSession = {
+					authenticated: true,
+					tokens: {
+						access_token: "expired-access-token",
+						refresh_token: "rotatable-refresh-token",
+						expires_in: 3600,
+						expires_at: Date.now() - 100, // expired
+						accountId: "123456",
+						clientId: "my-client-id",
+					},
+				};
+
+				await fs.mkdir(testStoragePath, { recursive: true });
+				await fs.writeFile(
+					path.join(testStoragePath, "session.json"),
+					JSON.stringify(mockSession),
+					"utf-8",
+				);
+
+				httpPostSpy.mockClear();
+				httpPostSpy.mockImplementation(async () => {
+					// Simulate network latency of 30ms
+					await new Promise((resolve) => setTimeout(resolve, 30));
+					return {
+						data: {
+							access_token: "single-refreshed-token",
+							refresh_token: "new-rotated-refresh-token",
+							expires_in: 3600,
+						},
+					} as any;
+				});
+
+				// Create 5 separate OAuthManager instances pointing to the same storagePath
+				const managers = Array.from(
+					{ length: 5 },
+					() => new OAuthManager({ storagePath: testStoragePath }),
+				);
+
+				const results = await Promise.all(
+					managers.map((m) => m.ensureValidToken({ allowInteractive: false })),
+				);
+
+				// All 5 managers must receive the exact same new access_token
+				expect(results).toHaveLength(5);
+				for (const res of results) {
+					expect(res).toBe("single-refreshed-token");
+				}
+
+				// Underlying refresh HTTP call was executed only once
+				expect(httpPostSpy).toHaveBeenCalledTimes(1);
+			});
+
+			it("should handle 5 concurrent OAuthManager instances with RedisLockProvider refreshing at the same time", async () => {
+				const mockSession = {
+					authenticated: true,
+					tokens: {
+						access_token: "expired-access-token-redis",
+						refresh_token: "rotatable-refresh-token-redis",
+						expires_in: 3600,
+						expires_at: Date.now() - 100,
+						accountId: "123456",
+						clientId: "my-client-id",
+					},
+				};
+
+				await fs.mkdir(testStoragePath, { recursive: true });
+				await fs.writeFile(
+					path.join(testStoragePath, "session.json"),
+					JSON.stringify(mockSession),
+					"utf-8",
+				);
+
+				httpPostSpy.mockClear();
+				httpPostSpy.mockImplementation(async () => {
+					await new Promise((resolve) => setTimeout(resolve, 30));
+					return {
+						data: {
+							access_token: "redis-locked-refreshed-token",
+							refresh_token: "new-rotated-refresh-token-redis",
+							expires_in: 3600,
+						},
+					} as any;
+				});
+
+				// Mock redis lock provider with mutex
+				let isLocked = false;
+				const mockLockProvider = {
+					acquire: vi.fn(async () => {
+						while (isLocked) {
+							await new Promise((resolve) => setTimeout(resolve, 20));
+						}
+						isLocked = true;
+						return { id: "mock-lock" };
+					}),
+					release: vi.fn(async () => {
+						isLocked = false;
+						return true;
+					}),
+				};
+
+				const managers = Array.from({ length: 5 }, () => {
+					const m = new OAuthManager({ storagePath: testStoragePath });
+					m.setLockProvider(mockLockProvider as any);
+					return m;
+				});
+
+				const results = await Promise.all(
+					managers.map((m) => m.ensureValidToken({ allowInteractive: false })),
+				);
+
+				expect(results).toHaveLength(5);
+				for (const res of results) {
+					expect(res).toBe("redis-locked-refreshed-token");
+				}
+
+				expect(httpPostSpy).toHaveBeenCalledTimes(1);
+			});
 		});
 
 		describe("tryAutoRecover", () => {

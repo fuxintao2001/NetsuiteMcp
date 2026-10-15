@@ -1,12 +1,16 @@
 import fs from "node:fs/promises";
 import { basename, join } from "node:path";
 import type { Server } from "@modelcontextprotocol/server";
+import yaml from "yaml";
 import { getSkillsDir } from "../utils/environment.js";
+import { formatGovernanceUnitsMarkdown } from "../utils/governanceReference.js";
+import { permissionsReferenceService } from "../utils/permissionsReference.js";
 import { recordsReferenceService } from "../utils/recordsReference.js";
+import { formatSuiteQLBuiltinsMarkdown } from "../utils/suiteqlBuiltinsReference.js";
 import { SUITEQL_TEMPLATES } from "../utils/suiteqlTemplates.js";
 
 // ---------------------------------------------------------------------------
-// Helper: Parse YAML frontmatter simply
+// Helper: Parse YAML frontmatter using yaml library
 // ---------------------------------------------------------------------------
 function parseFrontmatter(content: string): {
 	name?: string;
@@ -14,44 +18,22 @@ function parseFrontmatter(content: string): {
 } {
 	const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
 	if (!match?.[1]) return {};
-	const frontmatterText = match[1];
-	const lines = frontmatterText.split("\n");
-	const result: { name?: string; description?: string } = {};
-
-	let currentKey: "name" | "description" | null = null;
-	for (const line of lines) {
-		const trimmed = line.trim();
-		if (!trimmed) continue;
-
-		const nameMatch = line.match(/^name:\s*(.*)/);
-		const descMatch = line.match(/^description:\s*(.*)/);
-
-		if (nameMatch) {
-			const val = nameMatch[1];
-			if (val !== undefined) {
-				result.name = val.trim();
-				currentKey = "name";
+	try {
+		const parsed = yaml.parse(match[1]) as Record<string, unknown>;
+		if (parsed && typeof parsed === "object") {
+			const res: { name?: string; description?: string } = {};
+			if (typeof parsed.name === "string") {
+				res.name = parsed.name.trim();
 			}
-		} else if (descMatch) {
-			const val = descMatch[1];
-			if (val !== undefined) {
-				result.description = val.trim();
-				currentKey = "description";
+			if (typeof parsed.description === "string") {
+				res.description = parsed.description.trim();
 			}
-		} else if (line.match(/^[a-zA-Z0-9_-]+:/)) {
-			currentKey = null;
-		} else if (currentKey && line.startsWith(" ")) {
-			if (currentKey === "description" && result.description) {
-				result.description += ` ${trimmed}`;
-			}
+			return res;
 		}
+	} catch {
+		// Non-fatal
 	}
-
-	if (result.name) result.name = result.name.replace(/^['"]|['"]$/g, "");
-	if (result.description)
-		result.description = result.description.replace(/^['"]|['"]$/g, "");
-
-	return result;
+	return {};
 }
 
 interface SkillResourceItem {
@@ -112,6 +94,31 @@ export function registerResourceHandlers(
 				description:
 					"Production-ready HTML/Tailwind templates for NetSuite financial variance, " +
 					"transaction flow graphs, and multi-location inventory maps conforming to Antigravity theme standards.",
+				mimeType: "text/markdown",
+			},
+			{
+				uri: "netsuite://reference/permissions",
+				name: "Oracle NetSuite Official Standard Permissions Matrix Dictionary",
+				description:
+					"Complete standard permission matrix dictionary across 5 categories (ADMI, LIST, TRAN, REPO, REGT) " +
+					"with permkey IDs, official display names, and 403 permission self-healing diagnostic SOP.",
+				mimeType: "text/markdown",
+			},
+			{
+				uri: "netsuite://reference/suiteql-builtins",
+				name: "Oracle NetSuite Official SuiteQL Built-in Functions Reference",
+				description:
+					"Authoritative signatures, parameter schemas, SAFE Guide restrictions, and examples for " +
+					"NetSuite2.com SuiteQL built-in functions (BUILTIN.DF, BUILTIN.CF, BUILTIN.HIERARCHY, " +
+					"BUILTIN.PERIOD, BUILTIN.CONSOLIDATE, BUILTIN.RELATIVE_RANGES, BUILTIN.CURRENCY).",
+				mimeType: "text/markdown",
+			},
+			{
+				uri: "netsuite://safe/governance-units",
+				name: "Oracle SAFE Guide Official Governance Units & Limits Reference",
+				description:
+					"Authoritative governance unit consumption costs and execution limits from Oracle NetSuite " +
+					"SAFE Guide (2025.2). Includes script type limits, API operation unit costs, and SAFE optimization patterns.",
 				mimeType: "text/markdown",
 			},
 		];
@@ -249,6 +256,42 @@ export function registerResourceHandlers(
 						uri,
 						mimeType: "text/markdown",
 						text: md,
+					},
+				],
+			};
+		}
+
+		if (uri === "netsuite://reference/permissions") {
+			return {
+				contents: [
+					{
+						uri,
+						mimeType: "text/markdown",
+						text: permissionsReferenceService.formatPermissionsMarkdown(),
+					},
+				],
+			};
+		}
+
+		if (uri === "netsuite://reference/suiteql-builtins") {
+			return {
+				contents: [
+					{
+						uri,
+						mimeType: "text/markdown",
+						text: formatSuiteQLBuiltinsMarkdown(),
+					},
+				],
+			};
+		}
+
+		if (uri === "netsuite://safe/governance-units") {
+			return {
+				contents: [
+					{
+						uri,
+						mimeType: "text/markdown",
+						text: formatGovernanceUnitsMarkdown(),
 					},
 				],
 			};

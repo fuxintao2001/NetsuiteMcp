@@ -212,6 +212,35 @@ describe("SuiteCloudRunnerService", () => {
 		fs.rmSync(tmpDir, { recursive: true, force: true });
 	});
 
+	it("should strictly reject cross-environment auth matching between sandbox and production", async () => {
+		const tmpDir = path.join(process.cwd(), "temp-test-auth-env");
+		fs.mkdirSync(tmpDir, { recursive: true });
+		fs.writeFileSync(
+			path.join(tmpDir, "project.json"),
+			JSON.stringify({ defaultAuthId: "9260916-Adm-Prod" }),
+		);
+
+		vi.spyOn(
+			suitecloudRunnerService,
+			"getAvailableAuthIds",
+		).mockResolvedValueOnce([
+			{ authId: "9260916-Adm-Prod", account: "9260916", role: "Admin" },
+		]);
+
+		// Target account is sandbox 9260916_SB1, but configured and available is production 9260916
+		const res = await suitecloudRunnerService.syncProjectAuthId(
+			tmpDir,
+			"9260916_SB1",
+		);
+		// Must not match production auth to sandbox target
+		expect(res.matchedAuthId).toBeUndefined();
+		expect(res.warning).toContain(
+			"未找到匹配账号 '9260916_SB1' 的 SuiteCloud Auth ID",
+		);
+
+		fs.rmSync(tmpDir, { recursive: true, force: true });
+	});
+
 	it("should generate diagnostic recommendations on error", () => {
 		const tipsAuth = suitecloudRunnerService.diagnoseUploadError(
 			"MISSING_DEFAULT_AUTH_ID: No default auth id set",

@@ -204,10 +204,15 @@ export const GetScriptLogsArgsSchema = z.object({
 		.number()
 		.int()
 		.optional()
-		.transform((v) => (v !== undefined ? Math.min(Math.max(v, 1), 200) : 50))
+		.default(50)
 		.describe(
 			"Maximum number of log entries to return. Default: 50, Max: 200.",
 		),
+	format: z
+		.enum(["markdown", "compact_json"])
+		.optional()
+		.default("markdown")
+		.describe("Output format: 'markdown' (default) or 'compact_json'."),
 });
 export type GetScriptLogsArgs = z.infer<typeof GetScriptLogsArgsSchema>;
 
@@ -244,7 +249,7 @@ export const GetSystemNotesArgsSchema = z.object({
 		.number()
 		.int()
 		.optional()
-		.transform((v) => (v !== undefined ? Math.min(Math.max(v, 1), 100) : 50))
+		.default(50)
 		.describe(
 			"Maximum number of audit trail entries to return. Default: 50, Max: 100.",
 		),
@@ -396,6 +401,47 @@ export const UpdateRecordArgsSchema = z
 export type UpdateRecordArgs = z.infer<typeof UpdateRecordArgsSchema>;
 
 // ---------------------------------------------------------------------------
+// Automatic MCP InputSchema Derivation from Zod Schemas
+// ---------------------------------------------------------------------------
+
+/**
+ * Automatically derives standard MCP Tool inputSchema from a Zod Schema object,
+ * preserving all descriptions, types, enums, constraints, and required fields.
+ */
+export function createToolInputSchema<T extends z.ZodObject<z.ZodRawShape>>(
+	schema: T,
+): {
+	type: "object";
+	properties: Record<string, unknown>;
+	required?: string[];
+} {
+	const jsonSchema = z.toJSONSchema(schema) as {
+		properties?: Record<string, unknown>;
+	};
+	const required: string[] = [];
+	for (const [key, field] of Object.entries(schema.shape)) {
+		const candidate = field as unknown as { isOptional?: () => boolean };
+		if (typeof candidate.isOptional === "function") {
+			if (!candidate.isOptional()) {
+				required.push(key);
+			}
+		}
+	}
+	const result: {
+		type: "object";
+		properties: Record<string, unknown>;
+		required?: string[];
+	} = {
+		type: "object",
+		properties: jsonSchema.properties || {},
+	};
+	if (required.length > 0) {
+		result.required = required;
+	}
+	return result;
+}
+
+// ---------------------------------------------------------------------------
 // 8 Authoritative Tool Definitions for MCP Server Registration
 // ---------------------------------------------------------------------------
 
@@ -411,341 +457,70 @@ MANDATORY OFFICIAL SYNTAX RULES:
 6. AUDIT: NEVER JOIN 'systemnote' directly (causes 45s+ timeouts). Use 'netsuite_get_system_notes'.
 7. UNKNOWN SCHEMA: If not 100% sure of column names, MUST call 'netsuite_get_metadata' first before writing SQL.
 8. PARALLEL BATCHING: When retrieving multiple independent datasets, pass an array in 'sqlQueries' to execute concurrently in 1 turn.`,
-	inputSchema: {
-		type: "object" as const,
-		properties: {
-			sqlQuery: {
-				type: "string",
-				description:
-					"The SuiteQL query string to execute. Follows Oracle NetSuite dialect rules above. Supports multiple statements separated by ';'.",
-			},
-			sqlQueries: {
-				type: "array",
-				items: { type: "string" },
-				description:
-					"Optional array of independent SuiteQL query strings to execute concurrently in parallel in a single turn (max 10).",
-			},
-			limit: {
-				type: "number",
-				description: "Optional safe row limit (default: 100).",
-			},
-		},
-	},
+	inputSchema: createToolInputSchema(RunSuiteQLArgsSchema),
 };
 
 export const GET_METADATA_TOOL = {
 	name: "netsuite_get_metadata",
 	description:
 		"Inspect NetSuite database table schema, valid column names, and data types for SuiteQL and records. Supports single-turn parallel inspection of multiple tables via 'tables'. Powered by 2ms Redis cache and authoritative 272 records catalog.",
-	inputSchema: {
-		type: "object" as const,
-		properties: {
-			table: {
-				type: "string",
-				description:
-					"NetSuite database table name or record type ID (e.g. 'customer', 'transaction', 'transactionline', 'item', 'salesorder').",
-			},
-			tables: {
-				type: "array",
-				items: { type: "string" },
-				description:
-					"Optional array of NetSuite database table names or record type IDs to inspect concurrently in parallel in a single turn (max 10).",
-			},
-			keyword: {
-				type: "string",
-				description:
-					"Optional search keyword to filter column names, labels, or descriptions.",
-			},
-			source: {
-				type: "string",
-				enum: ["auto", "offline", "remote"],
-				description:
-					"Metadata source strategy: 'auto' (default, checks offline catalog first for standard records, remote SuiteQL for custom records), 'offline' (strictly use bundled 272 records catalog), or 'remote' (strictly query live NetSuite SuiteQL).",
-			},
-		},
-	},
+	inputSchema: createToolInputSchema(GetMetadataArgsSchema),
 };
 
 export const GET_RECORD_TOOL = {
 	name: "netsuite_get_record",
 	description:
 		"Retrieve and inspect one or multiple NetSuite records concurrently by numeric internal ID or document number (tranid). Returns cleaned header fields, custom fields, and active Web UI links.",
-	inputSchema: {
-		type: "object" as const,
-		properties: {
-			recordType: {
-				type: "string",
-				description:
-					"Record type (e.g. 'salesorder', 'customer', 'invoice', 'customrecord_xxx').",
-			},
-			id: {
-				type: "string",
-				description:
-					"Numeric internal ID (e.g. '12345') or document number (tranid, e.g. 'SO10023').",
-			},
-			ids: {
-				type: "array",
-				items: { type: "string" },
-				description:
-					"Optional array of numeric internal IDs or document numbers (tranid) to inspect concurrently in parallel in a single turn (max 10).",
-			},
-			includeSublists: {
-				type: "boolean",
-				description:
-					"Whether to include line items / sublists (default: true).",
-			},
-			linesMode: {
-				type: "string",
-				enum: ["all", "summary"],
-				description:
-					"Sublist line rendering mode: 'all' (default, full line details) or 'summary' (concise summary table of line counts).",
-			},
-			maxLines: {
-				type: "number",
-				description:
-					"Maximum number of sublist lines to return per sublist (default: 100, max: 500).",
-			},
-			lineFields: {
-				type: "array",
-				items: { type: "string" },
-				description:
-					"Optional array of specific sublist field IDs to include (e.g. ['item', 'quantity', 'amount']).",
-			},
-			format: {
-				type: "string",
-				enum: ["markdown", "compact_json"],
-				description: "Output format: 'markdown' (default) or 'compact_json'.",
-			},
-		},
-		required: ["recordType"],
-	},
+	inputSchema: createToolInputSchema(GetRecordArgsSchema),
 };
 
 export const SCRIPT_LOGS_TOOL = {
 	name: "netsuite_get_script_logs",
 	description:
 		"Query NetSuite SuiteScript execution logs (ScriptNote) by script, deployment, or record type with index optimization. Defaults to the last 7 days.",
-	inputSchema: {
-		type: "object" as const,
-		properties: {
-			recordType: {
-				type: "string",
-				description:
-					"Optional filter by NetSuite record type (e.g. 'salesorder', 'customer'). Resolves all scripts deployed to this record type.",
-			},
-			scriptId: {
-				type: "string",
-				description:
-					"Filter by script's Script ID (e.g. customscript_my_ue). Matches against Script.scriptid.",
-			},
-			scriptIds: {
-				type: "array",
-				items: { type: "string" },
-				description:
-					"Optional array of script Script IDs to query concurrently in parallel (max 10).",
-			},
-			type: {
-				type: "string",
-				enum: ["DEBUG", "AUDIT", "ERROR", "EMERGENCY"],
-				description: "Filter by log level.",
-			},
-			dateFrom: {
-				type: "string",
-				description: "Start date in YYYY-MM-DD format (inclusive).",
-			},
-			dateTo: {
-				type: "string",
-				description: "End date in YYYY-MM-DD format (inclusive).",
-			},
-			title: {
-				type: "string",
-				description: "Filter by log title keyword.",
-			},
-			detail: {
-				type: "string",
-				description: "Filter by log detail keyword.",
-			},
-			keyword: {
-				type: "string",
-				description: "Filter by log title or detail keyword.",
-			},
-			deploymentId: {
-				type: "string",
-				description: "Filter by deployment Script ID.",
-			},
-			limit: {
-				type: "number",
-				description: "Max log entries to return (default: 50, max: 200).",
-			},
-		},
-	},
+	inputSchema: createToolInputSchema(GetScriptLogsArgsSchema),
 };
 
 export const SYSTEM_NOTES_TOOL = {
 	name: "netsuite_get_system_notes",
 	description:
 		"Query system audit trail and field change history (SystemNote) for one or multiple records concurrently. Standalone indexed query preventing SAFE Pitfall 11 timeouts.",
-	inputSchema: {
-		type: "object" as const,
-		properties: {
-			recordType: {
-				type: "string",
-				description: "Optional record type (e.g. 'salesorder', 'customer').",
-			},
-			recordId: {
-				type: "string",
-				description: "Numeric internal ID or document number (tranid).",
-			},
-			recordIds: {
-				type: "array",
-				items: { type: "string" },
-				description:
-					"Optional array of numeric internal IDs or document numbers (tranid) to inspect audit trails concurrently in parallel in a single turn (max 10).",
-			},
-			limit: {
-				type: "number",
-				description: "Max audit entries to return (default: 50).",
-			},
-		},
-	},
+	inputSchema: createToolInputSchema(GetSystemNotesArgsSchema),
 };
 
 export const UPLOAD_FILE_TOOL = {
 	name: "netsuite_upload_file",
 	description:
 		"Upload SuiteScript or FileCabinet files to NetSuite via SuiteCloud CLI. Before invocation, confirmation must be requested via ask_question displaying '<folder>/<fileName>' (e.g. '9260916/script.js'). Includes syntax pre-flight check and production write barrier.",
-	inputSchema: {
-		type: "object" as const,
-		properties: {
-			paths: {
-				oneOf: [
-					{ type: "string" },
-					{ type: "array", items: { type: "string" } },
-				],
-				description: "File path or array of file paths to upload.",
-			},
-			projectPath: {
-				type: "string",
-				description: "Optional SDF project root path.",
-			},
-			dryRun: {
-				type: "boolean",
-				description: "Validate files without uploading.",
-			},
-			skipValidation: {
-				type: "boolean",
-				description: "Skip pre-flight syntax validation.",
-			},
-			allowProduction: {
-				type: "boolean",
-				description:
-					"Explicit confirmation required if uploading to a production account.",
-			},
-			authId: {
-				type: "string",
-				description:
-					"Optional SuiteCloud CLI authentication ID (authID) to use for upload.",
-			},
-		},
-		required: ["paths"],
-	},
+	inputSchema: createToolInputSchema(UploadFileArgsSchema),
 };
 
 export const STATUS_TOOL = {
 	name: "netsuite_status",
 	description:
 		"Check NetSuite connection status, active account environment (Sandbox vs. Production), OAuth token lifespan, and recent error diagnostics.",
-	inputSchema: {
-		type: "object" as const,
-		properties: {
-			includeErrors: {
-				type: "boolean",
-				description:
-					"Whether to include recent error summary and self-healing advice.",
-			},
-		},
-	},
+	inputSchema: createToolInputSchema(StatusArgsSchema),
 };
 
 export const AUTH_TOOL = {
 	name: "netsuite_auth",
 	description:
 		"Manage NetSuite OAuth 2.0 PKCE authentication session and cache.",
-	inputSchema: {
-		type: "object" as const,
-		properties: {
-			action: {
-				type: "string",
-				enum: ["login", "logout", "refresh_cache"],
-				description:
-					"Action: 'login' (browser auth), 'logout' (revoke session), or 'refresh_cache' (clear Redis cache).",
-			},
-			accountId: {
-				type: "string",
-				description:
-					"Optional NetSuite account ID (e.g. '123456', '9260916_SB1') for target session.",
-			},
-			clientId: {
-				type: "string",
-				description: "Optional NetSuite OAuth 2.0 Client ID.",
-			},
-			table: {
-				type: "string",
-				description:
-					"Optional table name to clear cache for when action is 'refresh_cache'.",
-			},
-		},
-		required: ["action"],
-	},
+	inputSchema: createToolInputSchema(AuthArgsSchema),
 };
 
 export const CREATE_RECORD_TOOL = {
 	name: "netsuite_create_record",
 	description:
 		"Create a new NetSuite record in Sandbox / Test environments. Physically blocked in Production to guarantee ERP data integrity. Automatically cleans noise and generates active Web UI direct link.",
-	inputSchema: {
-		type: "object" as const,
-		properties: {
-			recordType: {
-				type: "string",
-				description:
-					"NetSuite record type ID (e.g. 'salesorder', 'customer', 'invoice', 'customrecord_xxx').",
-			},
-			record: {
-				type: "object",
-				description:
-					"Key-value object containing the field IDs and values to populate on the new record.",
-			},
-		},
-		required: ["recordType"],
-	},
+	inputSchema: createToolInputSchema(CreateRecordArgsSchema),
 };
 
 export const UPDATE_RECORD_TOOL = {
 	name: "netsuite_update_record",
 	description:
 		"Update an existing NetSuite record by numeric internal ID or document number (tranid) in Sandbox / Test environments. Physically blocked in Production. Automatically resolves natural keys and generates active Web UI direct link.",
-	inputSchema: {
-		type: "object" as const,
-		properties: {
-			recordType: {
-				type: "string",
-				description:
-					"NetSuite record type ID (e.g. 'salesorder', 'customer', 'invoice', 'customrecord_xxx').",
-			},
-			id: {
-				type: "string",
-				description:
-					"Numeric internal ID (e.g. '12345') or document number (tranid, e.g. 'SO10023').",
-			},
-			record: {
-				type: "object",
-				description:
-					"Key-value object containing the field IDs and values to update on the record.",
-			},
-		},
-		required: ["recordType", "id"],
-	},
+	inputSchema: createToolInputSchema(UpdateRecordArgsSchema),
 };
 
 /** Set of tools restricted strictly to Sandbox / Test environments. */

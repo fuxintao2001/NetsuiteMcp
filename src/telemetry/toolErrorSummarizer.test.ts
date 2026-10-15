@@ -157,7 +157,7 @@ describe("toolErrorSummarizer", () => {
 
 		const suiteqlRec = recs.find((r) => r.area === "SUITEQL_TEMPLATES");
 		expect(suiteqlRec?.priority).toBe("HIGH");
-		expect(suiteqlRec?.actionableFix).toContain("ns_getSuiteQLMetadata");
+		expect(suiteqlRec?.actionableFix).toContain("netsuite_get_metadata");
 	});
 
 	it("should compute full summary and format to Markdown", async () => {

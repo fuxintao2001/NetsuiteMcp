@@ -164,10 +164,19 @@ export async function handleUploadFile(
 		authSync.matchedAuthId || authSync.configuredAuthId || "UNKNOWN";
 
 	// 6. Production Safety Check (Rule 3)
-	if (isProd && !allowProduction) {
+	const effectiveAuthIsProd =
+		effectiveAuthId !== "UNKNOWN" && !isSandboxAccount(effectiveAuthId);
+	const targetIsProd = isProd || effectiveAuthIsProd;
+
+	if (targetIsProd && !allowProduction) {
 		let prodMd = `🚨 **生产环境安全拦截 (Production Safety Block)**\n\n`;
-		prodMd += `当前目标 NetSuite 账号为**生产环境** (\`${currentAccountId.toUpperCase()}\`)。\n`;
-		prodMd += `为防止误操作覆盖生产代码，需获得用户明确授权。\n\n`;
+		if (effectiveAuthIsProd && !isProd) {
+			prodMd += `⚠️ 严重警告：当前目标 NetSuite 会话为沙箱环境 (\`${currentAccountId.toUpperCase()}\`)，但项目配置的 Auth ID (\`${effectiveAuthId}\`) 指向**生产环境**！\n`;
+			prodMd += `为防止沙箱代码误传生产环境，已被硬拦截。\n\n`;
+		} else {
+			prodMd += `当前目标 NetSuite 账号为**生产环境** (\`${currentAccountId.toUpperCase()}\`)。\n`;
+			prodMd += `为防止误操作覆盖生产代码，需获得用户明确授权。\n\n`;
+		}
 		prodMd += `### 待上传文件清单（共 ${resolution.files.length} 个文件，${(resolution.totalBytes / 1024).toFixed(2)} KB）：\n`;
 		for (const f of resolution.files) {
 			const targetDisplay = formatTargetFileDisplay(
@@ -217,16 +226,19 @@ export async function handleUploadFile(
 	}
 
 	// 8. Synchronize external source files into resolvedProjectRoot if execution directory was switched
+	const fileCabinetRoot = path.join(resolvedProjectRoot, "src", "FileCabinet");
 	for (const f of resolution.files) {
 		if (f.exists && f.localFullPath && f.fileCabinetPath) {
 			const cleanFcPath = f.fileCabinetPath.replace(/^\/+/, "");
-			const expectedInRoot = path.join(
-				resolvedProjectRoot,
-				"src",
-				"FileCabinet",
-				cleanFcPath,
-			);
-			if (path.resolve(f.localFullPath) !== path.resolve(expectedInRoot)) {
+			const expectedInRoot = path.resolve(fileCabinetRoot, cleanFcPath);
+			const rel = path.relative(fileCabinetRoot, expectedInRoot);
+			if (rel.startsWith("..") || path.isAbsolute(rel)) {
+				return textResult(
+					`🚨 **路径安全拦截**: 检测到非法路径穿越 '${f.fileCabinetPath}'，禁止写入 FileCabinet 目录之外。`,
+					true,
+				);
+			}
+			if (path.resolve(f.localFullPath) !== expectedInRoot) {
 				const targetDir = path.dirname(expectedInRoot);
 				if (!fs.existsSync(targetDir)) {
 					fs.mkdirSync(targetDir, { recursive: true });

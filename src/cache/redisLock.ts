@@ -15,8 +15,8 @@ export class RedisLockProvider {
 	constructor(redis: Redis) {
 		this.redlock = new Redlock([redis], {
 			driftFactor: 0.01,
-			retryCount: 10,
-			retryDelay: 200, // 10 * 200ms = 2s max wait for lock
+			retryCount: 40,
+			retryDelay: 400, // 40 * 400ms = 16-24s wait for lock (exceeds 15s token HTTP timeout)
 			retryJitter: 200,
 			automaticExtensionThreshold: 500,
 		});
@@ -29,10 +29,10 @@ export class RedisLockProvider {
 	 * Acquires a lock on a specific resource.
 	 *
 	 * @param resource The identifier of the resource to lock.
-	 * @param ttlMs Time to live for the lock in milliseconds (default: 10000ms).
+	 * @param ttlMs Time to live for the lock in milliseconds (default: 25000ms).
 	 * @returns A promise that resolves to the lock object if successful, or null if the lock couldn't be acquired.
 	 */
-	async acquire(resource: string, ttlMs: number = 10000): Promise<Lock | null> {
+	async acquire(resource: string, ttlMs: number = 25000): Promise<Lock | null> {
 		const key = `${this.keyPrefix}${resource}`;
 		try {
 			const lockObj = await this.redlock.acquire([key], ttlMs);

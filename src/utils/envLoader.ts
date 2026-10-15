@@ -1,21 +1,33 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { parseEnv as nodeParseEnv } from "node:util";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const projectRoot = path.resolve(__dirname, "../..");
 
 /**
- * Parse .env file contents into key-value pairs.
+ * Parse .env file contents into key-value pairs using Node.js native util.parseEnv.
  */
 export function parseEnv(content: string): Record<string, string> {
+	if (typeof nodeParseEnv === "function") {
+		const parsed = nodeParseEnv(content);
+		const result: Record<string, string> = {};
+		for (const [k, v] of Object.entries(parsed)) {
+			if (v !== undefined) {
+				result[k] = v;
+			}
+		}
+		return result;
+	}
+
+	// Fallback for older runtimes without util.parseEnv
 	const result: Record<string, string> = {};
 	const lines = content.split(/\r?\n/);
 
 	for (const rawLine of lines) {
 		const line = rawLine.trim();
-		// Skip empty lines and comments
 		if (!line || line.startsWith("#")) continue;
 
 		const equalIndex = line.indexOf("=");
@@ -24,7 +36,6 @@ export function parseEnv(content: string): Record<string, string> {
 		const key = line.substring(0, equalIndex).trim();
 		let val = line.substring(equalIndex + 1).trim();
 
-		// Handle surrounding quotes
 		if (
 			(val.startsWith('"') && val.endsWith('"')) ||
 			(val.startsWith("'") && val.endsWith("'"))

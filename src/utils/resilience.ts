@@ -65,6 +65,10 @@ export async function isUserActiveOnMacOS(): Promise<boolean> {
 	}
 }
 
+import { createLogger } from "./logger.js";
+
+const logger = createLogger("resilience");
+
 /**
  * Checks if basic network connectivity is up by resolving a well-known NetSuite API hostname.
  * Prevents firing token requests right as macOS wakes up from sleep when Wi-Fi/TLS socket is not yet ready.
@@ -89,7 +93,8 @@ export async function checkNetworkReadiness(
 					method: "HEAD",
 					timeout: timeoutMs,
 				},
-				() => {
+				(res) => {
+					res.resume();
 					resolve(true);
 				},
 			);
@@ -108,7 +113,7 @@ export async function checkNetworkReadiness(
 /** Minimal interface for the OAuthManager used by the scheduler */
 interface TokenRefreshTarget {
 	hasValidSession(): Promise<boolean>;
-	ensureValidToken(): Promise<string>;
+	ensureValidToken(options?: { allowInteractive?: boolean }): Promise<string>;
 	forceRefreshToken(failedToken?: string): Promise<string>;
 	tryAutoRecover(maxRetries?: number): Promise<void>;
 	touchHeartbeat?(): Promise<void>;
@@ -132,6 +137,7 @@ export class TokenRefreshScheduler {
 	private readonly intervalMs: number;
 	private readonly isUserActiveFn: () => Promise<boolean>;
 	private lastTickTime: number = Date.now();
+	private isTickRunning = false;
 
 	constructor(
 		target: TokenRefreshTarget,
@@ -151,8 +157,8 @@ export class TokenRefreshScheduler {
 		if (this.intervalId) return;
 
 		this.lastTickTime = Date.now();
-		console.error(
-			`🔄 [TokenRefreshScheduler] Started — checking every ${this.intervalMs / 1000}s`,
+		logger.info(
+			`[TokenRefreshScheduler] Started — checking every ${this.intervalMs / 1000}s`,
 		);
 
 		// Run first tick immediately to handle startup/wake state
@@ -177,7 +183,7 @@ export class TokenRefreshScheduler {
 		if (this.intervalId) {
 			clearInterval(this.intervalId);
 			this.intervalId = null;
-			console.error("🔄 [TokenRefreshScheduler] Stopped");
+			logger.info("[TokenRefreshScheduler] Stopped");
 		}
 	}
 
@@ -192,6 +198,9 @@ export class TokenRefreshScheduler {
 	 * ALL exceptions are caught here — nothing escapes to global scope.
 	 */
 	private async tick(): Promise<void> {
+		if (this.isTickRunning) return;
+		this.isTickRunning = true;
+
 		try {
 			// macOS Sleep / DarkWake guard:
 			// If macOS display is off / lid is closed / system in DarkWake, do not proactively rotate tokens.
@@ -207,23 +216,23 @@ export class TokenRefreshScheduler {
 			this.lastTickTime = now;
 
 			if (wasSleeping) {
-				console.error(
-					`⏰ [TokenRefreshScheduler] System woke from sleep (elapsed ${Math.round(elapsed / 1000)}s). Checking network readiness...`,
+				logger.info(
+					`[TokenRefreshScheduler] System woke from sleep (elapsed ${Math.round(elapsed / 1000)}s). Checking network readiness...`,
 				);
 
 				const isReady = await checkNetworkReadiness();
 				if (!isReady) {
-					console.error(
-						"⚠️ [TokenRefreshScheduler] Network not ready after wake. Waiting 10s for Wi-Fi/TLS stabilization...",
+					logger.warn(
+						"[TokenRefreshScheduler] Network not ready after wake. Waiting 10s for Wi-Fi/TLS stabilization...",
 					);
 					await new Promise((resolve) => setTimeout(resolve, 10000));
 					if (!(await checkNetworkReadiness())) {
-						console.error(
-							"⚠️ [TokenRefreshScheduler] Network still unreachable. Skipping this tick to protect refresh token.",
+						logger.warn(
+							"[TokenRefreshScheduler] Network still unreachable. Skipping this tick to protect refresh token.",
 						);
 						return;
 					}
-					console.error("✅ [TokenRefreshScheduler] Network stabilized!");
+					logger.info("[TokenRefreshScheduler] Network stabilized!");
 				}
 
 				// Stagger multiple accounts waking up simultaneously with small random jitter (0-3s)
@@ -238,30 +247,26 @@ export class TokenRefreshScheduler {
 			}
 
 			const hasSession = await this.target.hasValidSession();
-
 			if (!hasSession) {
-				// No valid session — attempt auto-recovery using stored refresh token
-				console.error(
-					"🔄 [TokenRefreshScheduler] No valid session. Attempting auto-recovery...",
+				logger.info(
+					"[TokenRefreshScheduler] No valid session. Attempting auto-recovery...",
 				);
 				await this.target.tryAutoRecover(1);
-				if (await this.target.hasValidSession()) {
-					await this.target.touchHeartbeat?.().catch(() => {});
-				}
 				return;
 			}
 
-			// Normal path: ensureValidToken() auto-refreshes if within the 5-minute window
-			await this.target.ensureValidToken();
-
+			// Normal path: ensureValidToken({ allowInteractive: false }) auto-refreshes if within window
+			await this.target.ensureValidToken({ allowInteractive: false });
 			await this.target.touchHeartbeat?.().catch(() => {});
 		} catch (error: unknown) {
 			// Intentionally swallowed. This is a background maintenance task.
 			// Logging is the only action — we never rethrow from a setInterval callback.
 			const message = error instanceof Error ? error.message : String(error);
-			console.error(
-				`⚠️ [TokenRefreshScheduler] Proactive refresh failed: ${message}`,
+			logger.warn(
+				`[TokenRefreshScheduler] Proactive refresh failed: ${message}`,
 			);
+		} finally {
+			this.isTickRunning = false;
 		}
 	}
 }
@@ -296,13 +301,13 @@ export async function retryWithBackoff<T>(
 				throw error;
 			}
 
-			// 优先解析并遵从 NetSuite 返回的 Retry-After 头部时间
+			// Prioritize parsing and respecting NetSuite Retry-After header delay
 			let delay =
 				getRetryAfterMs(error) ?? minTimeout * factor ** (attempt - 1);
 			delay = Math.min(delay, maxTimeout);
 
 			if (jitter && !getRetryAfterMs(error)) {
-				// 应用随机抖动，防止波峰重合（惊群效应）
+				// Apply random jitter to prevent synchronized retry storms (thundering herd)
 				delay = (Math.random() * 0.5 + 0.5) * delay;
 			}
 
@@ -334,7 +339,7 @@ export function getRetryAfterMs(error: unknown): number | null {
 }
 
 /**
- * 全局并发控制，使用 p-limit 限制并行请求数，防止并发超出 NetSuite 账户上限。
+ * Global concurrency limiter using p-limit to restrict parallel requests below account ceilings.
  */
 export class ConcurrencyLimiter {
 	private readonly limiter: LimitFunction;

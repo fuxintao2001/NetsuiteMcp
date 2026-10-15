@@ -146,6 +146,21 @@ describe("SuiteQL, Search & Query Utilities", () => {
 				const tables = extractReferencedTables(sql);
 				expect(tables).toEqual(["customer"]);
 			});
+
+			it("should exclude CTE virtual table names from physical referenced tables", () => {
+				const sql = `
+					WITH sales_summary AS (
+						SELECT transaction, SUM(amount) AS total FROM transactionline WHERE mainline = 'F' GROUP BY transaction
+					)
+					SELECT t.id, ss.total
+					FROM transaction t
+					JOIN sales_summary ss ON t.id = ss.transaction
+				`;
+				const tables = extractReferencedTables(sql);
+				expect(tables).toContain("transaction");
+				expect(tables).toContain("transactionline");
+				expect(tables).not.toContain("sales_summary");
+			});
 		});
 
 		describe("pagination helpers", () => {
@@ -193,6 +208,19 @@ describe("SuiteQL, Search & Query Utilities", () => {
 				const paginated = ensureSuiteQLPagination(unionQuery, 100);
 				expect(paginated).toBe(
 					"SELECT * FROM (SELECT id FROM customer UNION ALL SELECT id FROM vendor) WHERE ROWNUM <= 100",
+				);
+			});
+
+			it("should strip trailing line and block comments before appending FETCH FIRST", () => {
+				const queryWithLineComment =
+					"SELECT id FROM customer WHERE isinactive = 'F' -- get active customers";
+				expect(ensureSuiteQLPagination(queryWithLineComment, 50)).toBe(
+					"SELECT id FROM customer WHERE isinactive = 'F' FETCH FIRST 50 ROWS ONLY",
+				);
+
+				const queryWithBlockComment = "SELECT id FROM customer /* end note */";
+				expect(ensureSuiteQLPagination(queryWithBlockComment, 50)).toBe(
+					"SELECT id FROM customer FETCH FIRST 50 ROWS ONLY",
 				);
 			});
 		});
@@ -249,6 +277,19 @@ describe("SuiteQL, Search & Query Utilities", () => {
 				const res2 = validateSuiteQL("SELECT id, t.* FROM transaction t");
 				expect(res2.valid).toBe(false);
 				expect(res2.reason).toContain("wildcard projection");
+			});
+
+			it("should correctly handle FROM inside functions like EXTRACT(YEAR FROM trandate) and reject wildcard", () => {
+				const res = validateSuiteQL(
+					"SELECT EXTRACT(YEAR FROM trandate), * FROM transaction",
+				);
+				expect(res.valid).toBe(false);
+				expect(res.reason).toContain("wildcard projection");
+
+				const resValid = validateSuiteQL(
+					"SELECT EXTRACT(YEAR FROM trandate) AS yr, id FROM transaction",
+				);
+				expect(resValid.valid).toBe(true);
 			});
 
 			it("should allow valid COUNT(*) aggregate and arithmetic multiplication without false positives", () => {

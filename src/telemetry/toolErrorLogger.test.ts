@@ -56,6 +56,20 @@ describe("toolErrorLogger", () => {
 			expect(maskSensitiveData(123)).toBe(123);
 			expect(maskSensitiveData("plain text")).toBe("plain text");
 		});
+
+		it("should preserve harmless business parameters like keyword and author without masking", () => {
+			const input = {
+				keyword: "invoice-search",
+				author: "Finance Team",
+				apiKey: "secret_123",
+				password: "pass",
+			};
+			const masked = maskSensitiveData(input) as Record<string, unknown>;
+			expect(masked.keyword).toBe("invoice-search");
+			expect(masked.author).toBe("Finance Team");
+			expect(masked.apiKey).toBe("[REDACTED]");
+			expect(masked.password).toBe("[REDACTED]");
+		});
 	});
 
 	describe("classifyError", () => {
@@ -116,8 +130,8 @@ describe("toolErrorLogger", () => {
 			).toBe("SUITEQL_SYNTAX");
 			expect(
 				classifyError(
-					"ns_getSuiteQLMetadata",
-					"Invalid search criteria in SuiteQL",
+					"netsuite_run_suiteql",
+					"Invalid column name: custbody_unknown",
 				),
 			).toBe("SUITEQL_SYNTAX");
 		});

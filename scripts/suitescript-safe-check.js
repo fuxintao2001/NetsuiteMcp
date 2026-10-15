@@ -16,6 +16,7 @@
 import { execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import * as acorn from "acorn";
 
 /**
  * @typedef {Object} Issue
@@ -36,6 +37,85 @@ export function analyzeSuiteScriptContent(content, filename = "anonymous.js") {
 	const issues = [];
 	const lines = content.split("\n");
 
+	let astLoopCheckDone = false;
+
+	// 1. Precise Acorn AST loop scope and governance check
+	try {
+		const ast = acorn.parse(content, {
+			ecmaVersion: "latest",
+			sourceType: "module",
+			locations: true,
+		});
+
+		function walk(node, inLoop = false) {
+			if (!node || typeof node !== "object") return;
+			const isLoop =
+				node.type === "ForStatement" ||
+				node.type === "WhileStatement" ||
+				node.type === "DoWhileStatement" ||
+				node.type === "ForOfStatement" ||
+				node.type === "ForInStatement" ||
+				(node.type === "CallExpression" &&
+					node.callee?.type === "MemberExpression" &&
+					["forEach", "map", "filter", "reduce"].includes(
+						node.callee.property?.name,
+					));
+
+			const currentlyInLoop = inLoop || isLoop;
+
+			if (
+				currentlyInLoop &&
+				!isLoop &&
+				node.type === "CallExpression" &&
+				node.callee?.type === "MemberExpression"
+			) {
+				const objName = node.callee.object?.name;
+				const propName = node.callee.property?.name;
+
+				if (
+					objName === "record" &&
+					["load", "delete", "submitFields"].includes(propName)
+				) {
+					issues.push({
+						file: filename,
+						line: node.loc?.start?.line || 1,
+						rule: "SAFE-GOV-001",
+						message:
+							"Avoid record.load/delete/submitFields inside loops. Governance will exhaust rapidly on bulk data. Use Map/Reduce or submitFields batch.",
+						severity: "ERROR",
+					});
+				} else if (
+					(objName === "search" && ["create", "load"].includes(propName)) ||
+					(objName === "query" && propName === "runSuiteQL")
+				) {
+					issues.push({
+						file: filename,
+						line: node.loc?.start?.line || 1,
+						rule: "SAFE-GOV-002",
+						message:
+							"Executing searches or SuiteQL queries inside loops will rapidly exhaust governance units (10 units per search). Hoist queries outside loops or use Map/Reduce.",
+						severity: "ERROR",
+					});
+				}
+			}
+
+			for (const key of Object.keys(node)) {
+				if (key === "loc" || key === "range") continue;
+				const child = node[key];
+				if (Array.isArray(child)) {
+					for (const c of child) walk(c, currentlyInLoop);
+				} else if (child && typeof child === "object") {
+					walk(child, currentlyInLoop);
+				}
+			}
+		}
+
+		walk(ast, false);
+		astLoopCheckDone = true;
+	} catch {
+		// Fallback to line-based loop analysis if syntax is non-standard
+	}
+
 	let inLoopDepth = 0;
 
 	for (let i = 0; i < lines.length; i++) {
@@ -46,14 +126,15 @@ export function analyzeSuiteScriptContent(content, filename = "anonymous.js") {
 		// Skip comments
 		if (trimmed.startsWith("//") || trimmed.startsWith("*")) continue;
 
-		// Track loop depth
+		// Track loop depth for fallback if AST parse failed
 		const isLoopHeader = /\b(for|while)\s*\(|\.forEach\s*\(/.test(line);
 		if (isLoopHeader) {
 			inLoopDepth++;
 		}
 
-		// Rule 1: Governance abuse - record.load / submit inside loop
+		// Rule 1 (fallback): Governance abuse - record.load / submit inside loop
 		if (
+			!astLoopCheckDone &&
 			inLoopDepth > 0 &&
 			/\brecord\.(load|delete|submitFields)\s*\(/.test(line)
 		) {
@@ -182,8 +263,9 @@ export function analyzeSuiteScriptContent(content, filename = "anonymous.js") {
 			});
 		}
 
-		// Rule 10: Search or Query inside loop (SAFE Governance budget exhaustion)
+		// Rule 10 (fallback): Search or Query inside loop (SAFE Governance budget exhaustion)
 		if (
+			!astLoopCheckDone &&
 			inLoopDepth > 0 &&
 			/\b(search\.create|query\.runSuiteQL|search\.load)\s*\(/.test(line)
 		) {

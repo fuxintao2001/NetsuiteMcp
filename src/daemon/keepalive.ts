@@ -4,13 +4,13 @@ import os from "node:os";
 import path from "node:path";
 import { Redis } from "ioredis";
 import { RedisLockProvider } from "../cache/redisLock.js";
+import { OAuthManager } from "../oauth/manager.js";
 import type { SessionData } from "../oauth/sessionStorage.js";
+import { shouldRefreshToken } from "../oauth/tokenExchange.js";
 import {
-	refreshAccessToken,
-	shouldRefreshToken,
-	TokenRefreshError,
-} from "../oauth/tokenExchange.js";
-import { formatNetSuiteAccountHost } from "../utils/environment.js";
+	getDefaultConfigDir,
+	getDefaultSessionsDir,
+} from "../utils/environment.js";
 import {
 	checkNetworkReadiness,
 	isUserActiveOnMacOS,
@@ -109,9 +109,12 @@ export async function runKeepAlive(): Promise<void> {
 			p.trim(),
 		);
 	} else {
-		sessionRoots = [
+		const candidateRoots = [
+			getDefaultSessionsDir(),
+			path.join(getDefaultConfigDir(), "sessions"),
 			path.join(os.homedir(), ".gemini", "antigravity", "sessions"),
 		];
+		sessionRoots = Array.from(new Set(candidateRoots));
 	}
 
 	let totalAccounts = 0;
@@ -153,8 +156,6 @@ export async function runKeepAlive(): Promise<void> {
 				} catch {
 					// No heartbeat file or error reading, proceed with keepalive scan
 				}
-
-				let lockId: unknown = null;
 
 				try {
 					// Read session file (unlocked read for quick check)
@@ -198,86 +199,16 @@ export async function runKeepAlive(): Promise<void> {
 					}
 
 					logInfo(
-						`[${accountId}] Needs refresh (expiry in ${Math.round(timeUntilExpiry / 1000)}s, authenticated: ${session.authenticated}). Acquiring lock...`,
+						`[${accountId}] Needs refresh (expiry in ${Math.round(timeUntilExpiry / 1000)}s, authenticated: ${session.authenticated}). Refreshing token...`,
 					);
 
-					const lockResource = `token_refresh:${formatNetSuiteAccountHost(accountId)}`;
+					// Reuse OAuthManager for robust lock handling, rotation validation, and unrecoverable error marking
+					const manager = new OAuthManager({ storagePath: sessionDir });
 					if (lockProvider) {
-						lockId = await lockProvider.acquire(lockResource);
-						if (!lockId) {
-							logWarn(
-								`[${accountId}] Could not acquire Redis lock, skipping this round...`,
-							);
-							failedAccounts++;
-							continue;
-						}
+						manager.setLockProvider(lockProvider);
 					}
 
-					// Re-load under lock
-					const lockedContent = await fs.readFile(sessionFile, "utf-8");
-					const lockedSession = JSON.parse(lockedContent) as SessionData;
-
-					if (!lockedSession.tokens || !lockedSession.config) {
-						skippedAccounts++;
-						continue;
-					}
-
-					const currentTokens = lockedSession.tokens;
-					if (
-						!shouldRefreshToken(currentTokens) &&
-						lockedSession.authenticated
-					) {
-						logInfo(
-							`[${accountId}] Session refreshed by another process concurrently`,
-						);
-						skippedAccounts++;
-						continue;
-					}
-
-					logInfo(`[${accountId}] Refreshing token...`);
-					const updatedTokens = await refreshAccessToken(currentTokens);
-
-					// Token Rotation safety: verify refresh_token hasn't been rotated by another process
-					const preWriteContent = await fs.readFile(sessionFile, "utf-8");
-					const preWriteSession = JSON.parse(preWriteContent) as SessionData;
-					if (
-						preWriteSession.tokens?.refresh_token !==
-						currentTokens.refresh_token
-					) {
-						logWarn(
-							`[${accountId}] Refresh token was rotated by another process during our refresh. Discarding our result to prevent rotation conflict.`,
-						);
-						skippedAccounts++;
-						continue;
-					}
-
-					const updatedSession: SessionData & { consecutiveFailures?: number } =
-						{
-							...lockedSession,
-							previous_tokens: lockedSession.tokens,
-							tokens: updatedTokens,
-							authenticated: true,
-							unrecoverable: false,
-							consecutiveFailures: 0,
-						};
-
-					// Save atomic
-					const tempFile = `${sessionFile}.tmp`;
-					await fs.writeFile(
-						tempFile,
-						JSON.stringify(updatedSession, null, 2),
-						{ mode: 0o600 },
-					);
-					await fs.chmod(tempFile, 0o600);
-					await fs.rename(tempFile, sessionFile);
-
-					const oldRTFingerprint = currentTokens.refresh_token.slice(-8);
-					const newRTFingerprint = updatedTokens.refresh_token
-						? String(updatedTokens.refresh_token).slice(-8)
-						: "unchanged";
-					logInfo(
-						`[${accountId}] Token rotation: old_rt=...${oldRTFingerprint} → new_rt=...${newRTFingerprint}`,
-					);
+					await manager.ensureValidToken({ allowInteractive: false });
 					logSuccess(`[${accountId}] Token refreshed successfully!`);
 					refreshedAccounts++;
 				} catch (err: unknown) {
@@ -286,44 +217,6 @@ export async function runKeepAlive(): Promise<void> {
 						`[${accountId}] Failed during refresh operation: ${message}`,
 					);
 					failedAccounts++;
-					// If refresh token has an unrecoverable response, track consecutive failures
-					try {
-						const isUnrecoverable =
-							(err instanceof TokenRefreshError && !err.recoverable) ||
-							message.includes("Unrecoverable");
-						if (isUnrecoverable) {
-							const fileContent = await fs.readFile(sessionFile, "utf-8");
-							const session = JSON.parse(fileContent) as SessionData & {
-								consecutiveFailures?: number;
-							};
-							const failures = (session.consecutiveFailures ?? 0) + 1;
-							session.authenticated = false;
-							session.consecutiveFailures = failures;
-							// Only mark unrecoverable after 5 consecutive failures (~50 minutes)
-							session.unrecoverable = failures >= 5;
-							await fs.writeFile(
-								sessionFile,
-								JSON.stringify(session, null, 2),
-								{ mode: 0o600 },
-							);
-							if (session.unrecoverable) {
-								logWarn(
-									`[${accountId}] Session marked unrecoverable after ${failures} consecutive failed refresh attempts.`,
-								);
-							} else {
-								logWarn(
-									`[${accountId}] Session marked unauthenticated (${failures}/5 failed attempts). Will retry next scan.`,
-								);
-							}
-						}
-					} catch {
-						// Ignore sub-errors
-					}
-				} finally {
-					if (lockId && lockProvider) {
-						await lockProvider.release(lockId);
-						lockId = null;
-					}
 				}
 			}
 		} catch (err: unknown) {

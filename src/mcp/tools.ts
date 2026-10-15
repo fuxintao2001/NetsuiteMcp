@@ -54,12 +54,6 @@ export class NetSuiteMCPTools {
 
 	constructor(oauthManager: OAuthManager) {
 		this.oauthManager = oauthManager;
-
-		// Load cached mappings from disk (fire-and-forget, no API call)
-		this.loadCustomRecordMappingsCache().catch((err: unknown) => {
-			const msg = err instanceof Error ? err.message : String(err);
-			logger.warn(`Failed to load custom record mappings cache: ${msg}`);
-		});
 	}
 
 	// ---------------------------------------------------------------------------
@@ -210,12 +204,16 @@ export class NetSuiteMCPTools {
 	}
 
 	/**
-	 * Clear the tools cache (e.g. after re-authentication).
+	 * Clear the tools and custom record mappings cache (e.g. after re-authentication or logout).
 	 */
 	async clearCache(): Promise<void> {
+		this.customRecordMappings.clear();
+		this.hasFetchedMappings = false;
+		this.hasSeededFromDisk = false;
 		const accountId = await this.oauthManager.getAccountId();
 		if (accountId) {
 			await cacheService.delete(accountId, "toolsCache");
+			await cacheService.delete(accountId, "customrecord_mappings");
 		}
 	}
 
@@ -300,16 +298,19 @@ export class NetSuiteMCPTools {
 	 */
 	async fetchCustomRecordMappings(): Promise<void> {
 		if (this.hasFetchedMappings) return;
-		this.hasFetchedMappings = true;
 
 		try {
 			logger.info("Fetching custom record mappings from NetSuite...");
 			const rawResult = await this.executeTool("ns_runCustomSuiteQL", {
 				sqlQuery: "SELECT internalId, scriptId FROM customrecordtype",
+				limit: 1000,
 			});
 
 			const records = this.extractDataArray(rawResult);
-			if (records.length === 0) return;
+			if (records.length === 0) {
+				this.hasFetchedMappings = true;
+				return;
+			}
 
 			const newMappings: Record<string, number> = {};
 			for (const record of records) {
@@ -333,7 +334,9 @@ export class NetSuiteMCPTools {
 					`Saved ${this.customRecordMappings.size} custom record mappings`,
 				);
 			}
+			this.hasFetchedMappings = true;
 		} catch (err: unknown) {
+			this.hasFetchedMappings = false;
 			const msg = err instanceof Error ? err.message : String(err);
 			logger.warn(`Failed to fetch custom record mappings: ${msg}`);
 		}
@@ -701,8 +704,8 @@ export class NetSuiteMCPTools {
 		return result;
 	}
 
-	/** Load custom record mappings from local file cache (no API call). */
-	private async loadCustomRecordMappingsCache(): Promise<void> {
+	/** Load custom record mappings from cache (no API call). */
+	public async loadCustomRecordMappingsCache(): Promise<void> {
 		const accountId = await this.oauthManager.getAccountId();
 		if (!accountId) return;
 

@@ -14,14 +14,21 @@ export class McpSupervisor {
 	private workerRl: readline.Interface | null = null;
 	private savedInitRequest: string | null = null;
 	private savedInitializedNotification: string | null = null;
-	private readonly activeRequestIds = new Set<string | number>();
+	private readonly activeRequestIds = new Map<string | number, number>();
 	private isReloading = false;
 	private reloadPending = false;
 	private readonly queuedInputLines: string[] = [];
 	private lastStampTime = 0;
 	private pollTimer: NodeJS.Timeout | null = null;
+	private fsWatcher: fs.FSWatcher | null = null;
+	private debounceReloadTimer: NodeJS.Timeout | null = null;
+	private reloadGraceTimer: NodeJS.Timeout | null = null;
 	private isShuttingDown = false;
 	private readonly pollIntervalMs: number;
+	private consecutiveCrashes = 0;
+	private workerSpawnTime = 0;
+	private handshakeTimer: NodeJS.Timeout | null = null;
+	private restartTimer: NodeJS.Timeout | null = null;
 
 	constructor(private readonly config: SupervisorConfig) {
 		this.pollIntervalMs = config.pollIntervalMs ?? 1000;
@@ -59,6 +66,7 @@ export class McpSupervisor {
 	}
 
 	private spawnWorker(attachStdout = true): ChildProcess {
+		this.workerSpawnTime = Date.now();
 		const worker = spawn(
 			process.execPath,
 			[this.config.scriptPath, ...process.argv.slice(2)],
@@ -77,17 +85,50 @@ export class McpSupervisor {
 		}
 
 		worker.on("exit", (code, signal) => {
+			// Clear active request IDs to avoid permanent reload deadlock if worker crashed mid-request
+			this.activeRequestIds.clear();
+
+			// Clear handshake timer if worker exited during handshake
+			if (this.handshakeTimer) {
+				clearTimeout(this.handshakeTimer);
+				this.handshakeTimer = null;
+			}
+
 			if (this.isShuttingDown || this.isReloading) {
 				return;
 			}
+
+			// Measure worker lifetime to determine if this was an immediate crash
+			const uptime = Date.now() - this.workerSpawnTime;
+			if (uptime > 30000) {
+				this.consecutiveCrashes = 0;
+			}
+			this.consecutiveCrashes++;
+
+			if (this.consecutiveCrashes >= 5) {
+				console.error(
+					`❌ [Supervisor] Worker crashed 5 consecutive times rapidly (code: ${code}, signal: ${signal}). Auto-restart suspended until next build/file change.`,
+				);
+				return;
+			}
+
+			// Exponential backoff: 500ms -> 1000ms -> 2000ms -> 5000ms
+			const backoffDelays = [500, 1000, 2000, 5000];
+			const delay = backoffDelays[this.consecutiveCrashes - 1] ?? 5000;
+
 			console.error(
-				`⚠️ [Supervisor] Worker process exited unexpectedly (code: ${code}, signal: ${signal}). Restarting in 500ms...`,
+				`⚠️ [Supervisor] Worker process exited unexpectedly (code: ${code}, signal: ${signal}). Restarting in ${delay}ms (attempt ${this.consecutiveCrashes}/5)...`,
 			);
-			setTimeout(() => {
+
+			if (this.restartTimer) {
+				clearTimeout(this.restartTimer);
+			}
+			this.restartTimer = setTimeout(() => {
+				this.restartTimer = null;
 				if (!this.isShuttingDown) {
 					void this.performReload();
 				}
-			}, 500);
+			}, delay);
 		});
 
 		worker.on("error", (err) => {
@@ -114,7 +155,7 @@ export class McpSupervisor {
 				} else if (parsed.method === "notifications/initialized") {
 					this.savedInitializedNotification = trimmed;
 				} else if (parsed.id !== undefined && parsed.id !== null) {
-					this.activeRequestIds.add(parsed.id);
+					this.activeRequestIds.set(parsed.id, Date.now());
 				}
 			} catch {
 				// Non-JSON line
@@ -164,28 +205,102 @@ export class McpSupervisor {
 			// Forward line to parent stdout (Antigravity)
 			process.stdout.write(`${line}\n`);
 
+			this.pruneStaleRequests();
 			if (this.reloadPending && this.activeRequestIds.size === 0) {
+				if (this.reloadGraceTimer) {
+					clearTimeout(this.reloadGraceTimer);
+					this.reloadGraceTimer = null;
+				}
 				this.reloadPending = false;
 				void this.performReload();
 			}
 		});
 	}
 
-	private setupFileWatcher(): void {
-		this.pollTimer = setInterval(() => {
-			if (this.isShuttingDown || this.isReloading) return;
-			const latestStamp = this.getLatestBuildTimestamp();
-			if (latestStamp > this.lastStampTime) {
-				this.lastStampTime = latestStamp;
-				this.triggerReload();
+	private pruneStaleRequests(): void {
+		const now = Date.now();
+		const REQUEST_TTL_MS = 65_000;
+		for (const [id, timestamp] of this.activeRequestIds.entries()) {
+			if (now - timestamp > REQUEST_TTL_MS) {
+				this.activeRequestIds.delete(id);
 			}
-		}, this.pollIntervalMs);
+		}
+	}
+
+	private setupFileWatcher(): void {
+		// 1. Instantaneous native fs.watch with debouncing
+		try {
+			const watchTarget = fs.existsSync(this.config.distDir)
+				? this.config.distDir
+				: path.dirname(this.config.scriptPath);
+
+			if (fs.existsSync(watchTarget)) {
+				this.fsWatcher = fs.watch(watchTarget, (_eventType, filename) => {
+					if (this.isShuttingDown || this.isReloading) return;
+					if (
+						!filename ||
+						filename === ".build_stamp" ||
+						filename.endsWith(".js")
+					) {
+						if (this.debounceReloadTimer) {
+							clearTimeout(this.debounceReloadTimer);
+						}
+						this.debounceReloadTimer = setTimeout(() => {
+							this.debounceReloadTimer = null;
+							const latestStamp = this.getLatestBuildTimestamp();
+							if (latestStamp > this.lastStampTime) {
+								this.lastStampTime = latestStamp;
+								this.triggerReload();
+							}
+						}, 250);
+					}
+				});
+			}
+		} catch {
+			// Non-fatal, fallback to periodic polling
+		}
+
+		// 2. Relaxed fallback polling in case fs.watch misses events
+		this.pollTimer = setInterval(
+			() => {
+				if (this.isShuttingDown || this.isReloading) return;
+				const latestStamp = this.getLatestBuildTimestamp();
+				if (latestStamp > this.lastStampTime) {
+					this.lastStampTime = latestStamp;
+					this.triggerReload();
+				}
+			},
+			Math.max(this.pollIntervalMs, 2000),
+		);
 	}
 
 	private triggerReload(): void {
+		// Reset consecutive crashes on new build trigger
+		this.consecutiveCrashes = 0;
+		if (this.restartTimer) {
+			clearTimeout(this.restartTimer);
+			this.restartTimer = null;
+		}
+
+		this.pruneStaleRequests();
 		if (this.activeRequestIds.size > 0) {
 			this.reloadPending = true;
+			if (!this.reloadGraceTimer) {
+				this.reloadGraceTimer = setTimeout(() => {
+					this.reloadGraceTimer = null;
+					if (this.reloadPending) {
+						this.reloadPending = false;
+						this.activeRequestIds.clear();
+						void this.performReload();
+					}
+				}, 15_000);
+			}
 			return;
+		}
+
+		if (this.reloadGraceTimer) {
+			clearTimeout(this.reloadGraceTimer);
+			this.reloadGraceTimer = null;
 		}
 		this.reloadPending = false;
 		void this.performReload();
@@ -279,6 +394,10 @@ export class McpSupervisor {
 			const finish = () => {
 				if (done) return;
 				done = true;
+				if (this.handshakeTimer) {
+					clearTimeout(this.handshakeTimer);
+					this.handshakeTimer = null;
+				}
 				rl.close();
 				resolve();
 			};
@@ -294,7 +413,7 @@ export class McpSupervisor {
 			worker.stdin.write(`${initReq}\n`);
 
 			// Timeout safety: if worker doesn't respond in 5s, proceed anyway
-			setTimeout(() => finish(), 5000);
+			this.handshakeTimer = setTimeout(() => finish(), 5000);
 		});
 	}
 
@@ -315,6 +434,35 @@ export class McpSupervisor {
 		if (this.pollTimer) {
 			clearInterval(this.pollTimer);
 			this.pollTimer = null;
+		}
+
+		if (this.debounceReloadTimer) {
+			clearTimeout(this.debounceReloadTimer);
+			this.debounceReloadTimer = null;
+		}
+
+		if (this.reloadGraceTimer) {
+			clearTimeout(this.reloadGraceTimer);
+			this.reloadGraceTimer = null;
+		}
+
+		if (this.fsWatcher) {
+			try {
+				this.fsWatcher.close();
+			} catch {
+				// Non-fatal
+			}
+			this.fsWatcher = null;
+		}
+
+		if (this.restartTimer) {
+			clearTimeout(this.restartTimer);
+			this.restartTimer = null;
+		}
+
+		if (this.handshakeTimer) {
+			clearTimeout(this.handshakeTimer);
+			this.handshakeTimer = null;
 		}
 
 		if (this.workerRl) {

@@ -45,3 +45,31 @@ export interface CacheProvider {
 	 */
 	getStats(): Promise<CacheStats>;
 }
+
+export class NoOpCacheProvider implements CacheProvider {
+	async connect(): Promise<void> {}
+	async disconnect(): Promise<void> {}
+	async get<T>(_accountId: string, _key: string): Promise<T | null> {
+		return null;
+	}
+	async set<T>(
+		_accountId: string,
+		_key: string,
+		_data: T,
+		_ttlSeconds?: number,
+	): Promise<void> {}
+	async delete(_accountId: string, _key: string): Promise<void> {}
+	async clearAccountCache(_accountId: string): Promise<void> {}
+	async getStats(): Promise<CacheStats> {
+		return {
+			provider: "noop",
+			connected: false,
+			keyCount: 0,
+		};
+	}
+}
+
+export {
+	type TieredCacheOptions,
+	TieredCacheProvider,
+} from "./tieredCacheProvider.js";

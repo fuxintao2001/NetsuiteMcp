@@ -77,7 +77,7 @@ export class CallbackServer {
 				settle("reject", error);
 			});
 
-			// 绑定 127.0.0.1 回环口，防止局域网暴露
+			// Bind strictly to 127.0.0.1 loopback to prevent LAN exposure
 			this.server.listen(this.port, "127.0.0.1", () => {
 				console.error(
 					`🌐 OAuth callback server listening strictly on http://127.0.0.1:${this.port}`,
@@ -126,14 +126,14 @@ export class CallbackServer {
 				return;
 			}
 
-			// CSRF validation - 过滤非致命的无效 state 错误请求，不触发 settle() 关闭
+			// CSRF validation - filter out non-fatal invalid state requests without terminating server via settle()
 			if (state !== expectedState) {
 				this.sendErrorPage(
 					res,
 					"Invalid State",
 					"CSRF validation failed. Please try again.",
 				);
-				return; // 直接返回，不破坏当前服务器生命周期，允许真实认证请求重试
+				return; // Return directly without destroying server lifecycle, allowing genuine requests to retry
 			}
 
 			if (!code) {

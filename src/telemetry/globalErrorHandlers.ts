@@ -3,12 +3,7 @@ import { sanitizeError, sanitizeMessage } from "../utils/errors.js";
 interface ProcessLike {
 	on(event: "uncaughtException", listener: (error: unknown) => void): unknown;
 	on(event: "unhandledRejection", listener: (reason: unknown) => void): unknown;
-	on(event: "SIGTERM", listener: () => void): unknown;
-	stdin: {
-		on(event: "close" | "end", listener: () => void): unknown;
-	};
-	exit(code?: number): never;
-	exitCode: number | string | null | undefined;
+	exitCode?: number | string | null | undefined;
 }
 
 interface LoggerLike {
@@ -47,14 +42,19 @@ function logSanitizedError(
  *
  * MCP servers are long-lived stdio processes. Network, OAuth, and background
  * prefetch failures must be surfaced in logs, not promoted into process exits.
+ * Process lifecycle and graceful shutdown are managed centrally by the server runner.
  */
 export function installGlobalErrorHandlers(
 	proc: ProcessLike = process,
 	logger: LoggerLike = console,
+	onShutdown?: () => void | Promise<void>,
 ): void {
 	proc.on("uncaughtException", (error: unknown) => {
 		if (isBrokenStdioError(error)) {
 			proc.exitCode = 0;
+			if (onShutdown) {
+				void onShutdown();
+			}
 			return;
 		}
 
@@ -64,20 +64,12 @@ export function installGlobalErrorHandlers(
 	proc.on("unhandledRejection", (reason: unknown) => {
 		if (isBrokenStdioError(reason)) {
 			proc.exitCode = 0;
+			if (onShutdown) {
+				void onShutdown();
+			}
 			return;
 		}
 
 		logSanitizedError("[MCP] Unhandled Promise Rejection:", reason, logger);
-	});
-
-	proc.stdin.on("close", () => {
-		proc.exit(0);
-	});
-	proc.stdin.on("end", () => {
-		proc.exit(0);
-	});
-
-	proc.on("SIGTERM", () => {
-		proc.exit(0);
 	});
 }

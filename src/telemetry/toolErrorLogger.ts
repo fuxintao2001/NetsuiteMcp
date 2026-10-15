@@ -40,8 +40,34 @@ export type NewToolErrorInput = Omit<ToolErrorEntry, "id" | "timestamp">;
 // Sensitive data masking
 // ---------------------------------------------------------------------------
 
-const SENSITIVE_KEY_PATTERN =
-	/token|secret|password|auth|key|credential|bearer|session/i;
+const SENSITIVE_WORDS = new Set([
+	"token",
+	"tokens",
+	"secret",
+	"secrets",
+	"password",
+	"passwords",
+	"auth",
+	"key",
+	"keys",
+	"credential",
+	"credentials",
+	"bearer",
+	"session",
+	"sessions",
+]);
+
+/**
+ * Checks if a parameter or property key is sensitive based on word boundary matching.
+ * Safely distinguishes words like 'keyword' or 'author' from 'apiKey' or 'authHeader'.
+ */
+export function isSensitiveKey(key: string): boolean {
+	const words = key
+		.split(/[-_]|(?<=[a-z0-9])(?=[A-Z])/)
+		.map((w) => w.toLowerCase());
+	return words.some((w) => SENSITIVE_WORDS.has(w));
+}
+
 const MAX_STRING_LENGTH = 50_000;
 
 /**
@@ -69,7 +95,7 @@ export function maskSensitiveData(data: unknown, depth = 0): unknown {
 
 	const masked: Record<string, unknown> = {};
 	for (const [key, value] of Object.entries(data as Record<string, unknown>)) {
-		if (SENSITIVE_KEY_PATTERN.test(key)) {
+		if (isSensitiveKey(key)) {
 			masked[key] = "[REDACTED]";
 		} else {
 			masked[key] = maskSensitiveData(value, depth + 1);
@@ -150,7 +176,7 @@ export function classifyError(
 	}
 
 	if (
-		toolName === "ns_runCustomSuiteQL" ||
+		toolName === "netsuite_run_suiteql" ||
 		lower.includes("suiteql") ||
 		lower.includes("invalid_search") ||
 		lower.includes("syntax error") ||

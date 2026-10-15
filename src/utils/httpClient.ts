@@ -10,7 +10,7 @@ const httpAgent = new http.Agent({
 	timeout: 60000,
 });
 
-// 排除非 https.AgentOptions 支持的 freeSocketTimeout
+// Exclude freeSocketTimeout which is not supported by https.AgentOptions
 const httpsAgent = new https.Agent({
 	keepAlive: true,
 	keepAliveMsecs: 1000,
@@ -19,7 +19,7 @@ const httpsAgent = new https.Agent({
 	timeout: 60000,
 });
 
-// 全局配置了 Keep-Alive 连接池与请求超时的 Axios 实例
+// Global Axios instance configured with Keep-Alive connection pool and request timeout
 export const httpClient = axios.create({
 	httpAgent,
 	httpsAgent,

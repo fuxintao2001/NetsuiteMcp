@@ -147,4 +147,98 @@ describe("Cache & Locking", () => {
 			expect(result).toBe(false);
 		});
 	});
+
+	describe("TieredCacheProvider (L1 LRU + L2 Redis)", () => {
+		let mockL2: any;
+		let tiered: any;
+
+		beforeEach(async () => {
+			const { TieredCacheProvider } = await import("./tieredCacheProvider.js");
+			mockL2 = {
+				connect: vi.fn().mockResolvedValue(undefined),
+				disconnect: vi.fn().mockResolvedValue(undefined),
+				get: vi.fn(),
+				set: vi.fn().mockResolvedValue(undefined),
+				delete: vi.fn().mockResolvedValue(undefined),
+				clearAccountCache: vi.fn().mockResolvedValue(undefined),
+				getStats: vi.fn().mockResolvedValue({
+					provider: "redis",
+					connected: true,
+					keyCount: 5,
+				}),
+			};
+			tiered = new TieredCacheProvider(mockL2, {
+				l1MaxItems: 10,
+				l1TtlMs: 60000,
+			});
+		});
+
+		it("should set into both L1 and L2 and hit L1 on subsequent get without touching L2", async () => {
+			await tiered.set("acc1", "user", { name: "Alice" }, 300);
+			expect(mockL2.set).toHaveBeenCalledWith(
+				"acc1",
+				"user",
+				{ name: "Alice" },
+				300,
+			);
+
+			// Subsequent get should hit L1 without calling L2.get
+			const val = await tiered.get("acc1", "user");
+			expect(val).toEqual({ name: "Alice" });
+			expect(mockL2.get).not.toHaveBeenCalled();
+		});
+
+		it("should populate L1 on L2 hit when L1 misses", async () => {
+			mockL2.get.mockResolvedValueOnce({ name: "Bob" });
+
+			const val1 = await tiered.get("acc1", "bobKey");
+			expect(val1).toEqual({ name: "Bob" });
+			expect(mockL2.get).toHaveBeenCalledTimes(1);
+
+			// Second get should be served from L1
+			const val2 = await tiered.get("acc1", "bobKey");
+			expect(val2).toEqual({ name: "Bob" });
+			expect(mockL2.get).toHaveBeenCalledTimes(1);
+		});
+
+		it("should delete key from both L1 and L2", async () => {
+			await tiered.set("acc1", "delKey", "value");
+			await tiered.delete("acc1", "delKey");
+
+			expect(mockL2.delete).toHaveBeenCalledWith("acc1", "delKey");
+
+			// L1 should no longer have the key; next get queries L2
+			mockL2.get.mockResolvedValueOnce(null);
+			const val = await tiered.get("acc1", "delKey");
+			expect(val).toBeNull();
+			expect(mockL2.get).toHaveBeenCalledWith("acc1", "delKey");
+		});
+
+		it("should clear account cache from L1 and L2", async () => {
+			await tiered.set("acc1", "k1", "v1");
+			await tiered.set("acc1", "k2", "v2");
+			await tiered.set("acc2", "k3", "v3");
+
+			await tiered.clearAccountCache("acc1");
+			expect(mockL2.clearAccountCache).toHaveBeenCalledWith("acc1");
+
+			// acc1 keys evicted from L1; next get queries L2
+			mockL2.get.mockResolvedValueOnce(null);
+			const val = await tiered.get("acc1", "k1");
+			expect(val).toBeNull();
+			expect(mockL2.get).toHaveBeenCalledWith("acc1", "k1");
+
+			// acc2 key still in L1 (hits L1 without calling L2)
+			const valAcc2 = await tiered.get("acc2", "k3");
+			expect(valAcc2).toBe("v3");
+		});
+
+		it("should aggregate stats correctly from L1 and L2", async () => {
+			await tiered.set("acc1", "k1", "v1");
+			const stats = await tiered.getStats();
+			expect(stats.provider).toBe("tiered(l1:lru,l2:redis)");
+			expect(stats.connected).toBe(true);
+			expect(stats.keyCount).toBe(6); // 1 in L1 + 5 in L2
+		});
+	});
 });
