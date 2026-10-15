@@ -36,11 +36,11 @@ describe("MCP Handler Wires", () => {
 		};
 
 		mockOAuthManager = {
-			getAccountId: (vi.fn() as any).mockResolvedValue("123456_SB1"),
+			getAccountId: (vi.fn() as any).mockResolvedValue("9260916-sb1"),
 			hasValidSession: (vi.fn() as any).mockResolvedValue(true),
 			getSessionInfo: (vi.fn() as any).mockResolvedValue({
 				authenticated: true,
-				accountId: "123456_SB1",
+				accountId: "9260916-sb1",
 			}),
 		};
 
@@ -65,9 +65,10 @@ describe("MCP Handler Wires", () => {
 						}
 					}
 					return Promise.resolve({
-						id: "101",
+						id: "166",
+						entityid: "IC00000009",
 						type: "customer",
-						name: "Acme Corp",
+						name: "100101-NVC Lighting Japan株式会社",
 					});
 				},
 			),
@@ -118,7 +119,7 @@ describe("MCP Handler Wires", () => {
 		});
 
 		it("should list 8 authoritative tools in Production environment", async () => {
-			mockOAuthManager.getAccountId.mockResolvedValue("123456"); // Production
+			mockOAuthManager.getAccountId.mockResolvedValue("9260916"); // Production
 			const listFn = registeredHandlers.get("tools/list");
 
 			const result = await listFn?.();
@@ -194,7 +195,7 @@ describe("MCP Handler Wires", () => {
 		});
 
 		it("should block netsuite_create_record and netsuite_update_record in Production", async () => {
-			mockOAuthManager.getAccountId.mockResolvedValue("123456"); // Production
+			mockOAuthManager.getAccountId.mockResolvedValue("9260916"); // Production
 			const callFn = registeredHandlers.get("tools/call");
 
 			const createRes = await callFn?.({
@@ -202,7 +203,7 @@ describe("MCP Handler Wires", () => {
 					name: "netsuite_create_record",
 					arguments: {
 						recordType: "customer",
-						record: { companyName: "Acme" },
+						record: { companyName: "100101-NVC Lighting Japan株式会社" },
 					},
 				},
 			});
@@ -216,8 +217,8 @@ describe("MCP Handler Wires", () => {
 					name: "netsuite_update_record",
 					arguments: {
 						recordType: "customer",
-						id: "100",
-						record: { companyName: "Acme" },
+						id: "166",
+						record: { companyName: "100101-NVC Lighting Japan株式会社" },
 					},
 				},
 			});
@@ -288,14 +289,14 @@ describe("MCP Handler Wires", () => {
 		});
 
 		it("should include environment suffix in tool descriptions", async () => {
-			mockOAuthManager.getAccountId.mockResolvedValue("123456");
+			mockOAuthManager.getAccountId.mockResolvedValue("9260916");
 			const listFn = registeredHandlers.get("tools/list");
 
 			const result = await listFn?.();
 			const runSqlTool = result.tools.find(
 				(t: any) => t.name === "netsuite_run_suiteql",
 			);
-			expect(runSqlTool?.description).toContain("123456");
+			expect(runSqlTool?.description).toContain("9260916");
 		});
 
 		it("should reject unknown tools on tools/call", async () => {
@@ -312,7 +313,7 @@ describe("MCP Handler Wires", () => {
 		});
 
 		it("should require allowProduction for file upload in Production", async () => {
-			mockOAuthManager.getAccountId.mockResolvedValue("123456"); // Production
+			mockOAuthManager.getAccountId.mockResolvedValue("9260916"); // Production
 			const callFn = registeredHandlers.get("tools/call");
 
 			const dummy = path.join(testRoot, "dummy.js");
@@ -336,7 +337,7 @@ describe("MCP Handler Wires", () => {
 			const res = await callFn?.({
 				params: {
 					name: "netsuite_get_record",
-					arguments: { recordType: "customer", id: "101" },
+					arguments: { recordType: "customer", id: "166" },
 				},
 			});
 
@@ -350,15 +351,17 @@ describe("MCP Handler Wires", () => {
 			const res = await callFn?.({
 				params: {
 					name: "netsuite_get_record",
-					arguments: { recordType: "customer", id: "101" },
+					arguments: { recordType: "customer", id: "166" },
 				},
 			});
 
 			expect(mockMCPTools.executeTool).toHaveBeenCalledWith("ns_getRecord", {
 				recordType: "customer",
-				recordId: "101",
+				recordId: "166",
 			});
-			expect(res.content[0].text).toContain("Acme Corp");
+			expect(res.content[0].text).toContain(
+				"100101-NVC Lighting Japan株式会社",
+			);
 		});
 
 		it("should query table metadata for customrecord in netsuite_get_metadata", async () => {

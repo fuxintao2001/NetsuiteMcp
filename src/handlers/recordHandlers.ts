@@ -38,6 +38,32 @@ interface RecordInspectOptions {
 	format: "markdown" | "compact_json";
 }
 
+const TRANSACTION_TYPE_MAP: Record<string, string> = {
+	salesorder: "SalesOrd",
+	invoice: "CustInvc",
+	purchaseorder: "PurchOrd",
+	estimate: "Estimate",
+	opportunity: "Opprtnty",
+	customerpayment: "CustPymt",
+	vendorbill: "VendBill",
+	vendorpayment: "VendPymt",
+	creditmemo: "CustCred",
+	itemfulfillment: "ItemShip",
+	itemreceipt: "ItemRcpt",
+	returnauthorization: "RtnAuth",
+	journalentry: "Journal",
+	transferorder: "TrnfrOrd",
+};
+
+function getTransactionTypeFilter(recType: string): string {
+	if (recType === "transaction") return "";
+	const mappedType = TRANSACTION_TYPE_MAP[recType];
+	if (mappedType) {
+		return `AND (type = '${mappedType}' OR LOWER(type) = '${recType}')`;
+	}
+	return `AND LOWER(type) = '${recType}'`;
+}
+
 /**
  * Resolves natural keys (document tranid, entity entityid, item itemid) to numeric internal ID via 1-turn SuiteQL.
  */
@@ -72,8 +98,7 @@ export async function resolveNaturalKeyToInternalId(
 
 	if (isTransaction) {
 		try {
-			const typeFilter =
-				recType !== "transaction" ? `AND LOWER(type) = '${recType}'` : "";
+			const typeFilter = getTransactionTypeFilter(recType);
 			const upperKey = safeKey.toUpperCase();
 			const sql = `SELECT id, type, tranid FROM transaction WHERE UPPER(tranid) = '${upperKey}' ${typeFilter} ORDER BY id DESC FETCH FIRST 1 ROWS ONLY`;
 			const res = await mcpTools.executeTool("ns_runCustomSuiteQL", {
@@ -199,8 +224,7 @@ export async function resolveNaturalKeysBatch(
 
 	if (isTransaction) {
 		try {
-			const typeFilter =
-				recType !== "transaction" ? `AND LOWER(type) = '${recType}'` : "";
+			const typeFilter = getTransactionTypeFilter(recType);
 			const inList = safeKeys
 				.map((k) => `'${k.replace(/'/g, "''").toUpperCase()}'`)
 				.join(", ");

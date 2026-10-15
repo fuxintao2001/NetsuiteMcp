@@ -256,6 +256,16 @@ const TOOL_DEFINITIONS: AnyToolDefinition[] = [
 								"ns_runCustomSuiteQL",
 								queryParams,
 							);
+							if (
+								queryRes &&
+								typeof queryRes === "object" &&
+								"error" in queryRes &&
+								typeof (queryRes as Record<string, unknown>).error === "string"
+							) {
+								throw new Error(
+									(queryRes as Record<string, unknown>).error as string,
+								);
+							}
 							const formatted = formatSuiteQLToCompactMarkdown(queryRes);
 							return {
 								index: index + 1,
@@ -327,6 +337,14 @@ const TOOL_DEFINITIONS: AnyToolDefinition[] = [
 				"ns_runCustomSuiteQL",
 				queryParams,
 			);
+			if (
+				queryRes &&
+				typeof queryRes === "object" &&
+				"error" in queryRes &&
+				typeof (queryRes as Record<string, unknown>).error === "string"
+			) {
+				throw new Error((queryRes as Record<string, unknown>).error as string);
+			}
 			return textResult(formatSuiteQLToCompactMarkdown(queryRes));
 		},
 	}),

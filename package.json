@@ -30,6 +30,7 @@
     "lint": "biome check src",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:live": "vitest run tests/live-e2e.test.ts",
     "score": "node --import tsx scripts/test-system-architecture-score.ts",
     "test:compliance": "node --import tsx scripts/test-official-docs-compliance.ts",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json",

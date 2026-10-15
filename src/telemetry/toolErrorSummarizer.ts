@@ -90,6 +90,28 @@ export function findRelevantLogFiles(
 }
 
 /**
+ * Detects whether a raw log entry originated from automated unit/integration test suites.
+ */
+export function isTestErrorEntry(raw: Record<string, unknown>): boolean {
+	const stack = typeof raw.errorStack === "string" ? raw.errorStack : "";
+	if (
+		stack.includes("node_modules/@vitest") ||
+		stack.includes("node_modules/vitest") ||
+		/\.test\.[jt]sx?:\d+/.test(stack)
+	) {
+		return true;
+	}
+	const paramsStr = JSON.stringify(raw.parameters || "");
+	if (
+		paramsStr.includes(".test-handlers-root") ||
+		paramsStr.includes(".test-")
+	) {
+		return true;
+	}
+	return false;
+}
+
+/**
  * Parses JSONL log files line-by-line into structured ToolErrorEntry objects.
  */
 export async function loadErrorEntries(
@@ -117,6 +139,11 @@ export async function loadErrorEntries(
 			if (!line?.trim()) continue;
 			try {
 				const raw = JSON.parse(line);
+				// Filter out automated test suite executions to preserve operational data accuracy
+				if (isTestErrorEntry(raw)) {
+					continue;
+				}
+
 				// Pino attaches fields directly to root or as metadata
 				const timestamp = raw.timestamp || raw.time || new Date().toISOString();
 				const entryDate = new Date(timestamp);

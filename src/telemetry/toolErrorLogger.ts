@@ -216,12 +216,23 @@ let activeTransport: {
 } | null = null;
 
 /**
+ * Detects whether the process is currently executing in an automated test environment.
+ */
+export function isTestEnvironment(): boolean {
+	return process.env.NODE_ENV === "test" || Boolean(process.env.VITEST);
+}
+
+/**
  * Creates a configured Pino logger instance writing to rotating JSON Lines files.
  */
 export function createToolErrorLogger(
 	customLogsDir?: string,
 	options: { syncFile?: string } = {},
 ): Logger {
+	if (!customLogsDir && !options.syncFile && isTestEnvironment()) {
+		return pino({ level: "silent" });
+	}
+
 	const logsDir = customLogsDir || getDefaultLogsDir();
 	if (!fs.existsSync(logsDir)) {
 		try {
@@ -275,6 +286,9 @@ export function createToolErrorLogger(
  */
 function getToolErrorLogger(): Logger {
 	if (!defaultLogger) {
+		if (isTestEnvironment()) {
+			return pino({ level: "silent" });
+		}
 		defaultLogger = createToolErrorLogger();
 	}
 	return defaultLogger;
@@ -301,6 +315,10 @@ export function recordToolError(input: NewToolErrorInput): ToolErrorEntry {
 		>,
 	};
 
+	if (isTestEnvironment() && !defaultLogger) {
+		return entry;
+	}
+
 	try {
 		const logger = getToolErrorLogger();
 		logger.error(entry, `Tool ${entry.tool} failed [${entry.category}]`);
@@ -316,6 +334,9 @@ export function recordToolError(input: NewToolErrorInput): ToolErrorEntry {
  * Flushes pending asynchronous logs to disk. Useful during server shutdown.
  */
 export async function flushToolErrorLogger(): Promise<void> {
+	if (isTestEnvironment() && !defaultLogger) {
+		return;
+	}
 	if (activeTransport) {
 		try {
 			if (typeof activeTransport.flushSync === "function") {

@@ -1,9 +1,11 @@
 import fs from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { getDefaultLogsDir } from "../utils/environment.js";
 import {
 	classifyError,
 	createToolErrorLogger,
+	isTestEnvironment,
 	maskSensitiveData,
 	recordToolError,
 	setToolErrorLogger,
@@ -231,6 +233,29 @@ describe("toolErrorLogger", () => {
 			expect(logged.tool).toBe("ns_runCustomSuiteQL");
 			expect(logged.category).toBe("SUITEQL_SYNTAX");
 			expect(logged.parameters.accessToken).toBe("[REDACTED]");
+		});
+
+		it("should return silent logger when createToolErrorLogger is called without params in test mode", () => {
+			expect(isTestEnvironment()).toBe(true);
+			const defaultTestLogger = createToolErrorLogger();
+			expect(defaultTestLogger.level).toBe("silent");
+		});
+
+		it("should not write any file to default logs dir when recordToolError is called in test mode without custom logger", () => {
+			setToolErrorLogger(null);
+			const entry = recordToolError({
+				tool: "netsuite_run_suiteql",
+				durationMs: 10,
+				category: "SUITEQL_SYNTAX",
+				errorMessage: "Test error in test environment",
+				parameters: { sqlQuery: "SELECT id FROM nonexistent" },
+			});
+			expect(entry.id).toBeDefined();
+			expect(entry.tool).toBe("netsuite_run_suiteql");
+
+			const logsDir = getDefaultLogsDir();
+			const activeLogFile = path.join(logsDir, "tool-errors.jsonl");
+			expect(fs.existsSync(activeLogFile)).toBe(false);
 		});
 	});
 });

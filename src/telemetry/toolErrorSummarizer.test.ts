@@ -129,6 +129,46 @@ describe("toolErrorSummarizer", () => {
 		expect(validationOnly[0].category).toBe("ARGUMENT_VALIDATION");
 	});
 
+	it("should filter out entries generated from automated unit test executions", async () => {
+		const mixedEntries = [
+			...sampleEntries,
+			{
+				id: "test-err-1",
+				timestamp: new Date().toISOString(),
+				tool: "netsuite_run_suiteql",
+				accountId: "123456_SB1",
+				environment: "Sandbox",
+				durationMs: 1,
+				category: "ARGUMENT_VALIDATION",
+				errorMessage: "Test permission error",
+				errorStack:
+					"Error: Permission Violation\n    at /Users/fuxintao/WebstormProjects/NetsuiteMcp/src/handlers/handlers.test.ts:447:5\n    at node_modules/@vitest/runner/dist/chunk-artifact.js:302:11",
+				parameters: { sqlQuery: "SELECT id FROM customer" },
+			},
+			{
+				id: "test-err-2",
+				timestamp: new Date().toISOString(),
+				tool: "netsuite_upload_file",
+				accountId: "123456_SB1",
+				environment: "Sandbox",
+				durationMs: 1,
+				category: "SYSTEM_EXCEPTION",
+				errorMessage: "Operation not permitted",
+				parameters: { paths: "/tmp/.test-handlers-root/test.js" },
+			},
+		];
+
+		writeSampleLogs("tool-errors.2026-09-07.1.jsonl", mixedEntries as any);
+		const cutoff = new Date();
+		cutoff.setDate(cutoff.getDate() - 1);
+		const files = findRelevantLogFiles(testDir, cutoff);
+
+		const loaded = await loadErrorEntries(files, cutoff);
+		// Only sampleEntries should be loaded, test-err-1 and test-err-2 must be filtered out
+		expect(loaded.length).toBe(sampleEntries.length);
+		expect(loaded.some((e) => e.id.startsWith("test-err"))).toBe(false);
+	});
+
 	it("should generate actionable recommendations across error categories", () => {
 		const byCategory = {
 			ARGUMENT_VALIDATION: 1,
