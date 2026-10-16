@@ -322,7 +322,7 @@ async function readStdin() {
 	});
 }
 
-// CLI Execution if executed directly
+// CLI / Hook Execution if executed directly
 if (
 	process.argv[1] &&
 	path.resolve(process.argv[1]) ===
@@ -331,6 +331,7 @@ if (
 	async function runCli() {
 		const args = process.argv.slice(2);
 		let targetFiles = args;
+		let isHookMode = false;
 
 		// Antigravity PostToolUse hook protocol fallback
 		if (targetFiles.length === 0) {
@@ -338,11 +339,14 @@ if (
 				const rawInput = await readStdin();
 				if (rawInput.trim()) {
 					const parsed = JSON.parse(rawInput);
+					if (parsed?.toolCall || parsed?.stepIdx !== undefined) {
+						isHookMode = true;
+					}
 					const hookFile =
 						parsed?.toolCall?.args?.TargetFile ||
 						parsed?.toolCall?.args?.targetFile ||
 						parsed?.toolCall?.args?.path;
-					if (typeof hookFile === "string" && (hookFile.endsWith(".js") || hookFile.endsWith(".ts"))) {
+					if (typeof hookFile === "string") {
 						targetFiles = [hookFile];
 					}
 				}
@@ -351,6 +355,59 @@ if (
 			}
 		}
 
+		// In Antigravity PostToolUse hook mode
+		if (isHookMode) {
+			try {
+				const hookFile = targetFiles[0];
+				if (hookFile && fs.existsSync(hookFile)) {
+					const ext = path.extname(hookFile).toLowerCase();
+
+					// 1. TypeScript / JSON files: run repository standard Biome linter
+					if ([".ts", ".tsx", ".json"].includes(ext)) {
+						try {
+							execSync(
+								`npx @biomejs/biome check --diagnostic-level=error "${hookFile}"`,
+								{ stdio: "pipe", encoding: "utf-8" },
+							);
+						} catch (err) {
+							const out = err?.stdout || err?.stderr || err?.message || "";
+							console.error(
+								`❌ [Code Quality Gate: Biome Lint Violation in ${hookFile}]:\n${out}`,
+							);
+						}
+					}
+					// 2. SuiteScript / JavaScript files: run Oracle SAFE & OWASP static analyzer
+					else if ([".js", ".mjs", ".cjs"].includes(ext)) {
+						const content = fs.readFileSync(hookFile, "utf-8");
+						const issues = analyzeSuiteScriptContent(
+							content,
+							path.basename(hookFile),
+						);
+						if (issues.length > 0) {
+							console.error(
+								`🔍 [SuiteScript SAFE Check] Issues found in ${hookFile}:`,
+							);
+							for (const iss of issues) {
+								const icon = iss.severity === "ERROR" ? "❌" : "⚠️";
+								console.error(
+									`  ${icon} [Line ${iss.line}] [${iss.rule}] ${iss.message}`,
+								);
+							}
+						}
+					}
+				}
+			} catch (err) {
+				console.error(
+					`⚠️ [Code Quality Gate Hook Error]: ${err instanceof Error ? err.message : String(err)}`,
+				);
+			} finally {
+				// PostToolUse contract strictly requires an empty JSON object on stdout
+				process.stdout.write("{}\n");
+				process.exit(0);
+			}
+		}
+
+		// Standalone CLI mode (e.g. npm run check:safe)
 		if (targetFiles.length === 0) {
 			const scanDirs = ["FileCabinet", "src/suitescript", "suitescripts"];
 			targetFiles = [];
@@ -367,7 +424,6 @@ if (
 			console.log(
 				"🛡️ [SuiteScript SAFE Check] No target SuiteScript files specified or found. Static check passed.",
 			);
-			process.stdout.write("{}");
 			process.exit(0);
 		}
 
@@ -404,16 +460,15 @@ if (
 
 		if (totalErrors > 0) {
 			console.error("🛑 [SuiteScript SAFE Check] Failed with compliance errors.");
-			process.stdout.write("{}");
 			process.exit(1);
 		} else {
 			console.log(
 				"✨ [SuiteScript SAFE Check] Codebase is compliant with Oracle SAFE Guide 2025.2.",
 			);
-			process.stdout.write("{}");
 			process.exit(0);
 		}
 	}
 
 	runCli();
 }
+
