@@ -7,7 +7,7 @@ import {
 	formatMetadataToCompactMarkdown,
 } from "../utils/contextSlimmer.js";
 import { isSandboxAccount } from "../utils/environment.js";
-import { isPermissionError } from "../utils/errors.js";
+import { assertNoMcpError, isPermissionError } from "../utils/errors.js";
 import {
 	formatTableCatalogMarkdown,
 	searchSuiteQLCatalog,
@@ -100,10 +100,11 @@ export async function resolveNaturalKeyToInternalId(
 		try {
 			const typeFilter = getTransactionTypeFilter(recType);
 			const upperKey = safeKey.toUpperCase();
-			const sql = `SELECT id, type, tranid FROM transaction WHERE UPPER(tranid) = '${upperKey}' ${typeFilter} ORDER BY id DESC FETCH FIRST 1 ROWS ONLY`;
+			const sql = `SELECT id, type, tranid FROM transaction WHERE UPPER(tranid) = '${upperKey}' ${typeFilter} ORDER BY id DESC FETCH FIRST 2 ROWS ONLY`;
 			const res = await mcpTools.executeTool("ns_runCustomSuiteQL", {
 				sqlQuery: sql,
 			});
+			assertNoMcpError(res);
 			const rows = mcpTools.extractDataArray(res);
 			if (rows.length > 0 && rows[0]?.id) {
 				return {
@@ -126,10 +127,11 @@ export async function resolveNaturalKeyToInternalId(
 		}
 		try {
 			const upperKey = safeKey.toUpperCase();
-			const sql = `SELECT id, name FROM ${recType} WHERE UPPER(name) = '${upperKey}' ORDER BY id DESC FETCH FIRST 1 ROWS ONLY`;
+			const sql = `SELECT id, name FROM ${recType} WHERE UPPER(name) = '${upperKey}' ORDER BY id DESC FETCH FIRST 2 ROWS ONLY`;
 			const res = await mcpTools.executeTool("ns_runCustomSuiteQL", {
 				sqlQuery: sql,
 			});
+			assertNoMcpError(res);
 			const rows = mcpTools.extractDataArray(res);
 			if (rows.length > 0 && rows[0]?.id) {
 				return { id: String(rows[0].id), recordType: recType };
@@ -146,10 +148,11 @@ export async function resolveNaturalKeyToInternalId(
 	if (recType === "customer" || recType === "vendor" || recType === "entity") {
 		try {
 			const upperKey = safeKey.toUpperCase();
-			const sql = `SELECT id FROM entity WHERE UPPER(entityid) = '${upperKey}' FETCH FIRST 1 ROWS ONLY`;
+			const sql = `SELECT id FROM entity WHERE UPPER(entityid) = '${upperKey}' FETCH FIRST 2 ROWS ONLY`;
 			const res = await mcpTools.executeTool("ns_runCustomSuiteQL", {
 				sqlQuery: sql,
 			});
+			assertNoMcpError(res);
 			const rows = mcpTools.extractDataArray(res);
 			if (rows.length > 0 && rows[0]?.id) {
 				return { id: String(rows[0].id), recordType: recType };
@@ -166,10 +169,11 @@ export async function resolveNaturalKeyToInternalId(
 	if (recType === "item" || recType === "inventoryitem") {
 		try {
 			const upperKey = safeKey.toUpperCase();
-			const sql = `SELECT id FROM item WHERE UPPER(itemid) = '${upperKey}' FETCH FIRST 1 ROWS ONLY`;
+			const sql = `SELECT id FROM item WHERE UPPER(itemid) = '${upperKey}' FETCH FIRST 2 ROWS ONLY`;
 			const res = await mcpTools.executeTool("ns_runCustomSuiteQL", {
 				sqlQuery: sql,
 			});
+			assertNoMcpError(res);
 			const rows = mcpTools.extractDataArray(res);
 			if (rows.length > 0 && rows[0]?.id) {
 				return { id: String(rows[0].id), recordType: "item" };
@@ -232,6 +236,7 @@ export async function resolveNaturalKeysBatch(
 			const res = await mcpTools.executeTool("ns_runCustomSuiteQL", {
 				sqlQuery: sql,
 			});
+			assertNoMcpError(res);
 			const rows = mcpTools.extractDataArray(res);
 			for (const row of rows) {
 				const tranid = (row.tranid as string)?.toUpperCase();
@@ -261,6 +266,7 @@ export async function resolveNaturalKeysBatch(
 			const res = await mcpTools.executeTool("ns_runCustomSuiteQL", {
 				sqlQuery: sql,
 			});
+			assertNoMcpError(res);
 			const rows = mcpTools.extractDataArray(res);
 			for (const row of rows) {
 				const name = (row.name as string)?.toUpperCase();
@@ -284,6 +290,7 @@ export async function resolveNaturalKeysBatch(
 			const res = await mcpTools.executeTool("ns_runCustomSuiteQL", {
 				sqlQuery: sql,
 			});
+			assertNoMcpError(res);
 			const rows = mcpTools.extractDataArray(res);
 			for (const row of rows) {
 				const entityid = (row.entityid as string)?.toUpperCase();
@@ -429,6 +436,9 @@ async function inspectSingleRecord(
 		) {
 			if (isFalseFlag) {
 				customFalseFlags.push(key);
+				if (format === "compact_json") {
+					customFields[key] = val;
+				}
 			} else {
 				customFields[key] = val;
 			}
@@ -446,6 +456,9 @@ async function inspectSingleRecord(
 		} else {
 			if (isFalseFlag) {
 				systemFalseFlags.push(key);
+				if (format === "compact_json") {
+					systemFields[key] = val;
+				}
 			} else {
 				systemFields[key] = val;
 			}
@@ -488,6 +501,14 @@ async function inspectSingleRecord(
 			recordId: targetId,
 			systemFields,
 			customFields,
+			...(systemFalseFlags.length > 0 || customFalseFlags.length > 0
+				? {
+						uncheckedFlags: {
+							system: systemFalseFlags,
+							custom: customFalseFlags,
+						},
+					}
+				: {}),
 		};
 		if (linesMode === "summary") {
 			jsonOutput.sublistsSummary = sublistsSummary;
@@ -554,7 +575,9 @@ async function inspectSingleRecord(
 	} else if (includeSublists && Object.keys(sublistsDetail).length > 0) {
 		md += `\n### 📦 Sublists & Line Details\n`;
 		for (const [sublistName, rows] of Object.entries(sublistsDetail)) {
-			md += `#### 🔹 Sublist: \`${sublistName}\` (${rows.length} lines)\n\n`;
+			const totalCount = sublistsSummary[sublistName]?.count ?? rows.length;
+			const isTruncated = totalCount > rows.length;
+			md += `#### 🔹 Sublist: \`${sublistName}\` (Showing ${rows.length} of ${totalCount} lines${isTruncated ? " — TRUNCATED" : ""})\n\n`;
 			if (rows.length > 0) {
 				const headerSet = new Set<string>();
 				for (const r of rows) {
@@ -735,6 +758,7 @@ function formatOfflineRecordMetadata(
 	table: string,
 ): string {
 	let md = `## 📖 Official Records Definition: \`${table}\` (Offline Catalog)\n\n`;
+	md += `> ℹ️ **Notice**: Showing standard built-in schema from offline catalog (fast cache). Tenant custom fields (\`custbody_*\`, \`custentity_*\`, \`custcol_*\`, etc.) are not included in offline reference. To inspect live tenant custom fields, invoke \`netsuite_get_metadata\` with \`source: 'remote'\`.\n\n`;
 	if (def.description) {
 		md += `> **Description**: ${def.description}\n\n`;
 	}
@@ -937,10 +961,11 @@ async function inspectSingleRecordSystemNotes(
 		try {
 			const safeTranid = recordId.replace(/'/g, "''");
 			const upperTranid = safeTranid.toUpperCase();
-			const lookupSql = `SELECT id FROM transaction WHERE UPPER(tranid) = '${upperTranid}' FETCH FIRST 1 ROWS ONLY`;
+			const lookupSql = `SELECT id FROM transaction WHERE UPPER(tranid) = '${upperTranid}' FETCH FIRST 2 ROWS ONLY`;
 			const lookupRes = await mcpTools.executeTool("ns_runCustomSuiteQL", {
 				sqlQuery: lookupSql,
 			});
+			assertNoMcpError(lookupRes);
 			const rows = mcpTools.extractDataArray(lookupRes);
 			if (rows.length > 0 && rows[0]?.id) {
 				recordId = String(rows[0].id);
@@ -966,6 +991,7 @@ async function inspectSingleRecordSystemNotes(
 	const res = await mcpTools.executeTool("ns_runCustomSuiteQL", {
 		sqlQuery: sql,
 	});
+	assertNoMcpError(res);
 	const rows = mcpTools.extractDataArray(res);
 
 	if (rows.length === 0) {
@@ -979,12 +1005,12 @@ async function inspectSingleRecordSystemNotes(
 		const author = r.author_name || r.author_id || "System";
 		const role = r.role_name || "-";
 		const field = r.field || "-";
-		const oldVal = (
-			r.oldvalue !== null && r.oldvalue !== undefined ? String(r.oldvalue) : ""
-		).slice(0, 30);
-		const newVal = (
-			r.newvalue !== null && r.newvalue !== undefined ? String(r.newvalue) : ""
-		).slice(0, 30);
+		const rawOld =
+			r.oldvalue !== null && r.oldvalue !== undefined ? String(r.oldvalue) : "";
+		const oldVal = rawOld.length > 60 ? `${rawOld.slice(0, 57)}...` : rawOld;
+		const rawNew =
+			r.newvalue !== null && r.newvalue !== undefined ? String(r.newvalue) : "";
+		const newVal = rawNew.length > 60 ? `${rawNew.slice(0, 57)}...` : rawNew;
 		md += `| ${r.date} | ${author} | ${role} | \`${field}\` | ${oldVal} | ${newVal} |\n`;
 	}
 

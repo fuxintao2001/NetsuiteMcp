@@ -104,6 +104,7 @@ export async function handleGetScriptLogs(
 		}
 		conditions.push(`sn.type = '${cleanLogType}'`);
 	}
+	const isDefaultDateWindow = !dateFrom && !dateTo;
 	if (dateFrom) {
 		if (!/^\d{4}-\d{2}-\d{2}$/.test(dateFrom)) {
 			return textResult(
@@ -162,14 +163,14 @@ export async function handleGetScriptLogs(
 				);
 				if (
 					errorMsg.includes("Record 'ScriptNote' was not found") ||
-					errorMsg.includes("Record 'Script' was not found")
+					errorMsg.includes("Record 'Script' was not found") ||
+					isPermissionError(errorMsg)
 				) {
-					return textResult(
-						`❌ NetSuite Error: ${errorMsg}\n\n💡 Tip: Accessing script execution logs requires the role to have 'SuiteScript' (ADMI_CUSTOMSCRIPT) permission.`,
-						true,
+					throw new Error(
+						`INSUFFICIENT_PERMISSION: Accessing SuiteScript execution logs requires the role to have 'SuiteScript' (ADMI_CUSTOMSCRIPT) permission. NetSuite error: ${errorMsg}`,
 					);
 				}
-				return textResult(`❌ Failed to query script logs: ${errorMsg}`, true);
+				throw new Error(`Failed to query script logs: ${errorMsg}`);
 			}
 		}
 
@@ -198,6 +199,12 @@ export async function handleGetScriptLogs(
 				JSON.stringify(
 					{
 						totalResults: data.length,
+						...(isDefaultDateWindow
+							? {
+									dateWindowNotice:
+										"Filtered to last 7 days by default (sn.date >= SYSDATE - 7). Specify dateFrom to query older logs.",
+								}
+							: {}),
 						...(diagnosticSummary ? { diagnosticSummary } : {}),
 						query: sql,
 						data,
@@ -209,12 +216,16 @@ export async function handleGetScriptLogs(
 		}
 
 		if (data.length === 0) {
-			return textResult(
-				"No script logs found matching the specified criteria.",
-			);
+			const windowDesc = isDefaultDateWindow
+				? "within the default 7-day window (sn.date >= SYSDATE - 7). To search older logs, specify 'dateFrom' (e.g. dateFrom: '2025-01-01')"
+				: "matching the specified criteria";
+			return textResult(`No script logs found ${windowDesc}.`);
 		}
 
 		let md = `## 📜 SuiteScript Execution Logs (${data.length} entries)\n\n`;
+		if (isDefaultDateWindow) {
+			md += `> ℹ️ **Notice**: Showing logs from the last 7 days (default partition filter: \`sn.date >= SYSDATE - 7\`). To query older logs, specify \`dateFrom\`.\n\n`;
+		}
 
 		if (diagnosticSummary) {
 			md += `> [!WARNING] **Diagnostic Alert**: ${diagnosticSummary.errorCount} error/emergency log(s) found.\n`;

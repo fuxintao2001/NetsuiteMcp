@@ -694,10 +694,23 @@ export class NetSuiteMCPTools {
 		}
 
 		if (suiteqlData) {
+			const dataList = Array.isArray(suiteqlData.data)
+				? suiteqlData.data
+				: Array.isArray(suiteqlData.items)
+					? (suiteqlData.items as unknown[])
+					: [];
+			const hasMore =
+				typeof suiteqlData.hasMore === "boolean"
+					? suiteqlData.hasMore
+					: typeof suiteqlData.totalResults === "number"
+						? suiteqlData.totalResults > dataList.length
+						: undefined;
+
 			return {
 				totalResults: suiteqlData.totalResults,
 				numberOfPages: suiteqlData.numberOfPages,
-				data: suiteqlData.data,
+				...(hasMore !== undefined ? { hasMore } : {}),
+				data: suiteqlData.data ?? dataList,
 			};
 		}
 

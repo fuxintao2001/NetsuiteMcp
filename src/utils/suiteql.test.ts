@@ -987,6 +987,23 @@ describe("SuiteQL, Search & Query Utilities", () => {
 				expect(markdown).toContain("| 1 | Row 1 |");
 			});
 
+			it("should display hasMore notice when hasMore is true or at 100 limit", () => {
+				const hasMoreResult = {
+					hasMore: true,
+					data: [{ id: "1", name: "Row 1" }],
+				};
+				const markdown = formatSuiteQLToCompactMarkdown(hasMoreResult);
+				expect(markdown).toContain(
+					"safe ceiling applied; additional rows may exist",
+				);
+
+				const atLimitResult = {
+					data: Array.from({ length: 100 }, (_, i) => ({ id: String(i) })),
+				};
+				const atLimitMarkdown = formatSuiteQLToCompactMarkdown(atLimitResult);
+				expect(atLimitMarkdown).toContain("Query returned 100 rows");
+			});
+
 			it("should place truncation notice at the very top when rows exceed 100", () => {
 				const largeResult = {
 					data: Array.from({ length: 105 }, (_, i) => ({

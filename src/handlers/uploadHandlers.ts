@@ -227,6 +227,7 @@ export async function handleUploadFile(
 
 	// 8. Synchronize external source files into resolvedProjectRoot if execution directory was switched
 	const fileCabinetRoot = path.join(resolvedProjectRoot, "src", "FileCabinet");
+	const syncedFiles: string[] = [];
 	for (const f of resolution.files) {
 		if (f.exists && f.localFullPath && f.fileCabinetPath) {
 			const cleanFcPath = f.fileCabinetPath.replace(/^\/+/, "");
@@ -244,6 +245,7 @@ export async function handleUploadFile(
 					fs.mkdirSync(targetDir, { recursive: true });
 				}
 				fs.copyFileSync(f.localFullPath, expectedInRoot);
+				syncedFiles.push(f.fileCabinetPath);
 			}
 		}
 	}
@@ -292,6 +294,10 @@ export async function handleUploadFile(
 			resolvedProjectRoot,
 		);
 		successMd += `- \`${targetDisplay}\` (${sizeKb} KB) ➔ \`${f.fileCabinetPath}\`\n`;
+	}
+
+	if (syncedFiles.length > 0) {
+		successMd += `\n> ℹ️ **Notice**: ${syncedFiles.length} file(s) synchronized from external path into project FileCabinet: \`${syncedFiles.join("`, `")}\`\n`;
 	}
 
 	if (execResult.stdout.trim().length > 0) {

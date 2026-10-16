@@ -44,7 +44,12 @@ export function isPermissionError(
 		normalized.includes("access denied") ||
 		normalized.includes("you do not have permission") ||
 		normalized.includes("you need the '") ||
-		normalized.includes("forbidden")
+		normalized.includes("forbidden") ||
+		normalized.includes("unauthorized") ||
+		normalized.includes("does not have access") ||
+		normalized.includes("two-factor authentication") ||
+		normalized.includes("record 'scriptnote' was not found") ||
+		normalized.includes("record 'script' was not found")
 	);
 }
 
@@ -365,4 +370,35 @@ export function sanitizeError(error: unknown): Error {
 	}
 
 	return cleanErr;
+}
+
+/**
+ * Inspects any NetSuite tool response (raw object, MCP content wrapper, or JSON string)
+ * for embedded error fields. Throws an Error if an error is detected.
+ * If the error is a permission error, ensures it throws so the permission hard stop is triggered.
+ */
+export function assertNoMcpError(result: unknown): void {
+	if (!result || typeof result !== "object") return;
+
+	let payload: unknown = result;
+	const resObj = result as Record<string, unknown>;
+
+	if (Array.isArray(resObj.content)) {
+		const first = (resObj.content as Array<{ text?: string }>)[0];
+		if (first?.text && typeof first.text === "string") {
+			try {
+				payload = JSON.parse(first.text);
+			} catch {
+				// not JSON text
+			}
+		}
+	}
+
+	if (payload && typeof payload === "object") {
+		const pObj = payload as Record<string, unknown>;
+		if (pObj.isError === true || pObj.error || pObj.success === false) {
+			const errMsg = String(pObj.error || pObj.message || JSON.stringify(pObj));
+			throw new Error(errMsg);
+		}
+	}
 }

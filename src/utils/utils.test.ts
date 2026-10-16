@@ -11,6 +11,7 @@ import {
 import { parseEnv } from "./envLoader.js";
 import { validateEnv } from "./envValidator.js";
 import {
+	assertNoMcpError,
 	isPermissionError,
 	PERMISSION_HARD_STOP_ADVICE,
 	parseNetSuiteError,
@@ -230,6 +231,18 @@ SPACED = trimmed
 				).toBe(true);
 				expect(isPermissionError("Access denied")).toBe(true);
 				expect(isPermissionError("Forbidden")).toBe(true);
+				expect(isPermissionError("Record 'ScriptNote' was not found")).toBe(
+					true,
+				);
+				expect(isPermissionError("Record 'Script' was not found")).toBe(true);
+				expect(
+					isPermissionError(
+						"Two-Factor Authentication required to access role",
+					),
+				).toBe(true);
+				expect(
+					isPermissionError("User does not have access to this application"),
+				).toBe(true);
 			});
 
 			it("should return false for non-permission errors", () => {
@@ -237,6 +250,39 @@ SPACED = trimmed
 				expect(isPermissionError("RECORD_NOT_FOUND")).toBe(false);
 				expect(isPermissionError("INVALID_FLD_VALUE")).toBe(false);
 				expect(isPermissionError(undefined, 400)).toBe(false);
+			});
+		});
+
+		describe("assertNoMcpError", () => {
+			it("should not throw on valid payload without error", () => {
+				expect(() => assertNoMcpError({ data: [{ id: "1" }] })).not.toThrow();
+				expect(() =>
+					assertNoMcpError({
+						content: [{ type: "text", text: '{"success": true, "data": []}' }],
+					}),
+				).not.toThrow();
+			});
+
+			it("should throw on top-level error object", () => {
+				expect(() =>
+					assertNoMcpError({ error: "INSUFFICIENT_PERMISSION: Denied" }),
+				).toThrow("INSUFFICIENT_PERMISSION");
+				expect(() =>
+					assertNoMcpError({ success: false, message: "Custom error" }),
+				).toThrow("Custom error");
+			});
+
+			it("should throw on nested MCP content wrapper error", () => {
+				expect(() =>
+					assertNoMcpError({
+						content: [
+							{
+								type: "text",
+								text: '{"success": false, "error": "Access denied"}',
+							},
+						],
+					}),
+				).toThrow("Access denied");
 			});
 		});
 

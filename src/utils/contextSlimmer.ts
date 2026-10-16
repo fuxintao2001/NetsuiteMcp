@@ -138,6 +138,7 @@ export function formatSuiteQLToCompactMarkdown(result: unknown): string {
 
 	let dataRows: Array<Record<string, unknown>> = [];
 	let totalResults: number | undefined;
+	let hasMore: boolean | undefined;
 
 	// Direct array
 	if (Array.isArray(result)) {
@@ -150,6 +151,10 @@ export function formatSuiteQLToCompactMarkdown(result: unknown): string {
 			return typeof result === "string"
 				? result
 				: JSON.stringify(result, null, 2);
+		}
+
+		if (typeof resObj.hasMore === "boolean") {
+			hasMore = resObj.hasMore;
 		}
 
 		if (Array.isArray(resObj.data)) {
@@ -180,7 +185,8 @@ export function formatSuiteQLToCompactMarkdown(result: unknown): string {
 					k !== "links" &&
 					k !== "method" &&
 					k !== "totalResults" &&
-					k !== "numberOfPages",
+					k !== "numberOfPages" &&
+					k !== "hasMore",
 			);
 			if (keys.length > 0) {
 				dataRows = [resObj];
@@ -230,6 +236,11 @@ export function formatSuiteQLToCompactMarkdown(result: unknown): string {
 	let output = "";
 	if (wasTruncated) {
 		output += `> ⚠️ **Notice**: Result truncated to top ${MAX_DISPLAY_ROWS} of ${totalInputRows} rows. Use WHERE, ROWNUM, or aggregation in SuiteQL for complete totals.\n\n`;
+	} else if (
+		hasMore === true ||
+		(dataRows.length === 100 && totalResults === undefined)
+	) {
+		output += `> ℹ️ **Notice**: Query returned ${dataRows.length} rows (safe ceiling applied; additional rows may exist). Use \`COUNT(*)\` aggregate for exact total or specify \`OFFSET / ROWNUM\` for remaining pages.\n\n`;
 	}
 	if (totalResults !== undefined && totalResults !== dataRows.length) {
 		output += `*Total Results: ${totalResults} (Showing ${dataRows.length} rows)*\n\n`;

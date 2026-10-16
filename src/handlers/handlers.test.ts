@@ -1037,6 +1037,62 @@ describe("MCP Handler Wires", () => {
 				expect(parsed.sublists.item[1].item).toBe("101");
 			});
 
+			it("should preserve false and 'F' boolean flags in compact_json mode", async () => {
+				const callFn = registeredHandlers.get("tools/call");
+				mockMCPTools.executeTool.mockResolvedValueOnce({
+					id: "999",
+					isinactive: false,
+					isclosed: "F",
+					custbody_approved: false,
+				});
+
+				const res = await callFn?.({
+					params: {
+						name: "netsuite_get_record",
+						arguments: {
+							recordType: "salesorder",
+							id: "999",
+							format: "compact_json",
+						},
+					},
+				});
+
+				const parsed = JSON.parse(res.content[0].text.split("\n\n---\n")[0]);
+				expect(parsed.systemFields.isinactive).toBe(false);
+				expect(parsed.systemFields.isclosed).toBe("F");
+				expect(parsed.customFields.custbody_approved).toBe(false);
+				expect(parsed.uncheckedFlags.system).toContain("isinactive");
+				expect(parsed.uncheckedFlags.system).toContain("isclosed");
+				expect(parsed.uncheckedFlags.custom).toContain("custbody_approved");
+			});
+
+			it("should indicate total lines and truncation status in markdown sublists", async () => {
+				const callFn = registeredHandlers.get("tools/call");
+				mockMCPTools.executeTool.mockResolvedValueOnce({
+					id: "123",
+					item: [
+						{ item: "1", quantity: 10 },
+						{ item: "2", quantity: 20 },
+						{ item: "3", quantity: 30 },
+					],
+				});
+
+				const res = await callFn?.({
+					params: {
+						name: "netsuite_get_record",
+						arguments: {
+							recordType: "salesorder",
+							id: "123",
+							maxLines: 1,
+						},
+					},
+				});
+
+				expect(res.content[0].text).toContain(
+					"Showing 1 of 3 lines — TRUNCATED",
+				);
+			});
+
 			it("should support linesMode: summary when explicitly requested", async () => {
 				const callFn = registeredHandlers.get("tools/call");
 				mockMCPTools.executeTool.mockResolvedValueOnce({
@@ -1572,6 +1628,52 @@ describe("MCP Handler Wires", () => {
 				expect(res.content[0].text).toContain(
 					"could not be resolved to a numeric internal ID",
 				);
+			});
+
+			it("should trigger permission hard stop when netsuite_get_system_notes encounters permission error", async () => {
+				const callFn = registeredHandlers.get("tools/call");
+				mockMCPTools.executeTool.mockResolvedValueOnce({
+					isError: true,
+					error: "INSUFFICIENT_PERMISSION: Permission Violation for SystemNote",
+				});
+
+				const res = await callFn?.({
+					params: {
+						name: "netsuite_get_system_notes",
+						arguments: { recordId: "12345" },
+					},
+				});
+
+				expect(res.isError).toBe(true);
+				expect(res.content[0].text).toContain(
+					"PERMISSION DENIED — HARD STOP REQUIRED",
+				);
+			});
+
+			it("should truncate long audit values to 60 characters with ellipsis", async () => {
+				const callFn = registeredHandlers.get("tools/call");
+				const longValue = "A".repeat(80);
+				mockMCPTools.executeTool.mockResolvedValueOnce({
+					data: [
+						{
+							date: "2026-03-01 10:00:00",
+							field: "memo",
+							oldvalue: "Short",
+							newvalue: longValue,
+							author_name: "Admin",
+							role_name: "Admin",
+						},
+					],
+				});
+
+				const res = await callFn?.({
+					params: {
+						name: "netsuite_get_system_notes",
+						arguments: { recordId: "12345" },
+					},
+				});
+
+				expect(res.content[0].text).toContain(`${"A".repeat(57)}...`);
 			});
 
 			it("should handle error summary diagnostics via netsuite_status successfully", async () => {

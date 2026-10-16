@@ -9,6 +9,7 @@ import { normalizeStandardArgs } from "../utils/args.js";
 import { formatSuiteQLToCompactMarkdown } from "../utils/contextSlimmer.js";
 import { buildEnvSuffix, isSandboxAccount } from "../utils/environment.js";
 import {
+	assertNoMcpError,
 	isPermissionError,
 	PERMISSION_HARD_STOP_ADVICE,
 } from "../utils/errors.js";
@@ -256,16 +257,7 @@ const TOOL_DEFINITIONS: AnyToolDefinition[] = [
 								"ns_runCustomSuiteQL",
 								queryParams,
 							);
-							if (
-								queryRes &&
-								typeof queryRes === "object" &&
-								"error" in queryRes &&
-								typeof (queryRes as Record<string, unknown>).error === "string"
-							) {
-								throw new Error(
-									(queryRes as Record<string, unknown>).error as string,
-								);
-							}
+							assertNoMcpError(queryRes);
 							const formatted = formatSuiteQLToCompactMarkdown(queryRes);
 							return {
 								index: index + 1,
@@ -337,14 +329,7 @@ const TOOL_DEFINITIONS: AnyToolDefinition[] = [
 				"ns_runCustomSuiteQL",
 				queryParams,
 			);
-			if (
-				queryRes &&
-				typeof queryRes === "object" &&
-				"error" in queryRes &&
-				typeof (queryRes as Record<string, unknown>).error === "string"
-			) {
-				throw new Error((queryRes as Record<string, unknown>).error as string);
-			}
+			assertNoMcpError(queryRes);
 			return textResult(formatSuiteQLToCompactMarkdown(queryRes));
 		},
 	}),
