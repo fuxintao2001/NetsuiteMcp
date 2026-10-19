@@ -1,4 +1,6 @@
 import type { Server } from "@modelcontextprotocol/server";
+import { recordsReferenceService } from "../utils/recordsReference.js";
+import { SUITEQL_TEMPLATES } from "../utils/suiteqlTemplates.js";
 
 interface PromptArgument {
 	name: string;
@@ -204,14 +206,81 @@ ${errorLog}
 				const req = (args?.requirement as string) || "";
 				const recType = (args?.recordType as string) || "transaction";
 
+				let groundingContext = "";
+				const cleanRecType = recType.trim().toLowerCase();
+				const recDef =
+					recordsReferenceService.getRecordDefinition(cleanRecType);
+				if (recDef?.found && recDef.fields.length > 0) {
+					const topFields = recDef.fields
+						.slice(0, 30)
+						.map((f) => `${f.internalId} (${f.label}: ${f.type})`)
+						.join(", ");
+					groundingContext += `\n\n## Schema Grounding (Physical Columns for '${cleanRecType}'):\n${topFields}`;
+
+					if (recDef.sublists && recDef.sublists.length > 0) {
+						const sublistsDesc = recDef.sublists
+							.map((s) => `${s.name}${s.label ? ` (${s.label})` : ""}`)
+							.join(", ");
+						groundingContext += `\n\n## Sublists Available:\n${sublistsDesc}`;
+					}
+					if (recDef.relations && recDef.relations.length > 0) {
+						const relationsDesc = recDef.relations
+							.slice(0, 5)
+							.map(
+								(r) =>
+									`${r.field} -> ${r.targetTable}.${r.targetField || "id"} (${r.type})`,
+							)
+							.join(", ");
+						groundingContext += `\n\n## Entity Relations:\n${relationsDesc}`;
+					}
+				}
+
+				const isTransactionType = [
+					"transaction",
+					"salesorder",
+					"invoice",
+					"purchaseorder",
+					"itemfulfillment",
+					"creditmemo",
+					"vendorbill",
+					"cashsale",
+				].includes(cleanRecType);
+
+				const isItemType = [
+					"item",
+					"inventoryitem",
+					"assemblyitem",
+					"lotnumberedinventoryitem",
+					"serializedinventoryitem",
+				].includes(cleanRecType);
+
+				// Find relevant golden query templates
+				const matchingTemplates = SUITEQL_TEMPLATES.filter((t) => {
+					const target = `${t.id} ${t.name} ${t.description}`.toLowerCase();
+					return (
+						target.includes(cleanRecType) ||
+						(isTransactionType && t.category === "transactions") ||
+						(isItemType && t.category === "inventory")
+					);
+				});
+
+				let templateContext = "";
+				const tmpl = matchingTemplates[0];
+				if (tmpl) {
+					templateContext = `\n\n## Verified Oracle SAFE Golden Query Pattern (${tmpl.name}):
+\`\`\`sql
+${tmpl.sqlTemplate}
+\`\`\``;
+				}
+
 				const promptText = `You are a SuiteQL specialist following Oracle SAFE Guide (2025.2) and NetSuite2.com standards.
 Generate a valid, high-performance SuiteQL query for the following requirement:
 
 - **Requirement**: ${req}
-- **Target Domain / Record**: ${recType}
+- **Target Domain / Record**: ${recType}${groundingContext}${templateContext}
 
 ## Mandatory SuiteQL Guardrails:
-1. NO \`SELECT *\` — specify explicit column names.
+1. NO \`SELECT *\` — specify explicit column names from the provided schema.
 2. If querying \`transaction\` + \`transactionline\`, ALWAYS include \`tl.mainline = 'F'\` and \`tl.taxline = 'F'\`.
 3. If checking downstream linked transactions, join on \`transactionline.createdfrom\` (NOT transaction.createdfrom).
 4. If querying cross-item location stock, use \`aggregateitemlocation\` (NOT \`inventoryitemlocations\`).

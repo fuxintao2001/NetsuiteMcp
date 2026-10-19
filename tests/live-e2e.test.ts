@@ -12,7 +12,7 @@ import { OAuthManager } from "../src/oauth/manager.js";
  * - Sales Order: SO-ZH-202112-000003 (ID: 6257)
  * - Customer: IC00000009 (ID: 166, 100101-NVC Lighting Japan株式会社)
  */
-describe("NetSuite Live Sandbox E2E Suite (9260916-sb1)", () => {
+describe("NetSuite Live Sandbox E2E Suite (9260916-sb1)", { timeout: 25000 }, () => {
 	const sessionPath =
 		process.env.NETSUITE_SESSION_PATH ||
 		"/Users/fuxintao/.gemini/antigravity/sessions/9260916_sb1";

@@ -39,6 +39,19 @@ export const RunSuiteQLArgsSchema = z.object({
 		.describe(
 			"Optional mappings for custom record types (rectype and scriptId).",
 		),
+	templateId: z
+		.string()
+		.trim()
+		.optional()
+		.describe(
+			"Optional verified Oracle SAFE golden template ID (e.g. 'transaction_lines', 'transaction_lineage', 'multi_location_inventory', 'general_ledger_impact', 'script_execution_errors', 'audit_system_notes', 'entity_balance_summary', 'item_inventory_status').",
+		),
+	templateParams: z
+		.record(z.string(), z.string())
+		.optional()
+		.describe(
+			"Optional parameter key-value pairs to bind into the golden template (e.g. { ':tranType': \"'SalesOrd'\", ':tranId': '6257', ':docNumber': \"'SO10023'\" }).",
+		),
 });
 export type RunSuiteQLArgs = z.infer<typeof RunSuiteQLArgsSchema>;
 

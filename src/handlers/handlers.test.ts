@@ -1382,6 +1382,52 @@ describe("MCP Handler Wires", () => {
 				expect(res.content[0].text).toContain("Batch Limit Exceeded");
 			});
 
+			it("should execute golden template via templateId and bind templateParams", async () => {
+				mockMCPTools.executeTool.mockResolvedValueOnce({
+					data: [{ tran_id: "6257", item_id: "101", quantity: 5 }],
+				});
+				const callFn = registeredHandlers.get("tools/call");
+
+				const res = (await callFn?.({
+					params: {
+						name: "netsuite_run_suiteql",
+						arguments: {
+							templateId: "transaction_lines",
+							templateParams: {
+								":tranType": "'SalesOrd'",
+								":tranId": "6257",
+								":docNumber": "''",
+							},
+						},
+					},
+				})) as any;
+
+				expect(res.isError).toBeFalsy();
+				expect(mockMCPTools.executeTool).toHaveBeenCalledWith(
+					"ns_runCustomSuiteQL",
+					expect.objectContaining({
+						sqlQuery: expect.stringContaining("t.type = 'SalesOrd'"),
+					}),
+				);
+			});
+
+			it("should reject unknown templateId with list of available templates", async () => {
+				const callFn = registeredHandlers.get("tools/call");
+
+				const res = (await callFn?.({
+					params: {
+						name: "netsuite_run_suiteql",
+						arguments: {
+							templateId: "non_existent_template",
+						},
+					},
+				})) as any;
+
+				expect(res.isError).toBe(true);
+				expect(res.content[0].text).toContain("Invalid Template ID");
+				expect(res.content[0].text).toContain("transaction_lines");
+			});
+
 			it("should reject empty or missing id for netsuite_get_record without network call", async () => {
 				const callFn = registeredHandlers.get("tools/call");
 

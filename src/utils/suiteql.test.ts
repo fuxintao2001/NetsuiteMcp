@@ -124,6 +124,60 @@ describe("SuiteQL, Search & Query Utilities", () => {
 				);
 				expect(res.valid).toBe(true);
 			});
+
+			it("should reject non-Oracle date functions NOW() and CURDATE() with SYSDATE guidance", () => {
+				const res1 = validateSuiteQL(
+					"SELECT id FROM transaction WHERE trandate >= NOW()",
+				);
+				expect(res1.valid).toBe(false);
+				expect(res1.reason).toContain("SYSDATE");
+
+				const res2 = validateSuiteQL(
+					"SELECT id FROM transaction WHERE trandate >= CURDATE()",
+				);
+				expect(res2.valid).toBe(false);
+				expect(res2.reason).toContain("CURRENT_DATE");
+			});
+
+			it("should reject non-Oracle null functions IFNULL() and ISNULL() with NVL guidance", () => {
+				const res1 = validateSuiteQL(
+					"SELECT id, IFNULL(memo, 'N/A') FROM customer",
+				);
+				expect(res1.valid).toBe(false);
+				expect(res1.reason).toContain("NVL");
+
+				const res2 = validateSuiteQL(
+					"SELECT id, ISNULL(memo, 'N/A') FROM customer",
+				);
+				expect(res2.valid).toBe(false);
+				expect(res2.reason).toContain("COALESCE");
+			});
+
+			it("should reject non-Oracle GROUP_CONCAT() with LISTAGG guidance", () => {
+				const res = validateSuiteQL(
+					"SELECT entity, GROUP_CONCAT(tranid) FROM transaction GROUP BY entity",
+				);
+				expect(res.valid).toBe(false);
+				expect(res.reason).toContain("LISTAGG");
+			});
+
+			it("should reject non-existent previousline on transactionline", () => {
+				const res = validateSuiteQL(
+					"SELECT id, previousline FROM transactionline WHERE mainline = 'F'",
+				);
+				expect(res.valid).toBe(false);
+				expect(res.reason).toContain("previousline");
+				expect(res.reason).toContain("createdfrom");
+			});
+
+			it("should serve identical queries from in-memory LRU cache", () => {
+				const query =
+					"SELECT id, entityid FROM customer WHERE isinactive = 'F' ORDER BY id ASC FETCH FIRST 10 ROWS ONLY";
+				const res1 = validateSuiteQL(query);
+				const res2 = validateSuiteQL(query);
+				expect(res1.valid).toBe(true);
+				expect(res2).toBe(res1); // exact same cached object reference
+			});
 		});
 
 		describe("extractReferencedTables", () => {

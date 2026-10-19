@@ -147,6 +147,35 @@ describe("MCP Prompt Handlers", () => {
 		expect(text).toContain("nlapiLoadRecord('customer', 123)");
 	});
 
+	it("should render generate_suiteql prompt with schema grounding and golden template", async () => {
+		let getHandler: any;
+		const fakeServer = {
+			setRequestHandler: vi.fn((method, handler) => {
+				if (method === "prompts/get") getHandler = handler;
+			}),
+		} as unknown as Server;
+
+		registerPromptHandlers(fakeServer);
+
+		const res = await getHandler({
+			params: {
+				name: "generate_suiteql",
+				arguments: {
+					requirement: "Find pending sales orders with line items",
+					recordType: "salesorder",
+				},
+			},
+		});
+
+		expect(res.messages).toHaveLength(1);
+		const text = res.messages[0].content.text;
+		expect(text).toContain(
+			"Schema Grounding (Physical Columns for 'salesorder')",
+		);
+		expect(text).toContain("entity");
+		expect(text).toContain("Verified Oracle SAFE Golden Query Pattern");
+	});
+
 	it("should throw for unknown prompt", async () => {
 		let getHandler: any;
 		const fakeServer = {

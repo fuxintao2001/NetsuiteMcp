@@ -1,7 +1,13 @@
+import { LRUCache } from "lru-cache";
 import pkg from "node-sql-parser";
 
 const { Parser } = pkg;
 const sqlParser = new Parser();
+
+const validationCache = new LRUCache<string, SuiteQLValidationResult>({
+	max: 500,
+	ttl: 10 * 60 * 1000, // 10 minutes
+});
 
 export class SuiteQLValidationError extends Error {
 	constructor(message: string) {
@@ -394,10 +400,7 @@ function hasWildcardSelection(maskedSql: string): boolean {
 	return false;
 }
 
-/**
- * Validates a SuiteQL query string for security compliance.
- */
-export function validateSuiteQL(sqlQuery: string): SuiteQLValidationResult {
+function validateSuiteQLInternal(sqlQuery: string): SuiteQLValidationResult {
 	if (
 		!sqlQuery ||
 		typeof sqlQuery !== "string" ||
@@ -467,6 +470,33 @@ export function validateSuiteQL(sqlQuery: string): SuiteQLValidationResult {
 			valid: false,
 			reason:
 				"Invalid OFFSET syntax. SuiteQL requires Oracle-standard offset syntax: 'OFFSET M ROWS FETCH NEXT N ROWS ONLY', or 'FETCH FIRST N ROWS ONLY'.",
+		};
+	}
+
+	// Dialect Linter 1: Non-standard MySQL/Postgres date functions
+	if (/\b(?:NOW|CURDATE)\s*\(\s*\)/i.test(withoutTrailingSemicolon)) {
+		return {
+			valid: false,
+			reason:
+				"Non-Oracle date function detected ('NOW()' or 'CURDATE()'). In Oracle NetSuite SuiteQL, use 'SYSDATE' or 'CURRENT_DATE' instead (e.g. `WHERE trandate >= SYSDATE - 30`).",
+		};
+	}
+
+	// Dialect Linter 2: Non-standard null replacement functions
+	if (/\b(?:IFNULL|ISNULL)\s*\(/i.test(withoutTrailingSemicolon)) {
+		return {
+			valid: false,
+			reason:
+				"Non-Oracle null function detected ('IFNULL()' or 'ISNULL()'). In Oracle NetSuite SuiteQL, use 'NVL(expr, replacement)' or standard ANSI 'COALESCE(expr, replacement)' instead.",
+		};
+	}
+
+	// Dialect Linter 3: Non-standard string aggregation function
+	if (/\bGROUP_CONCAT\s*\(/i.test(withoutTrailingSemicolon)) {
+		return {
+			valid: false,
+			reason:
+				"Non-Oracle aggregation function detected ('GROUP_CONCAT()'). In Oracle NetSuite SuiteQL, use 'LISTAGG(column, \", \") WITHIN GROUP (ORDER BY ...)' instead.",
 		};
 	}
 
@@ -582,6 +612,18 @@ export function validateSuiteQL(sqlQuery: string): SuiteQLValidationResult {
 			valid: false,
 			reason:
 				"Missing 'mainline' filter on 'transactionline': NetSuite 'transactionline' rows contain both header summary (mainline = 'T') and line items (mainline = 'F'). Omitting this filter causes row duplication and distorted sum amounts. Add `tl.mainline = 'F'` (for line item details) or `tl.mainline = 'T'` (for transaction header line) to your WHERE clause.",
+		};
+	}
+
+	// Anti-Pattern 4b: Invalid column 'previousline' on 'transactionline'
+	if (
+		tables.includes("transactionline") &&
+		/\bpreviousline\b/i.test(withoutTrailingSemicolon)
+	) {
+		return {
+			valid: false,
+			reason:
+				"Invalid column 'previousline': The 'previousline' column does not exist on 'transactionline' in the NetSuite2.com SuiteQL schema. To trace upstream or downstream order relationships, join transactionline via 'createdfrom' (e.g. `JOIN transactionline tl ON t.id = tl.transaction WHERE tl.createdfrom = :sourceTranId`).",
 		};
 	}
 
@@ -722,6 +764,34 @@ export function validateSuiteQL(sqlQuery: string): SuiteQLValidationResult {
 	}
 
 	return { valid: true, tables, hasPagination };
+}
+
+/**
+ * Validates a SuiteQL query string for security compliance.
+ * Utilizes in-memory LRU cache to avoid redundant AST & regex parsing overhead.
+ */
+export function validateSuiteQL(sqlQuery: string): SuiteQLValidationResult {
+	if (
+		!sqlQuery ||
+		typeof sqlQuery !== "string" ||
+		sqlQuery.trim().length === 0
+	) {
+		return {
+			valid: false,
+			reason:
+				"SuiteQL query cannot be empty. Please provide a valid SELECT or WITH statement.",
+		};
+	}
+
+	const trimmed = sqlQuery.trim();
+	const cached = validationCache.get(trimmed);
+	if (cached) {
+		return cached;
+	}
+
+	const result = validateSuiteQLInternal(trimmed);
+	validationCache.set(trimmed, result);
+	return result;
 }
 
 /**

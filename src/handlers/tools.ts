@@ -18,6 +18,7 @@ import {
 	formatSuiteQLErrorResponse,
 	splitSuiteQLStatements,
 } from "../utils/suiteqlGuard.js";
+import { SUITEQL_TEMPLATES } from "../utils/suiteqlTemplates.js";
 import { handleAuth, handleStatus } from "./authHandlers.js";
 import { handleGetScriptLogs } from "./queryHandlers.js";
 import {
@@ -178,9 +179,38 @@ const TOOL_DEFINITIONS: AnyToolDefinition[] = [
 		schema: RunSuiteQLArgsSchema,
 		requiresAuth: true,
 		execute: async (args, ctx) => {
-			const { sqlQuery, sqlQueries, limit, customRecordMappings } = args;
-			const queriesFromSingle = sqlQuery
-				? splitSuiteQLStatements(sqlQuery)
+			const {
+				sqlQuery,
+				sqlQueries,
+				templateId,
+				templateParams,
+				limit,
+				customRecordMappings,
+			} = args;
+
+			let singleQuery = sqlQuery;
+			if (templateId) {
+				const template = SUITEQL_TEMPLATES.find((t) => t.id === templateId);
+				if (!template) {
+					const available = SUITEQL_TEMPLATES.map((t) => `'${t.id}'`).join(
+						", ",
+					);
+					return textResult(
+						`❌ [Invalid Template ID] Unknown templateId: '${templateId}'. Available verified templates: ${available}`,
+						true,
+					);
+				}
+				let rendered = template.sqlTemplate;
+				if (templateParams && typeof templateParams === "object") {
+					for (const [key, val] of Object.entries(templateParams)) {
+						rendered = rendered.replaceAll(key, String(val));
+					}
+				}
+				singleQuery = rendered;
+			}
+
+			const queriesFromSingle = singleQuery
+				? splitSuiteQLStatements(singleQuery)
 				: [];
 			const queriesFromArray = Array.isArray(sqlQueries)
 				? sqlQueries
@@ -193,7 +223,7 @@ const TOOL_DEFINITIONS: AnyToolDefinition[] = [
 
 			if (queriesToRun.length === 0) {
 				return textResult(
-					"❌ 'sqlQuery' or 'sqlQueries' parameter is required and cannot be empty.",
+					"❌ 'sqlQuery', 'sqlQueries', or 'templateId' parameter is required and cannot be empty.",
 					true,
 				);
 			}
