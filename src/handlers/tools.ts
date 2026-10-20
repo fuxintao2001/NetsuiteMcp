@@ -414,6 +414,7 @@ const TOOL_DEFINITIONS: AnyToolDefinition[] = [
 				args as unknown as Record<string, unknown>,
 				ctx.deps.oauthManager,
 				ctx.deps.projectRoot,
+				ctx.deps.mcpTools,
 			),
 	}),
 	defineTool({

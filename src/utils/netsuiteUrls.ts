@@ -52,6 +52,8 @@ const RECORD_URL_MAP: Record<string, string> = {
 	subsidiary: "/app/common/other/subsidiary.nl",
 	department: "/app/common/other/department.nl",
 	location: "/app/common/other/location.nl",
+	classification: "/app/common/other/classification.nl",
+	class: "/app/common/other/classification.nl",
 	account: "/app/accounting/general/account.nl",
 	accountingperiod: "/app/accounting/other/period.nl",
 	accountingbook: "/app/accounting/general/accountingbook.nl",
@@ -86,7 +88,23 @@ const RECORD_URL_MAP: Record<string, string> = {
 	customsegment: "/app/common/custom/customsegment.nl",
 	customrecordtype: "/app/common/custom/custrecord.nl",
 	script: "/app/common/scripting/script.nl",
-	scriptdeployment: "/app/common/scripting/scriptrecord.nl",
+	scriptrecord: "/app/common/scripting/script.nl",
+	scriptdeployment: "/app/common/scripting/scriptdeployment.nl",
+	deployment: "/app/common/scripting/scriptdeployment.nl",
+	scriptdeploy: "/app/common/scripting/scriptdeployment.nl",
+	clientscript: "/app/common/scripting/script.nl",
+	usereventscript: "/app/common/scripting/script.nl",
+	suitelet: "/app/common/scripting/script.nl",
+	restlet: "/app/common/scripting/script.nl",
+	scheduledscript: "/app/common/scripting/script.nl",
+	mapreducescript: "/app/common/scripting/script.nl",
+	portlet: "/app/common/scripting/script.nl",
+	massupdatescript: "/app/common/scripting/script.nl",
+	workflowactionscript: "/app/common/scripting/script.nl",
+	bundleinstallationscript: "/app/common/scripting/script.nl",
+	sdfinstallationscript: "/app/common/scripting/script.nl",
+	plugintype: "/app/common/scripting/plugintype.nl",
+	pluginimplementation: "/app/common/scripting/pluginimpl.nl",
 	workflow: "/app/common/workflow/setup/nextgen/workflowdesktop.nl",
 	savedsearch: "/app/common/search/search.nl",
 
@@ -167,4 +185,41 @@ export function generateNetSuiteScriptFileUrl(
 	if (!accountId || !cleanFileId) return null;
 	const formattedAccountId = formatNetSuiteAccountHost(accountId.toString());
 	return `https://${formattedAccountId}.app.netsuite.com/app/common/record/edittextmediaitem.nl?id=${cleanFileId}&e=T&l=T&target=filesize&syntaxHighlighting=T`;
+}
+
+/**
+ * Generate NetSuite Suitelet execution direct link URL.
+ */
+export function generateNetSuiteSuiteletUrl(
+	accountId: string | undefined,
+	scriptId: string | number | undefined,
+	deployId: string | number | undefined,
+): string | null {
+	const cleanScriptId =
+		scriptId !== undefined && scriptId !== null ? String(scriptId).trim() : "";
+	const cleanDeployId =
+		deployId !== undefined && deployId !== null ? String(deployId).trim() : "";
+	if (!accountId || !cleanScriptId || !cleanDeployId) return null;
+	const formattedAccountId = formatNetSuiteAccountHost(accountId.toString());
+	return `https://${formattedAccountId}.app.netsuite.com/app/site/hosting/scriptlet.nl?script=${encodeURIComponent(cleanScriptId)}&deploy=${encodeURIComponent(cleanDeployId)}`;
+}
+
+/**
+ * Generate NetSuite Script Deployment deep link URL.
+ */
+export function generateNetSuiteScriptDeploymentUrl(
+	accountId: string | undefined,
+	deploymentId: string | number | undefined,
+): string | null {
+	return generateNetSuiteUrl(accountId, "scriptdeployment", deploymentId);
+}
+
+/**
+ * Generate NetSuite Script Record deep link URL.
+ */
+export function generateNetSuiteScriptUrl(
+	accountId: string | undefined,
+	scriptId: string | number | undefined,
+): string | null {
+	return generateNetSuiteUrl(accountId, "script", scriptId);
 }

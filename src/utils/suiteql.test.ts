@@ -9,7 +9,10 @@ import {
 	searchSuiteQLCatalog,
 } from "./metadata.js";
 import {
+	generateNetSuiteScriptDeploymentUrl,
 	generateNetSuiteScriptFileUrl,
+	generateNetSuiteScriptUrl,
+	generateNetSuiteSuiteletUrl,
 	generateNetSuiteUrl,
 } from "./netsuiteUrls.js";
 import {
@@ -1119,6 +1122,40 @@ describe("SuiteQL, Search & Query Utilities", () => {
 			expect(scriptUrl).toBe(
 				"https://123456.app.netsuite.com/app/common/scripting/script.nl?id=99",
 			);
+
+			const deploymentUrl = generateNetSuiteUrl(
+				"123456",
+				"scriptdeployment",
+				"10",
+			);
+			expect(deploymentUrl).toBe(
+				"https://123456.app.netsuite.com/app/common/scripting/scriptdeployment.nl?id=10",
+			);
+
+			const deployAliasUrl = generateNetSuiteUrl("123456", "deployment", "10");
+			expect(deployAliasUrl).toBe(
+				"https://123456.app.netsuite.com/app/common/scripting/scriptdeployment.nl?id=10",
+			);
+
+			const ueUrl = generateNetSuiteUrl("123456", "usereventscript", "55");
+			expect(ueUrl).toBe(
+				"https://123456.app.netsuite.com/app/common/scripting/script.nl?id=55",
+			);
+
+			const suiteletRecordUrl = generateNetSuiteUrl("123456", "suitelet", "77");
+			expect(suiteletRecordUrl).toBe(
+				"https://123456.app.netsuite.com/app/common/scripting/script.nl?id=77",
+			);
+
+			const classUrl = generateNetSuiteUrl("123456", "classification", "3");
+			expect(classUrl).toBe(
+				"https://123456.app.netsuite.com/app/common/other/classification.nl?id=3",
+			);
+
+			const classShortUrl = generateNetSuiteUrl("123456", "class", "3");
+			expect(classShortUrl).toBe(
+				"https://123456.app.netsuite.com/app/common/other/classification.nl?id=3",
+			);
 		});
 
 		it("should handle custom records requiring numeric rectype parameter", () => {
@@ -1191,6 +1228,35 @@ describe("SuiteQL, Search & Query Utilities", () => {
 			const scriptFileUrl = generateNetSuiteScriptFileUrl("123456_SB1", "2048");
 			expect(scriptFileUrl).toBe(
 				"https://123456-sb1.app.netsuite.com/app/common/record/edittextmediaitem.nl?id=2048&e=T&l=T&target=filesize&syntaxHighlighting=T",
+			);
+		});
+
+		it("should generate NetSuite Suitelet execution and script helper URLs", () => {
+			expect(generateNetSuiteSuiteletUrl(undefined, "s1", "d1")).toBeNull();
+			expect(generateNetSuiteSuiteletUrl("123456", undefined, "d1")).toBeNull();
+			expect(generateNetSuiteSuiteletUrl("123456", "s1", undefined)).toBeNull();
+			expect(generateNetSuiteSuiteletUrl("123456", "", "d1")).toBeNull();
+
+			const suiteletUrl = generateNetSuiteSuiteletUrl(
+				"9260916-SB1",
+				"customscript_my_sl",
+				"customdeploy_my_sl",
+			);
+			expect(suiteletUrl).toBe(
+				"https://9260916-sb1.app.netsuite.com/app/site/hosting/scriptlet.nl?script=customscript_my_sl&deploy=customdeploy_my_sl",
+			);
+
+			const deployHelperUrl = generateNetSuiteScriptDeploymentUrl(
+				"123456",
+				"42",
+			);
+			expect(deployHelperUrl).toBe(
+				"https://123456.app.netsuite.com/app/common/scripting/scriptdeployment.nl?id=42",
+			);
+
+			const scriptHelperUrl = generateNetSuiteScriptUrl("123456", "88");
+			expect(scriptHelperUrl).toBe(
+				"https://123456.app.netsuite.com/app/common/scripting/script.nl?id=88",
 			);
 		});
 	});

@@ -1,8 +1,14 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { CallToolResult } from "@modelcontextprotocol/server";
+import type { NetSuiteMCPTools } from "../mcp/tools.js";
 import type { OAuthManager } from "../oauth/manager.js";
 import { isSandboxAccount } from "../utils/environment.js";
+import {
+	generateNetSuiteScriptFileUrl,
+	generateNetSuiteSuiteletUrl,
+	generateNetSuiteUrl,
+} from "../utils/netsuiteUrls.js";
 import { suitecloudRunnerService } from "../utils/suitecloudRunner.js";
 import { UploadFileArgsSchema } from "./toolSchemas.js";
 import { textResult } from "./types.js";
@@ -59,6 +65,7 @@ export async function handleUploadFile(
 	args: Record<string, unknown>,
 	oauthManager: OAuthManager,
 	defaultProjectRoot: string,
+	mcpTools?: NetSuiteMCPTools,
 ): Promise<ToolResponse> {
 	const parsed = UploadFileArgsSchema.safeParse(args);
 	if (!parsed.success) {
@@ -298,6 +305,143 @@ export async function handleUploadFile(
 
 	if (syncedFiles.length > 0) {
 		successMd += `\n> ℹ️ **Notice**: ${syncedFiles.length} file(s) synchronized from external path into project FileCabinet: \`${syncedFiles.join("`, `")}\`\n`;
+	}
+
+	// 10. Enrich uploaded files with active NetSuite Web UI links (Editor, File Cabinet, Script & Deployments)
+	const fileNames = resolution.files
+		.map((f) =>
+			path.basename(f.fileCabinetPath || f.localFullPath || "").trim(),
+		)
+		.filter((n) => n.length > 0);
+
+	if (mcpTools && fileNames.length > 0) {
+		try {
+			const inList = fileNames
+				.map((n) => `'${n.replace(/'/g, "''")}'`)
+				.join(", ");
+			const sql = `SELECT f.id AS file_id, f.name AS file_name, s.id AS script_id, s.scriptid AS script_text_id, s.name AS script_name, s.scripttype AS script_type, sd.primarykey AS deploy_id, sd.scriptid AS deploy_text_id, sd.title AS deploy_title FROM file f LEFT JOIN Script s ON s.scriptfile = f.id LEFT JOIN ScriptDeployment sd ON sd.script = s.id WHERE f.name IN (${inList}) ORDER BY f.name, s.name`;
+			const res = await mcpTools.executeTool("ns_runCustomSuiteQL", {
+				sqlQuery: sql,
+			});
+			const rows = mcpTools.extractDataArray(res);
+			if (rows.length > 0) {
+				successMd += `\n### 🔗 快捷访问与部署链接 (Quick Access Links)\n\n`;
+				const fileMap = new Map<string, typeof rows>();
+				for (const row of rows) {
+					const name = String(row.file_name || "unknown");
+					let list = fileMap.get(name);
+					if (!list) {
+						list = [];
+						fileMap.set(name, list);
+					}
+					list.push(row);
+				}
+
+				for (const [name, rowList] of fileMap.entries()) {
+					const first = rowList[0];
+					const fileId =
+						first?.file_id !== undefined && first?.file_id !== null
+							? String(first.file_id)
+							: undefined;
+					const editUrl = generateNetSuiteScriptFileUrl(
+						currentAccountId,
+						fileId,
+					);
+					const fileCabinetUrl = generateNetSuiteUrl(
+						currentAccountId,
+						"file",
+						fileId,
+					);
+
+					successMd += `#### 📄 文件: \`${name}\`\n`;
+					if (editUrl) {
+						successMd += `- 📝 **在线代码编辑 (Code Editor)**: [打开编辑页面](${editUrl})\n`;
+					}
+					if (fileCabinetUrl) {
+						successMd += `- 📁 **文件柜媒体详情 (File Cabinet)**: [查看文件属性](${fileCabinetUrl})\n`;
+					}
+
+					const seenScripts = new Set<string>();
+					const seenDeploys = new Set<string>();
+
+					for (const row of rowList) {
+						const scriptId =
+							row.script_id !== undefined && row.script_id !== null
+								? String(row.script_id)
+								: undefined;
+						const scriptTextId =
+							row.script_text_id !== undefined && row.script_text_id !== null
+								? String(row.script_text_id)
+								: undefined;
+						const scriptName =
+							row.script_name !== undefined && row.script_name !== null
+								? String(row.script_name)
+								: undefined;
+
+						if (scriptId && !seenScripts.has(scriptId)) {
+							seenScripts.add(scriptId);
+							const scriptUrl = generateNetSuiteUrl(
+								currentAccountId,
+								"script",
+								scriptId,
+							);
+							const scriptLabel = scriptTextId
+								? `${scriptTextId} (${scriptName || "Script"})`
+								: String(scriptName || scriptId);
+							if (scriptUrl) {
+								successMd += `- 📜 **脚本定义记录 (Script)**: [${scriptLabel}](${scriptUrl})\n`;
+							}
+						}
+
+						const deployId =
+							row.deploy_id !== undefined && row.deploy_id !== null
+								? String(row.deploy_id)
+								: undefined;
+						const deployTextId =
+							row.deploy_text_id !== undefined && row.deploy_text_id !== null
+								? String(row.deploy_text_id)
+								: undefined;
+						const deployTitle =
+							row.deploy_title !== undefined && row.deploy_title !== null
+								? String(row.deploy_title)
+								: undefined;
+
+						if (deployId && !seenDeploys.has(deployId)) {
+							seenDeploys.add(deployId);
+							const deployUrl = generateNetSuiteUrl(
+								currentAccountId,
+								"scriptdeployment",
+								deployId,
+							);
+							const deployLabel = deployTextId
+								? `${deployTextId} (${deployTitle || "Deployment"})`
+								: String(deployTitle || deployId);
+							if (deployUrl) {
+								successMd += `- 🚀 **脚本部署记录 (Deployment)**: [${deployLabel}](${deployUrl})\n`;
+							}
+
+							if (
+								String(row.script_type || "").toUpperCase() === "SUITELET" &&
+								scriptTextId &&
+								deployTextId
+							) {
+								const suiteletUrl = generateNetSuiteSuiteletUrl(
+									currentAccountId,
+									scriptTextId,
+									deployTextId,
+								);
+								if (suiteletUrl) {
+									successMd += `- 🌐 **Suitelet 直接运行链接 (Launch)**: [点击访问 Suitelet](${suiteletUrl})\n`;
+								}
+							}
+						}
+					}
+					successMd += "\n";
+				}
+			}
+		} catch {
+			/* Non-fatal: upload succeeded */
+		}
 	}
 
 	if (execResult.stdout.trim().length > 0) {

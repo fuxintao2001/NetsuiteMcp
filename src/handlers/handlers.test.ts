@@ -1214,6 +1214,82 @@ describe("MCP Handler Wires", () => {
 				expect(res.content[0].text).toContain("NON_EXISTENT_DOC");
 			});
 
+			it("should auto-resolve scriptdeployment natural key customdeploy_xxx and append scriptdeployment.nl UI link", async () => {
+				const callFn = registeredHandlers.get("tools/call");
+				mockOAuthManager.getAccountId.mockResolvedValueOnce("9260916-sb1");
+
+				// 1. Natural key lookup via SuiteQL
+				mockMCPTools.executeTool.mockResolvedValueOnce({
+					data: [{ id: "4", scriptid: "customdeploy_my_ue" }],
+				});
+
+				// 2. Record get
+				mockMCPTools.executeTool.mockResolvedValueOnce({
+					id: "4",
+					scriptid: "customdeploy_my_ue",
+					status: "RELEASED",
+				});
+
+				const res = (await callFn?.({
+					params: {
+						name: "netsuite_get_record",
+						arguments: {
+							recordType: "scriptdeployment",
+							id: "customdeploy_my_ue",
+						},
+					},
+				})) as any;
+
+				expect(mockMCPTools.executeTool).toHaveBeenCalledWith(
+					"ns_runCustomSuiteQL",
+					expect.objectContaining({
+						sqlQuery: expect.stringContaining("FROM ScriptDeployment"),
+					}),
+				);
+				expect(res.isError).toBeFalsy();
+				expect(res.content[0].text).toContain(
+					"https://9260916-sb1.app.netsuite.com/app/common/scripting/scriptdeployment.nl?id=4",
+				);
+			});
+
+			it("should auto-resolve script natural key customscript_xxx and append script.nl UI link", async () => {
+				const callFn = registeredHandlers.get("tools/call");
+				mockOAuthManager.getAccountId.mockResolvedValueOnce("9260916-sb1");
+
+				// 1. Natural key lookup via SuiteQL
+				mockMCPTools.executeTool.mockResolvedValueOnce({
+					data: [{ id: "5", scriptid: "customscript_my_ue" }],
+				});
+
+				// 2. Record get
+				mockMCPTools.executeTool.mockResolvedValueOnce({
+					id: "5",
+					scriptid: "customscript_my_ue",
+					name: "My UE Script",
+				});
+
+				const res = (await callFn?.({
+					params: {
+						name: "netsuite_get_record",
+						arguments: {
+							recordType: "script",
+							id: "customscript_my_ue",
+						},
+					},
+				})) as any;
+
+				expect(mockMCPTools.executeTool).toHaveBeenCalledWith(
+					"ns_runCustomSuiteQL",
+					expect.objectContaining({
+						sqlQuery: expect.stringContaining("FROM Script"),
+					}),
+				);
+				expect(res.isError).toBeFalsy();
+				expect(res.content[0].text).toContain(
+					"https://9260916-sb1.app.netsuite.com/app/common/scripting/script.nl?id=5",
+				);
+			});
+
 			it("should transparently fall back to offline catalog when remote metadata fails", async () => {
 				const callFn = registeredHandlers.get("tools/call");
 
@@ -1766,6 +1842,60 @@ describe("MCP Handler Wires", () => {
 					"SuiteCloud File Upload Succeeded",
 				);
 				expect(res.content[0].text).toContain("9260916_SB1");
+				execSpy.mockRestore();
+			});
+
+			it("should enrich successful upload with active NetSuite Web UI links for file editor, script record, deployment, and suitelet launch", async () => {
+				const callFn = registeredHandlers.get("tools/call");
+				mockOAuthManager.getAccountId.mockResolvedValueOnce("9260916-sb1");
+
+				const dummyScript = path.join(testRoot, "my_suitelet.js");
+				await fs.writeFile(dummyScript, "/** @NApiVersion 2.1 */");
+
+				const execSpy = vi
+					.spyOn(suitecloudRunnerService, "executeUpload")
+					.mockResolvedValueOnce({
+						success: true,
+						stdout: "Upload complete.",
+						stderr: "",
+						executionTimeMs: 150,
+					});
+
+				mockMCPTools.executeTool.mockResolvedValueOnce({
+					data: [
+						{
+							file_id: "1001",
+							file_name: "my_suitelet.js",
+							script_id: "2001",
+							script_text_id: "customscript_my_suitelet",
+							script_name: "My Suitelet Script",
+							script_type: "SUITELET",
+							deploy_id: "3001",
+							deploy_text_id: "customdeploy_my_suitelet_dep",
+							deploy_title: "My Suitelet Deployment",
+						},
+					],
+				});
+
+				const res = await callFn?.({
+					params: {
+						name: "netsuite_upload_file",
+						arguments: {
+							paths: dummyScript,
+							projectPath: testRoot,
+						},
+					},
+				});
+
+				expect(execSpy).toHaveBeenCalled();
+				expect(res.content[0].text).toContain("快捷访问与部署链接");
+				expect(res.content[0].text).toContain("edittextmediaitem.nl?id=1001");
+				expect(res.content[0].text).toContain("mediaitem.nl?id=1001");
+				expect(res.content[0].text).toContain("script.nl?id=2001");
+				expect(res.content[0].text).toContain("scriptdeployment.nl?id=3001");
+				expect(res.content[0].text).toContain(
+					"scriptlet.nl?script=customscript_my_suitelet&deploy=customdeploy_my_suitelet_dep",
+				);
 				execSpy.mockRestore();
 			});
 

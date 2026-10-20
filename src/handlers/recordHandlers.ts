@@ -186,6 +186,89 @@ export async function resolveNaturalKeyToInternalId(
 		return null;
 	}
 
+	// 5. Script Deployment (matches ScriptDeployment.scriptid e.g. customdeploy_xxx or title)
+	const isDeployment = [
+		"scriptdeployment",
+		"deployment",
+		"scriptdeploy",
+	].includes(recType);
+	if (isDeployment) {
+		try {
+			const upperKey = safeKey.toUpperCase();
+			const sql = `SELECT primarykey AS id, scriptid, title FROM ScriptDeployment WHERE UPPER(scriptid) = '${upperKey}' OR UPPER(title) = '${upperKey}' FETCH FIRST 2 ROWS ONLY`;
+			const res = await mcpTools.executeTool("ns_runCustomSuiteQL", {
+				sqlQuery: sql,
+			});
+			assertNoMcpError(res);
+			const rows = mcpTools.extractDataArray(res);
+			if (rows.length > 0 && rows[0]?.id) {
+				return { id: String(rows[0].id), recordType: "scriptdeployment" };
+			}
+		} catch (err: unknown) {
+			const msg = err instanceof Error ? err.message : String(err);
+			if (isPermissionError(msg)) throw err;
+			/* Lookup failed */
+		}
+		return null;
+	}
+
+	// 6. Script Record (matches Script.scriptid e.g. customscript_xxx or name)
+	const isScript = [
+		"script",
+		"scriptrecord",
+		"clientscript",
+		"usereventscript",
+		"suitelet",
+		"restlet",
+		"scheduledscript",
+		"mapreducescript",
+		"portlet",
+		"massupdatescript",
+		"workflowactionscript",
+		"bundleinstallationscript",
+		"sdfinstallationscript",
+	].includes(recType);
+	if (isScript) {
+		try {
+			const upperKey = safeKey.toUpperCase();
+			const sql = `SELECT id, scriptid, name FROM Script WHERE UPPER(scriptid) = '${upperKey}' OR UPPER(name) = '${upperKey}' FETCH FIRST 2 ROWS ONLY`;
+			const res = await mcpTools.executeTool("ns_runCustomSuiteQL", {
+				sqlQuery: sql,
+			});
+			assertNoMcpError(res);
+			const rows = mcpTools.extractDataArray(res);
+			if (rows.length > 0 && rows[0]?.id) {
+				return { id: String(rows[0].id), recordType: "script" };
+			}
+		} catch (err: unknown) {
+			const msg = err instanceof Error ? err.message : String(err);
+			if (isPermissionError(msg)) throw err;
+			/* Lookup failed */
+		}
+		return null;
+	}
+
+	// 7. File Cabinet File (matches file.name e.g. script_file.js)
+	if (recType === "file") {
+		try {
+			const upperKey = safeKey.toUpperCase();
+			const sql = `SELECT id, name FROM file WHERE UPPER(name) = '${upperKey}' FETCH FIRST 2 ROWS ONLY`;
+			const res = await mcpTools.executeTool("ns_runCustomSuiteQL", {
+				sqlQuery: sql,
+			});
+			assertNoMcpError(res);
+			const rows = mcpTools.extractDataArray(res);
+			if (rows.length > 0 && rows[0]?.id) {
+				return { id: String(rows[0].id), recordType: "file" };
+			}
+		} catch (err: unknown) {
+			const msg = err instanceof Error ? err.message : String(err);
+			if (isPermissionError(msg)) throw err;
+			/* Lookup failed */
+		}
+		return null;
+	}
+
 	return null;
 }
 
@@ -296,6 +379,146 @@ export async function resolveNaturalKeysBatch(
 				const entityid = (row.entityid as string)?.toUpperCase();
 				if (entityid && row.id) {
 					resultMap.set(entityid, { id: String(row.id), recordType: recType });
+				}
+			}
+		} catch (err: unknown) {
+			const msg = err instanceof Error ? err.message : String(err);
+			if (isPermissionError(msg)) throw err;
+		}
+		return resultMap;
+	}
+
+	if (recType === "item" || recType === "inventoryitem") {
+		try {
+			const inList = safeKeys
+				.map((k) => `'${k.replace(/'/g, "''").toUpperCase()}'`)
+				.join(", ");
+			const sql = `SELECT id, itemid FROM item WHERE UPPER(itemid) IN (${inList})`;
+			const res = await mcpTools.executeTool("ns_runCustomSuiteQL", {
+				sqlQuery: sql,
+			});
+			assertNoMcpError(res);
+			const rows = mcpTools.extractDataArray(res);
+			for (const row of rows) {
+				const itemid = (row.itemid as string)?.toUpperCase();
+				if (itemid && row.id) {
+					resultMap.set(itemid, { id: String(row.id), recordType: "item" });
+				}
+			}
+		} catch (err: unknown) {
+			const msg = err instanceof Error ? err.message : String(err);
+			if (isPermissionError(msg)) throw err;
+		}
+		return resultMap;
+	}
+
+	const isDeployment = [
+		"scriptdeployment",
+		"deployment",
+		"scriptdeploy",
+	].includes(recType);
+	if (isDeployment) {
+		try {
+			const inList = safeKeys
+				.map((k) => `'${k.replace(/'/g, "''").toUpperCase()}'`)
+				.join(", ");
+			const sql = `SELECT primarykey AS id, scriptid, title FROM ScriptDeployment WHERE UPPER(scriptid) IN (${inList}) OR UPPER(title) IN (${inList})`;
+			const res = await mcpTools.executeTool("ns_runCustomSuiteQL", {
+				sqlQuery: sql,
+			});
+			assertNoMcpError(res);
+			const rows = mcpTools.extractDataArray(res);
+			for (const row of rows) {
+				const scriptid = (row.scriptid as string)?.toUpperCase();
+				const title = (row.title as string)?.toUpperCase();
+				if (row.id) {
+					if (scriptid) {
+						resultMap.set(scriptid, {
+							id: String(row.id),
+							recordType: "scriptdeployment",
+						});
+					}
+					if (title) {
+						resultMap.set(title, {
+							id: String(row.id),
+							recordType: "scriptdeployment",
+						});
+					}
+				}
+			}
+		} catch (err: unknown) {
+			const msg = err instanceof Error ? err.message : String(err);
+			if (isPermissionError(msg)) throw err;
+		}
+		return resultMap;
+	}
+
+	const isScript = [
+		"script",
+		"scriptrecord",
+		"clientscript",
+		"usereventscript",
+		"suitelet",
+		"restlet",
+		"scheduledscript",
+		"mapreducescript",
+		"portlet",
+		"massupdatescript",
+		"workflowactionscript",
+		"bundleinstallationscript",
+		"sdfinstallationscript",
+	].includes(recType);
+	if (isScript) {
+		try {
+			const inList = safeKeys
+				.map((k) => `'${k.replace(/'/g, "''").toUpperCase()}'`)
+				.join(", ");
+			const sql = `SELECT id, scriptid, name FROM Script WHERE UPPER(scriptid) IN (${inList}) OR UPPER(name) IN (${inList})`;
+			const res = await mcpTools.executeTool("ns_runCustomSuiteQL", {
+				sqlQuery: sql,
+			});
+			assertNoMcpError(res);
+			const rows = mcpTools.extractDataArray(res);
+			for (const row of rows) {
+				const scriptid = (row.scriptid as string)?.toUpperCase();
+				const name = (row.name as string)?.toUpperCase();
+				if (row.id) {
+					if (scriptid) {
+						resultMap.set(scriptid, {
+							id: String(row.id),
+							recordType: "script",
+						});
+					}
+					if (name) {
+						resultMap.set(name, {
+							id: String(row.id),
+							recordType: "script",
+						});
+					}
+				}
+			}
+		} catch (err: unknown) {
+			const msg = err instanceof Error ? err.message : String(err);
+			if (isPermissionError(msg)) throw err;
+		}
+		return resultMap;
+	}
+
+	if (recType === "file") {
+		try {
+			const inList = safeKeys
+				.map((k) => `'${k.replace(/'/g, "''").toUpperCase()}'`)
+				.join(", ");
+			const sql = `SELECT id, name FROM file WHERE UPPER(name) IN (${inList})`;
+			const res = await mcpTools.executeTool("ns_runCustomSuiteQL", {
+				sqlQuery: sql,
+			});
+			assertNoMcpError(res);
+			const rows = mcpTools.extractDataArray(res);
+			for (const row of rows) {
+				const name = (row.name as string)?.toUpperCase();
+				if (name && row.id) {
+					resultMap.set(name, { id: String(row.id), recordType: "file" });
 				}
 			}
 		} catch (err: unknown) {
