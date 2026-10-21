@@ -253,6 +253,31 @@ describe("MCP Handler Wires", () => {
 			expect(res.content[0].text).toContain("app.netsuite.com");
 		});
 
+		it("should handle netsuite_create_record when id is a string", async () => {
+			mockOAuthManager.getAccountId.mockResolvedValue("9260916-sb1"); // Sandbox
+			mockMCPTools.executeTool.mockResolvedValueOnce({
+				id: "502",
+				entityid: "CUST502",
+			});
+			const callFn = registeredHandlers.get("tools/call");
+
+			const res = await callFn?.({
+				params: {
+					name: "netsuite_create_record",
+					arguments: {
+						recordType: "customer",
+						record: { companyname: "Another Corp" },
+					},
+				},
+			});
+
+			expect(res.isError).toBeFalsy();
+			expect(res.content[0].text).toContain(
+				"✅ NetSuite Record Created: `customer` (ID: `502`)",
+			);
+			expect(res.content[0].text).toContain("app.netsuite.com");
+		});
+
 		it("should allow netsuite_update_record in Sandbox environment and resolve natural keys", async () => {
 			mockOAuthManager.getAccountId.mockResolvedValue("9260916-sb1"); // Sandbox
 			mockMCPTools.executeTool.mockImplementation(

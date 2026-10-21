@@ -20,6 +20,7 @@ describe("Cache & Locking", () => {
 				get: vi.fn(),
 				set: vi.fn(),
 				del: vi.fn(),
+				unlink: vi.fn(),
 				scan: vi.fn(),
 			};
 
@@ -85,7 +86,7 @@ describe("Cache & Locking", () => {
 				"COUNT",
 				100,
 			);
-			expect(mockRedisInstance.del).toHaveBeenCalledWith(
+			expect(mockRedisInstance.unlink).toHaveBeenCalledWith(
 				"ns:acc1:key1",
 				"ns:acc1:key2",
 			);

@@ -27,15 +27,15 @@ const DISALLOWED_KEYWORDS_REGEX =
 	/\b(INSERT|UPDATE|DELETE|DROP|CREATE|ALTER|TRUNCATE|GRANT|REVOKE|EXEC|EXECUTE|MERGE|INTO|DATABASE|SCHEMA)\b/i;
 
 /**
- * Replaces SQL string literals ('...') with placeholder tokens to avoid false positives
- * when matching keywords or comment symbols inside benign data values.
+ * Replaces SQL string literals ('...') and double-quoted identifiers/literals ("...")
+ * with placeholder tokens to avoid false positives when matching keywords or comment symbols.
  */
 export function maskStringLiterals(sql: string): {
 	maskedSql: string;
 	literals: string[];
 } {
 	const literals: string[] = [];
-	let inString = false;
+	let quoteChar: "'" | '"' | null = null;
 	let currentLiteral = "";
 	let maskedSql = "";
 
@@ -43,37 +43,35 @@ export function maskStringLiterals(sql: string): {
 		const char = sql[i];
 		const nextChar = sql[i + 1];
 
-		if (char === "'") {
-			if (inString) {
-				// Handle escaped single quote ''
-				if (nextChar === "'") {
-					currentLiteral += "''";
-					i++; // Skip next quote
+		if (quoteChar === null) {
+			if (char === "'" || char === '"') {
+				quoteChar = char;
+				currentLiteral = char;
+				continue;
+			}
+			maskedSql += char;
+		} else {
+			if (char === quoteChar) {
+				// Handle escaped quote ('' or "")
+				if (nextChar === quoteChar) {
+					currentLiteral += quoteChar + quoteChar;
+					i++; // Skip escaped quote
 					continue;
 				}
-				// End of string literal
-				inString = false;
-				currentLiteral += "'";
+				// End of literal / quoted identifier
+				currentLiteral += quoteChar;
 				literals.push(currentLiteral);
 				maskedSql += `__STR_LITERAL_${literals.length - 1}__`;
 				currentLiteral = "";
+				quoteChar = null;
 				continue;
 			}
-			// Start of string literal
-			inString = true;
-			currentLiteral = "'";
-			continue;
-		}
-
-		if (inString) {
 			currentLiteral += char;
-		} else {
-			maskedSql += char;
 		}
 	}
 
-	if (inString) {
-		// Unterminated string literal
+	if (quoteChar !== null) {
+		// Unterminated literal
 		maskedSql += currentLiteral;
 	}
 
@@ -139,7 +137,10 @@ export function splitSuiteQLStatements(rawSql: string): string[] {
  * Extracts referenced table names from a SuiteQL query.
  * Excludes virtual Common Table Expressions (CTE) defined via WITH <name> AS (...).
  */
-export function extractReferencedTables(sqlQuery: string): string[] {
+export function extractReferencedTables(
+	sqlQuery: string,
+	literals?: string[],
+): string[] {
 	const cteNames = new Set<string>();
 
 	// 1. Try AST parsing via node-sql-parser to extract CTE table names
@@ -162,14 +163,27 @@ export function extractReferencedTables(sqlQuery: string): string[] {
 		// Fall through to regex extraction
 	}
 
-	const { maskedSql } = maskStringLiterals(sqlQuery);
-	const cleanSql = stripSqlComments(maskedSql);
+	// Prepare clean SQL and resolve string literals if tokens like __STR_LITERAL_0__ are present
+	let cleanSql: string;
+	let resolvedLiterals: string[];
+
+	if (sqlQuery.includes("__STR_LITERAL_")) {
+		cleanSql = stripSqlComments(sqlQuery);
+		resolvedLiterals = literals ?? [];
+	} else {
+		const masked = maskStringLiterals(sqlQuery);
+		cleanSql = stripSqlComments(masked.maskedSql);
+		resolvedLiterals = literals ?? masked.literals;
+	}
 
 	// Extract CTE names via regex fallback: WITH name AS ( ... ), name2 AS ( ... )
-	const withMatch = cleanSql.match(/\bWITH\s+([a-zA-Z0-9_]+)\s+AS\s*\(/i);
+	// Supports optional double quotes around CTE identifiers
+	const withMatch = cleanSql.match(
+		/\bWITH\s+["']?([a-zA-Z0-9_]+)["']?\s+AS\s*\(/i,
+	);
 	if (withMatch?.[1]) {
 		cteNames.add(withMatch[1].toLowerCase());
-		const subsequentCteRegex = /,\s*([a-zA-Z0-9_]+)\s+AS\s*\(/gi;
+		const subsequentCteRegex = /,\s*["']?([a-zA-Z0-9_]+)["']?\s+AS\s*\(/gi;
 		let subMatch: RegExpExecArray | null;
 		while (true) {
 			subMatch = subsequentCteRegex.exec(cleanSql);
@@ -179,53 +193,168 @@ export function extractReferencedTables(sqlQuery: string): string[] {
 	}
 
 	const tableSet = new Set<string>();
+	const reservedKeywords = new Set([
+		"select",
+		"where",
+		"join",
+		"left",
+		"right",
+		"inner",
+		"outer",
+		"from",
+		"cross",
+		"natural",
+		"table",
+		"with",
+		"on",
+		"using",
+		"as",
+		"group",
+		"order",
+	]);
 
-	// 1. Match JOIN clauses: JOIN <table> [AS <alias>]
-	const joinRegex = /\bJOIN\s+([a-zA-Z0-9_]+)/gi;
+	const resolveTableToken = (rawToken: string): string | null => {
+		let token = rawToken.trim();
+		// If token is masked literal __STR_LITERAL_(\d+)__
+		const literalMatch = /^__STR_LITERAL_(\d+)__$/i.exec(token);
+		if (literalMatch) {
+			const lit = resolvedLiterals[Number(literalMatch[1])];
+			if (lit) {
+				token = lit.replace(/^["']|["']$/g, "").trim();
+			} else {
+				return null;
+			}
+		} else {
+			token = token.replace(/^["']|["']$/g, "").trim();
+		}
+
+		const lowered = token.toLowerCase();
+		if (
+			lowered &&
+			/^[a-zA-Z0-9_]+$/.test(lowered) &&
+			!lowered.startsWith("__str_literal") &&
+			!cteNames.has(lowered) &&
+			!reservedKeywords.has(lowered)
+		) {
+			return lowered;
+		}
+		return null;
+	};
+
+	// 1. Match JOIN clauses: JOIN <table>, JOIN "<table>", JOIN (<table> ...), JOIN ("<table>" ...)
+	const joinRegex =
+		/\bJOIN\s*[(\s]*(?:([a-zA-Z0-9_]+)|__STR_LITERAL_(\d+)__|"([^"]+)")/gi;
 	let match: RegExpExecArray | null;
 	while (true) {
 		match = joinRegex.exec(cleanSql);
 		if (!match) break;
-		const tableName = match[1]?.toLowerCase().trim();
-		if (
-			tableName &&
-			!tableName.startsWith("__str_literal") &&
-			!cteNames.has(tableName)
-		) {
-			tableSet.add(tableName);
+		const rawToken =
+			match[1] || (match[2] ? `__STR_LITERAL_${match[2]}__` : match[3]);
+		if (rawToken) {
+			const resolved = resolveTableToken(rawToken);
+			if (resolved) {
+				tableSet.add(resolved);
+			}
 		}
 	}
 
-	// 2. Match FROM clauses (including comma-separated table lists: FROM tableA a, tableB b)
-	const fromRegex =
-		/\bFROM\s+([\s\S]+?)(?=\b(?:WHERE|GROUP\s+BY|HAVING|ORDER\s+BY|FETCH\s+FIRST|LIMIT|OFFSET|JOIN|LEFT\s+JOIN|RIGHT\s+JOIN|INNER\s+JOIN|FULL\s+JOIN|CROSS\s+JOIN|UNION|WINDOW)\b|;|\)|$)/gi;
+	// 2. Match FROM clauses with balanced parenthesis tracking
+	// Handles: FROM table, FROM "table", FROM (table alias), FROM (customer c), (systemnote sn)
+	const fromKeywordRegex = /\bFROM\s+/gi;
 	while (true) {
-		match = fromRegex.exec(cleanSql);
+		match = fromKeywordRegex.exec(cleanSql);
 		if (!match) break;
-		const fromClause = match[1]?.trim();
-		if (fromClause) {
-			const items = fromClause.split(",");
-			for (const rawItem of items) {
-				const item = rawItem.trim();
-				if (!item || item.startsWith("(")) continue;
-				const firstToken = item.split(/\s+/)[0]?.toLowerCase().trim();
+		const startIdx = match.index + match[0].length;
+		let depth = 0;
+		let endIdx = startIdx;
+		for (let i = startIdx; i < cleanSql.length; i++) {
+			const char = cleanSql[i];
+			if (char === "(") {
+				depth++;
+			} else if (char === ")") {
+				if (depth > 0) {
+					depth--;
+				} else {
+					// Unmatched closing parenthesis terminates FROM in subquery
+					endIdx = i;
+					break;
+				}
+			} else if (depth === 0) {
+				const remaining = cleanSql.slice(i);
 				if (
-					firstToken &&
-					/^[a-zA-Z0-9_]+$/.test(firstToken) &&
-					!firstToken.startsWith("__str_literal") &&
-					!cteNames.has(firstToken) &&
-					![
-						"select",
-						"where",
-						"join",
-						"left",
-						"right",
-						"inner",
-						"outer",
-						"from",
-					].includes(firstToken)
+					/^(?:WHERE|GROUP\s+BY|HAVING|ORDER\s+BY|FETCH\s+FIRST|FETCH\s+NEXT|LIMIT|OFFSET|JOIN|LEFT\s+JOIN|RIGHT\s+JOIN|INNER\s+JOIN|FULL\s+JOIN|CROSS\s+JOIN|NATURAL\s+JOIN|UNION|WINDOW|;)/i.test(
+						remaining,
+					)
 				) {
-					tableSet.add(firstToken);
+					endIdx = i;
+					break;
+				}
+			}
+			endIdx = i + 1;
+		}
+
+		const fromClause = cleanSql.slice(startIdx, endIdx).trim();
+		if (!fromClause) continue;
+
+		// Split comma-separated table factors strictly at depth 0
+		const items: string[] = [];
+		let curItem = "";
+		let itemDepth = 0;
+		for (let i = 0; i < fromClause.length; i++) {
+			const c = fromClause[i];
+			if (c === "(") itemDepth++;
+			else if (c === ")") {
+				if (itemDepth > 0) itemDepth--;
+			} else if (c === "," && itemDepth === 0) {
+				if (curItem.trim()) items.push(curItem.trim());
+				curItem = "";
+				continue;
+			}
+			curItem += c;
+		}
+		if (curItem.trim()) items.push(curItem.trim());
+
+		for (const rawItem of items) {
+			let item = rawItem.trim();
+			// Strip outer matching parentheses: (systemnote sn) -> systemnote sn
+			while (item.startsWith("(") && item.endsWith(")")) {
+				let d = 0;
+				let closesAtEnd = true;
+				for (let i = 0; i < item.length - 1; i++) {
+					if (item[i] === "(") d++;
+					else if (item[i] === ")") {
+						d--;
+						if (d === 0) {
+							closesAtEnd = false;
+							break;
+						}
+					}
+				}
+				if (closesAtEnd) {
+					item = item.slice(1, -1).trim();
+				} else {
+					break;
+				}
+			}
+			// Strip any remaining leading open parenthesis
+			item = item.replace(/^\(+/, "").trim();
+
+			// Match first token: unquoted, double/single quoted identifier, or __STR_LITERAL_(\d+)__
+			const tokenMatch =
+				/^(?:([a-zA-Z0-9_]+)|__STR_LITERAL_(\d+)__|"([^"]+)"|'([^']+)')/i.exec(
+					item,
+				);
+			if (tokenMatch) {
+				const rawToken =
+					tokenMatch[1] ||
+					(tokenMatch[2]
+						? `__STR_LITERAL_${tokenMatch[2]}__`
+						: tokenMatch[3] || tokenMatch[4]);
+				if (rawToken) {
+					const resolved = resolveTableToken(rawToken);
+					if (resolved) {
+						tableSet.add(resolved);
+					}
 				}
 			}
 		}
@@ -239,13 +368,14 @@ export function extractReferencedTables(sqlQuery: string): string[] {
  */
 export function hasPaginationClause(sqlQuery: string): boolean {
 	const { maskedSql } = maskStringLiterals(sqlQuery);
+	const cleanMasked = stripSqlComments(maskedSql);
 	return (
-		/\bROWNUM\b/i.test(maskedSql) ||
+		/\bROWNUM\b/i.test(cleanMasked) ||
 		/\bFETCH\s+(?:FIRST|NEXT)\s+(?:\d+|\?|:\w+)\s+ROWS?\s+ONLY\b/i.test(
-			maskedSql,
+			cleanMasked,
 		) ||
 		/\bOFFSET\s+(?:\d+|\?|:\w+)\s+ROWS?\s+FETCH\s+(?:FIRST|NEXT)\s+(?:\d+|\?|:\w+)\s+ROWS?\s+ONLY\b/i.test(
-			maskedSql,
+			cleanMasked,
 		)
 	);
 }
@@ -383,21 +513,180 @@ function extractSelectProjections(maskedSql: string): string[] {
 }
 
 /**
+ * Helper to recursively peel matching balanced outer parentheses from an expression.
+ * E.g. "(( * ))" -> "*" or "(item.*)" -> "item.*", while preserving "(a) + (b)".
+ */
+function peelOuterParentheses(expr: string): string {
+	let trimmed = expr.trim();
+	while (trimmed.startsWith("(") && trimmed.endsWith(")")) {
+		let depth = 0;
+		let matchesOuter = false;
+		for (let i = 0; i < trimmed.length; i++) {
+			if (trimmed[i] === "(") {
+				depth++;
+			} else if (trimmed[i] === ")") {
+				depth--;
+				if (depth === 0) {
+					if (i === trimmed.length - 1) {
+						matchesOuter = true;
+					}
+					break;
+				}
+			}
+		}
+		if (matchesOuter) {
+			trimmed = trimmed.slice(1, -1).trim();
+		} else {
+			break;
+		}
+	}
+	return trimmed;
+}
+
+/**
+ * Splits a SELECT projection clause into individual top-level column expressions
+ * by top-level commas (depth 0), safely preserving commas inside functions (e.g. NVL(a, b)).
+ */
+function splitTopLevelProjections(projection: string): string[] {
+	const items: string[] = [];
+	let depth = 0;
+	let start = 0;
+
+	for (let i = 0; i < projection.length; i++) {
+		const char = projection[i];
+		if (char === "(") {
+			depth++;
+		} else if (char === ")") {
+			if (depth > 0) depth--;
+		} else if (char === "," && depth === 0) {
+			const item = projection.slice(start, i).trim();
+			if (item.length > 0) {
+				items.push(item);
+			}
+			start = i + 1;
+		}
+	}
+
+	const lastItem = projection.slice(start).trim();
+	if (lastItem.length > 0) {
+		items.push(lastItem);
+	}
+
+	return items;
+}
+
+/**
+ * Evaluates whether an individual projection item is a wildcard projection.
+ * Handles:
+ * - Bare asterisk: "*" or "(*)" or "(( * ))"
+ * - Qualified asterisk: "item.*" or '"item".*' or "(item.*)" or '("item".*)' or "( item . * )"
+ * - Optional column aliases: "(*) AS all_cols", "(item.*) AS all_cols", "(*) all_cols"
+ * Ignores:
+ * - Aggregate functions: "COUNT(*)", "COUNT ( * )", "COUNT(*) AS total"
+ * - Arithmetic multiplication: "a.rate * a.quantity", "(a * b)", "SUM(a * b)"
+ */
+function isWildcardProjectionItem(rawItem: string): boolean {
+	let item = rawItem.trim();
+	if (!item) return false;
+
+	// Normalize trailing alias: e.g. "(*) AS all_cols", "(item.*) AS my_item"
+	item = item.replace(/\s+AS\s+(?:"[^"]+"|[a-zA-Z0-9_]+)$/i, "").trim();
+	// Normalize implicit alias after closing parenthesis: e.g. "(*) all_cols"
+	item = item.replace(/\)\s+(?:"[^"]+"|[a-zA-Z0-9_]+)$/i, ")").trim();
+
+	// Peel outer matching parentheses: (( * )) -> *
+	const unwrapped = peelOuterParentheses(item);
+
+	// Check if unwrapped expression is a bare asterisk or qualified alias asterisk:
+	// Bare: "*"
+	// Qualified: "item.*", '"item".*', "item . *", '"item" . *'
+	const wildcardRegex = /^(?:(?:"[^"]+"|[a-zA-Z0-9_]+)\s*\.\s*)*\*$/;
+	return wildcardRegex.test(unwrapped);
+}
+
+/**
  * Detects whether a SuiteQL query contains any wildcard column projection (* or alias.*),
  * while correctly ignoring COUNT(*) aggregate functions, arithmetic multiplication (a * b),
  * and FROM clauses inside functions like EXTRACT(YEAR FROM trandate).
  */
-function hasWildcardSelection(maskedSql: string): boolean {
-	const projections = extractSelectProjections(maskedSql);
+function hasWildcardSelection(cleanMaskedSql: string): boolean {
+	const projections = extractSelectProjections(cleanMaskedSql);
 	if (projections.length === 0) return false;
 
 	for (const projection of projections) {
-		// Check for standalone * or alias.* not enclosed as a function parameter (e.g. not COUNT(*))
-		if (/(?:^|\s|,)(?:\w+\.)?\*\s*(?:,|$)/.test(projection.trim())) {
-			return true;
+		const items = splitTopLevelProjections(projection);
+		for (const item of items) {
+			if (isWildcardProjectionItem(item)) {
+				return true;
+			}
 		}
 	}
 	return false;
+}
+
+/**
+ * Evaluates whether transactionline queries contain a genuine mainline filter (= 'T' or = 'F'),
+ * ensuring that:
+ * 1. String literals (e.g. memo = 'mainline = T' or memo = "mainline = T") cannot spoof the filter.
+ * 2. Unquoted identifiers (TOTAL, TARGET, false, t.id, tl.transaction) cannot match [TF].
+ * 3. The condition is strictly evaluated inside WHERE or ON clauses (not SELECT projections or ORDER BY).
+ */
+export function hasMainlineFilter(
+	cleanMaskedSql: string,
+	literals: string[] = [],
+): boolean {
+	// 1. Restore only genuine single or double quoted 'T' or 'F' literals
+	const sqlForMainlineCheck = cleanMaskedSql.replace(
+		/__STR_LITERAL_(\d+)__/g,
+		(_match, idx) => {
+			const lit = literals[Number(idx)];
+			if (lit && /^['"][TF]['"]$/i.test(lit)) {
+				return lit;
+			}
+			return "__STR_LITERAL__";
+		},
+	);
+
+	// 2. Extract only WHERE and ON filtering clauses (ignoring SELECT projections and ORDER BY)
+	const filterClauses: string[] = [];
+
+	// Match all WHERE clauses up to the next major SQL clause or end of statement
+	const whereRegex =
+		/\bWHERE\s+([\s\S]+?)(?=\b(?:WHERE|GROUP\s+BY|HAVING|ORDER\s+BY|FETCH\s+FIRST|FETCH\s+NEXT|LIMIT|OFFSET|UNION|INTERSECT|MINUS)\b|;|$)/gi;
+	let m: RegExpExecArray | null;
+	while (true) {
+		m = whereRegex.exec(sqlForMainlineCheck);
+		if (!m) break;
+		if (m[1]) {
+			filterClauses.push(m[1]);
+		}
+	}
+
+	// Match all ON clauses up to the next JOIN, WHERE, or other major clause
+	const onRegex =
+		/\bON\s+([\s\S]+?)(?=\b(?:(?:LEFT|RIGHT|INNER|FULL|CROSS|NATURAL)\s+)?JOIN\b|\b(?:WHERE|GROUP\s+BY|HAVING|ORDER\s+BY|FETCH\s+FIRST|FETCH\s+NEXT|LIMIT|OFFSET|UNION|INTERSECT|MINUS)\b|;|$)/gi;
+	while (true) {
+		m = onRegex.exec(sqlForMainlineCheck);
+		if (!m) break;
+		if (m[1]) {
+			filterClauses.push(m[1]);
+		}
+	}
+
+	const searchScope = filterClauses.join(" ");
+	if (!searchScope.trim()) {
+		return false;
+	}
+
+	// 3. Match strict mainline predicate:
+	// Requires matching quotes: (['"])[TF]\1 followed by non-identifier boundary (?![a-zA-Z0-9_])
+	// Also supports Yoda syntax: 'T' = tl.mainline
+	const standardMainline =
+		/\b(?:[a-zA-Z0-9_]+\.)?mainline\s*(?:=|IS)\s*(['"])[TF]\1(?![a-zA-Z0-9_])/i;
+	const yodaMainline =
+		/(['"])[TF]\1\s*(?:=|IS)\s*(?:[a-zA-Z0-9_]+\.)?mainline\b/i;
+
+	return standardMainline.test(searchScope) || yodaMainline.test(searchScope);
 }
 
 function validateSuiteQLInternal(sqlQuery: string): SuiteQLValidationResult {
@@ -450,8 +739,13 @@ function validateSuiteQLInternal(sqlQuery: string): SuiteQLValidationResult {
 		};
 	}
 
-	// Check for MySQL/Postgres-style LIMIT (e.g. LIMIT 10 or LIMIT 0, 10)
-	if (/\bLIMIT\s+\d+/i.test(withoutTrailingSemicolon)) {
+	// Check for MySQL/Postgres-style LIMIT (bare, parenthesized, parameterized, named bind, user variable, or keyword)
+	// Uses negative lookbehind (?<!\bAS\s+) to avoid false positives on legitimate column aliases (e.g. creditlimit AS limit)
+	if (
+		/(?<!\bAS\s+)\bLIMIT\s*\(?\s*(?:\d+|\?|:\w+|\$\d+|@\w+|ALL\b|NULL\b|SELECT\b|$)/i.test(
+			withoutTrailingSemicolon,
+		)
+	) {
 		return {
 			valid: false,
 			reason:
@@ -518,7 +812,7 @@ function validateSuiteQLInternal(sqlQuery: string): SuiteQLValidationResult {
 		};
 	}
 
-	const tables = extractReferencedTables(cleanMaskedSql);
+	const tables = extractReferencedTables(cleanMaskedSql, literals);
 	const hasPagination = hasPaginationClause(cleanMaskedSql);
 
 	// --- Slow Query Anti-Pattern Checks & Smart Routing Guidance ---
@@ -554,7 +848,7 @@ function validateSuiteQLInternal(sqlQuery: string): SuiteQLValidationResult {
 		const tranAliases = new Set<string>(["transaction", "t"]);
 		let tranAliasMatch: RegExpExecArray | null;
 		while (true) {
-			tranAliasMatch = tranAliasRegex.exec(maskedSql);
+			tranAliasMatch = tranAliasRegex.exec(cleanMaskedSql);
 			if (!tranAliasMatch) break;
 			const alias = tranAliasMatch[1]?.toLowerCase().trim();
 			if (
@@ -578,7 +872,9 @@ function validateSuiteQLInternal(sqlQuery: string): SuiteQLValidationResult {
 
 		let hasHeaderCreatedFrom = false;
 		for (const alias of tranAliases) {
-			if (new RegExp(`\\b${alias}\\.createdfrom\\b`, "i").test(maskedSql)) {
+			if (
+				new RegExp(`\\b${alias}\\.createdfrom\\b`, "i").test(cleanMaskedSql)
+			) {
 				hasHeaderCreatedFrom = true;
 				break;
 			}
@@ -613,9 +909,7 @@ function validateSuiteQLInternal(sqlQuery: string): SuiteQLValidationResult {
 	// Anti-Pattern 4: 'transactionline' missing 'mainline' filter
 	if (
 		tables.includes("transactionline") &&
-		!/\b(?:[a-zA-Z0-9_]+\.)?mainline\s*(?:=|IS)\s*['"]?[TF]['"]?/i.test(
-			cleanSql,
-		)
+		!hasMainlineFilter(cleanMaskedSql, literals)
 	) {
 		return {
 			valid: false,
@@ -643,7 +937,7 @@ function validateSuiteQLInternal(sqlQuery: string): SuiteQLValidationResult {
 		const itemAliases = new Set<string>(["item"]);
 		let aliasMatch: RegExpExecArray | null;
 		while (true) {
-			aliasMatch = itemAliasRegex.exec(maskedSql);
+			aliasMatch = itemAliasRegex.exec(cleanMaskedSql);
 			if (!aliasMatch) break;
 			const alias = aliasMatch[1]?.toLowerCase().trim();
 			if (
@@ -667,7 +961,7 @@ function validateSuiteQLInternal(sqlQuery: string): SuiteQLValidationResult {
 
 		for (const alias of itemAliases) {
 			const aliasDotRecordType = new RegExp(`\\b${alias}\\.recordtype\\b`, "i");
-			if (aliasDotRecordType.test(maskedSql)) {
+			if (aliasDotRecordType.test(cleanMaskedSql)) {
 				return {
 					valid: false,
 					reason: `Invalid column '${alias}.recordtype' on 'item': In NetSuite SuiteQL, the 'item' table does NOT have a 'recordtype' column. Use '${alias}.itemtype' (e.g. 'Assembly', 'InvtPart', 'Kit', 'NonInvtPart', 'Service') or '${alias}.subtype' instead. ('recordtype' is exclusively used on 'transaction' and 'entity' tables).`,
@@ -680,7 +974,7 @@ function validateSuiteQLInternal(sqlQuery: string): SuiteQLValidationResult {
 			!tables.includes("transaction") &&
 			!tables.includes("entity") &&
 			!tables.includes("customrecordtype") &&
-			/\brecordtype\b/i.test(maskedSql)
+			/\brecordtype\b/i.test(cleanMaskedSql)
 		) {
 			return {
 				valid: false,
@@ -694,13 +988,13 @@ function validateSuiteQLInternal(sqlQuery: string): SuiteQLValidationResult {
 	if (tables.includes("transaction") && tables.includes("transactionline")) {
 		const whereMatch =
 			/\bWHERE\s+([\s\S]+?)(?:\s+(?:GROUP\s+BY|HAVING|ORDER\s+BY|FETCH\s+FIRST)|;|$)/i.exec(
-				maskedSql,
+				cleanMaskedSql,
 			);
 		const whereClause = whereMatch?.[1] || "";
 
 		// Also extract all ON conditions across JOINs so driving index filters in ON clauses are recognized
 		const onMatches =
-			maskedSql.match(
+			cleanMaskedSql.match(
 				/\bON\s+([\s\S]+?)(?:\b(?:JOIN|WHERE|GROUP\s+BY|ORDER\s+BY|FETCH\s+FIRST)\b|;|$)/gi,
 			) || [];
 		const combinedSearchTarget = `${whereClause} ${onMatches.join(" ")}`;
@@ -725,15 +1019,17 @@ function validateSuiteQLInternal(sqlQuery: string): SuiteQLValidationResult {
 	// Anti-Pattern 7: Heavy aggregation with HAVING but missing driving WHERE filter
 	if (
 		tables.includes("transaction") &&
-		/\bGROUP\s+BY\b/i.test(maskedSql) &&
-		/\bHAVING\b/i.test(maskedSql)
+		/\bGROUP\s+BY\b/i.test(cleanMaskedSql) &&
+		/\bHAVING\b/i.test(cleanMaskedSql)
 	) {
-		const whereMatch = /\bWHERE\s+([\s\S]+?)(?:\s+GROUP\s+BY)/i.exec(maskedSql);
+		const whereMatch = /\bWHERE\s+([\s\S]+?)(?:\s+GROUP\s+BY)/i.exec(
+			cleanMaskedSql,
+		);
 		const whereClause = whereMatch?.[1] || "";
 
 		// Also extract ON conditions (consistent with Anti-Pattern 6)
 		const onMatchesAP7 =
-			maskedSql.match(
+			cleanMaskedSql.match(
 				/\bON\s+([\s\S]+?)(?:\b(?:JOIN|WHERE|GROUP\s+BY|ORDER\s+BY|FETCH\s+FIRST)\b|;|$)/gi,
 			) || [];
 		const combinedSearchTargetAP7 = `${whereClause} ${onMatchesAP7.join(" ")}`;
@@ -757,7 +1053,7 @@ function validateSuiteQLInternal(sqlQuery: string): SuiteQLValidationResult {
 	// Anti-Pattern 8: Function conversion in JOIN ON clause against transactionline/transaction
 	// (SAFE Guide Principle 3: Wrapping join keys in functions invalidates Oracle B-tree index lookup and forces 60s full table scans)
 	if (tables.includes("transactionline") || tables.includes("transaction")) {
-		const onClauseMatches = maskedSql.matchAll(
+		const onClauseMatches = cleanMaskedSql.matchAll(
 			/\bJOIN\s+(?:transactionline|transaction)\b[\s\S]*?\bON\b([\s\S]*?)(?=\b(?:WHERE|JOIN|LEFT|RIGHT|INNER|FULL|CROSS|GROUP|ORDER|FETCH|UNION)\b|$)/gi,
 		);
 		for (const m of onClauseMatches) {
@@ -1163,12 +1459,16 @@ export function diagnoseSuiteQLError(
 	}
 
 	// 8. Missing mainline filter
-	if (
-		/Missing 'mainline' filter/i.test(err) ||
-		(sql &&
-			/\btransactionline\b/i.test(sql) &&
-			!/\bmainline\s*=\s*['"]?[TF]['"]?/i.test(sql))
-	) {
+	const hasMissingMainlineInSql = Boolean(
+		sql &&
+			extractReferencedTables(sql).includes("transactionline") &&
+			(() => {
+				const { maskedSql: mSql, literals: lits } = maskStringLiterals(sql);
+				const cleanM = stripSqlComments(mSql);
+				return !hasMainlineFilter(cleanM, lits);
+			})(),
+	);
+	if (/Missing 'mainline' filter/i.test(err) || hasMissingMainlineInSql) {
 		return {
 			isDiagnosed: true,
 			summary: "Missing 'mainline' Filter on 'transactionline'",
@@ -1185,8 +1485,8 @@ export function diagnoseSuiteQLError(
 
 	// 6. LIMIT / OFFSET dialect error
 	if (
-		/\bLIMIT\s+\d+/i.test(err) ||
-		/\bLIMIT\s+\d+/i.test(sql) ||
+		/\bLIMIT\s+(?:\d+|\?|:\w+|\$\d+)/i.test(err) ||
+		/\bLIMIT\s+(?:\d+|\?|:\w+|\$\d+)/i.test(sql) ||
 		/Invalid OFFSET syntax/i.test(err) ||
 		/does not support MySQL-style 'LIMIT'/i.test(err)
 	) {

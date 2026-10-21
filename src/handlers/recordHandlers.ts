@@ -1425,13 +1425,7 @@ export async function handleCreateRecord(
 	}
 
 	const cleaned = cleanRecordPayload(unwrapped);
-	const targetId = String(
-		(unwrapped as Record<string, unknown>)?.id ??
-			(unwrapped as Record<string, unknown>)?.recordId ??
-			((unwrapped as Record<string, unknown>)?.data as Record<string, unknown>)
-				?.id ??
-			"",
-	);
+	const targetId = unwrapped?.id != null ? String(unwrapped.id) : "";
 
 	let md = `## ✅ NetSuite Record Created: \`${recordType}\`${targetId ? ` (ID: \`${targetId}\`)` : ""}\n\n`;
 	md += `\`\`\`json\n${JSON.stringify(cleaned, null, 2)}\n\`\`\`\n`;

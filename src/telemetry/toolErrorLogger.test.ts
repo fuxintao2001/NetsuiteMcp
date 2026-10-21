@@ -5,6 +5,7 @@ import { getDefaultLogsDir } from "../utils/environment.js";
 import {
 	classifyError,
 	createToolErrorLogger,
+	flushToolErrorLogger,
 	isTestEnvironment,
 	maskSensitiveData,
 	recordToolError,
@@ -256,6 +257,21 @@ describe("toolErrorLogger", () => {
 			const logsDir = getDefaultLogsDir();
 			const activeLogFile = path.join(logsDir, "tool-errors.jsonl");
 			expect(fs.existsSync(activeLogFile)).toBe(false);
+		});
+	});
+
+	describe("flushToolErrorLogger", () => {
+		it("should safely resolve in test environment without default logger", async () => {
+			setToolErrorLogger(null);
+			await expect(flushToolErrorLogger()).resolves.toBeUndefined();
+		});
+
+		it("should safely resolve when custom logger is set", async () => {
+			const customLogger = createToolErrorLogger(undefined, {
+				syncFile: undefined,
+			});
+			setToolErrorLogger(customLogger);
+			await expect(flushToolErrorLogger()).resolves.toBeUndefined();
 		});
 	});
 });

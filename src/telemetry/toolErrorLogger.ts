@@ -210,10 +210,7 @@ export function classifyError(
 // ---------------------------------------------------------------------------
 
 let defaultLogger: Logger | null = null;
-let activeTransport: {
-	flush?: (cb?: () => void) => void;
-	flushSync?: () => void;
-} | null = null;
+let activeTransport: ReturnType<typeof pino.transport> | null = null;
 
 /**
  * Detects whether the process is currently executing in an automated test environment.
@@ -270,7 +267,7 @@ export function createToolErrorLogger(
 		},
 	});
 
-	activeTransport = transport as unknown as typeof activeTransport;
+	activeTransport = transport;
 
 	return pino(
 		{
@@ -339,14 +336,7 @@ export async function flushToolErrorLogger(): Promise<void> {
 	}
 	if (activeTransport) {
 		try {
-			if (typeof activeTransport.flushSync === "function") {
-				activeTransport.flushSync();
-			} else if (typeof activeTransport.flush === "function") {
-				await new Promise<void>((resolve) => {
-					activeTransport?.flush?.(() => resolve());
-					setTimeout(resolve, 500); // 500ms timeout guard
-				});
-			}
+			activeTransport.flushSync();
 		} catch {
 			// Non-fatal
 		}

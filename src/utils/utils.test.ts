@@ -54,6 +54,11 @@ SPACED = trimmed
 			const parsed = parseEnv(sample);
 			expect(Object.keys(parsed).length).toBe(0);
 		});
+
+		it("should return empty object for empty input string", () => {
+			const parsed = parseEnv("");
+			expect(parsed).toEqual({});
+		});
 	});
 
 	describe("Environment Validator", () => {

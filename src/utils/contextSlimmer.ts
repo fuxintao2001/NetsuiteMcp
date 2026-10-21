@@ -10,7 +10,7 @@ function cleanRecordPayloadHelper(
 	depth = 0,
 	seen = new WeakSet<object>(),
 ): unknown {
-	if (val === null || val === undefined || depth > 20) {
+	if (val === null || val === undefined || val === "" || depth > 20) {
 		return undefined;
 	}
 	if (typeof val === "object" && val !== null) {
@@ -20,7 +20,7 @@ function cleanRecordPayloadHelper(
 	if (Array.isArray(val)) {
 		const cleanedArr = val
 			.map((item) => cleanRecordPayloadHelper(item, depth + 1, seen))
-			.filter((item) => item !== undefined);
+			.filter((item) => item !== undefined && item !== null && item !== "");
 		return cleanedArr.length > 0 ? cleanedArr : undefined;
 	}
 	if (typeof val === "object" && val !== null) {
@@ -125,7 +125,9 @@ export function formatMetadataToCompactMarkdown(
 				? `object (${Object.keys(innerProps).join(", ")})`
 				: String(valObj.type || "string");
 		const nullable = valObj.nullable !== false ? "Yes" : "No";
-		output += `| ${key} | ${typeStr} | ${desc} | ${nullable} |\n`;
+		const safeKey = key.replace(/\|/g, "\\|");
+		const safeType = typeStr.replace(/\|/g, "\\|");
+		output += `| ${safeKey} | ${safeType} | ${desc} | ${nullable} |\n`;
 	}
 	return output;
 }
@@ -246,8 +248,9 @@ export function formatSuiteQLToCompactMarkdown(result: unknown): string {
 		output += `*Total Results: ${totalResults} (Showing ${dataRows.length} rows)*\n\n`;
 	}
 
-	output += `| ${headers.join(" | ")} |\n`;
-	output += `| ${headers.map(() => "---").join(" | ")} |\n`;
+	const escapedHeaders = headers.map((h) => h.replace(/\|/g, "\\|"));
+	output += `| ${escapedHeaders.join(" | ")} |\n`;
+	output += `| ${escapedHeaders.map(() => "---").join(" | ")} |\n`;
 
 	for (const row of dataRows) {
 		const rowValues = headers.map((header) => {
@@ -255,10 +258,18 @@ export function formatSuiteQLToCompactMarkdown(result: unknown): string {
 			if (val === null || val === undefined || val === "") {
 				return "-";
 			}
-			if (typeof val === "object") {
-				return JSON.stringify(val).replace(/\|/g, "\\|").replace(/\n/g, " ");
+			let formatted =
+				typeof val === "object"
+					? JSON.stringify(val)
+							.replace(/\|/g, "\\|")
+							.replace(/[\r\n]+/g, " ")
+					: String(val)
+							.replace(/\|/g, "\\|")
+							.replace(/[\r\n]+/g, " ");
+			if (formatted.length > 300) {
+				formatted = `${formatted.slice(0, 297)}...`;
 			}
-			return String(val).replace(/\|/g, "\\|").replace(/\n/g, " ");
+			return formatted;
 		});
 		output += `| ${rowValues.join(" | ")} |\n`;
 	}

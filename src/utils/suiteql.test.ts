@@ -21,6 +21,7 @@ import {
 	ensureSuiteQLPagination,
 	extractReferencedTables,
 	formatSuiteQLErrorResponse,
+	hasMainlineFilter,
 	hasPaginationClause,
 	maskStringLiterals,
 	SuiteQLValidationError,
@@ -45,6 +46,20 @@ describe("SuiteQL, Search & Query Utilities", () => {
 			it("should restore string literals accurately with unmaskStringLiterals", () => {
 				const sql = "SELECT * FROM customer WHERE memo = 'special $100 price'";
 				const { maskedSql, literals } = maskStringLiterals(sql);
+				const restored = unmaskStringLiterals(maskedSql, literals);
+				expect(restored).toBe(sql);
+			});
+
+			it("should mask double quote strings/identifiers and preserve escaped double quotes", () => {
+				const sql =
+					'SELECT id FROM customer WHERE memo = "DROP SHIPPING ""LLC""" AND "status" = "ACTIVE"';
+				const { maskedSql, literals } = maskStringLiterals(sql);
+				expect(maskedSql).toContain("__STR_LITERAL_0__");
+				expect(maskedSql).toContain("__STR_LITERAL_1__");
+				expect(maskedSql).toContain("__STR_LITERAL_2__");
+				expect(literals[0]).toBe('"DROP SHIPPING ""LLC"""');
+				expect(literals[1]).toBe('"status"');
+				expect(literals[2]).toBe('"ACTIVE"');
 				const restored = unmaskStringLiterals(maskedSql, literals);
 				expect(restored).toBe(sql);
 			});
@@ -114,6 +129,32 @@ describe("SuiteQL, Search & Query Utilities", () => {
 				expect(res.reason).toContain("LIMIT");
 			});
 
+			it("should reject parameterized LIMIT with question mark (LIMIT ?)", () => {
+				const res = validateSuiteQL("SELECT id, name FROM customer LIMIT ?");
+				expect(res.valid).toBe(false);
+				expect(res.reason).toContain("LIMIT/OFFSET");
+			});
+
+			it("should reject parameterized LIMIT with named bind variable (LIMIT :pageSize)", () => {
+				const res = validateSuiteQL(
+					"SELECT id, name FROM customer LIMIT :pageSize",
+				);
+				expect(res.valid).toBe(false);
+				expect(res.reason).toContain("LIMIT/OFFSET");
+			});
+
+			it("should reject parameterized LIMIT with positional bind variable (LIMIT $1)", () => {
+				const res = validateSuiteQL("SELECT id, name FROM customer LIMIT $1");
+				expect(res.valid).toBe(false);
+				expect(res.reason).toContain("LIMIT/OFFSET");
+			});
+
+			it("should reject parameterized LIMIT count and OFFSET (LIMIT ? OFFSET ?)", () => {
+				const res = validateSuiteQL("SELECT id FROM item LIMIT ? OFFSET ?");
+				expect(res.valid).toBe(false);
+				expect(res.reason).toContain("LIMIT/OFFSET");
+			});
+
 			it("should ignore LIMIT inside string literals and allow query", () => {
 				const res = validateSuiteQL(
 					"SELECT id, memo FROM customer WHERE memo = 'credit LIMIT 50' FETCH FIRST 5 ROWS ONLY",
@@ -124,6 +165,51 @@ describe("SuiteQL, Search & Query Utilities", () => {
 			it("should accept valid Oracle SuiteQL FETCH FIRST ROWS ONLY syntax", () => {
 				const res = validateSuiteQL(
 					"SELECT id, companyname FROM customer FETCH FIRST 10 ROWS ONLY",
+				);
+				expect(res.valid).toBe(true);
+			});
+
+			it("should accept Oracle-compliant parameterized FETCH FIRST ? ROWS ONLY", () => {
+				const res = validateSuiteQL(
+					"SELECT id, name FROM customer FETCH FIRST ? ROWS ONLY",
+				);
+				expect(res.valid).toBe(true);
+			});
+
+			it("should accept Oracle-compliant parameterized FETCH FIRST :limit ROWS ONLY", () => {
+				const res = validateSuiteQL(
+					"SELECT id, name FROM customer FETCH FIRST :limit ROWS ONLY",
+				);
+				expect(res.valid).toBe(true);
+			});
+
+			it("should reject parenthesized, parameter bind, and keyword LIMIT variations", () => {
+				expect(
+					validateSuiteQL("SELECT id FROM customer LIMIT (10)").valid,
+				).toBe(false);
+				expect(validateSuiteQL("SELECT id FROM customer LIMIT (?)").valid).toBe(
+					false,
+				);
+				expect(
+					validateSuiteQL("SELECT id FROM customer LIMIT (:p)").valid,
+				).toBe(false);
+				expect(
+					validateSuiteQL("SELECT id FROM customer LIMIT ($1)").valid,
+				).toBe(false);
+				expect(
+					validateSuiteQL("SELECT id FROM customer LIMIT @param").valid,
+				).toBe(false);
+				expect(validateSuiteQL("SELECT id FROM customer LIMIT ALL").valid).toBe(
+					false,
+				);
+				expect(
+					validateSuiteQL("SELECT id FROM customer LIMIT NULL").valid,
+				).toBe(false);
+			});
+
+			it("should permit legitimate column alias AS limit without false positive", () => {
+				const res = validateSuiteQL(
+					"SELECT id, creditlimit AS limit FROM customer FETCH FIRST 10 ROWS ONLY",
 				);
 				expect(res.valid).toBe(true);
 			});
@@ -237,6 +323,19 @@ describe("SuiteQL, Search & Query Utilities", () => {
 				expect(tables).toContain("transactionline");
 				expect(tables).not.toContain("sales_summary");
 			});
+
+			it("should extract quoted identifiers and parenthesized tables", () => {
+				const sql1 =
+					'SELECT t.id, sn.date FROM transaction t JOIN "systemnote" sn ON t.id = sn.recordid';
+				expect(extractReferencedTables(sql1)).toContain("systemnote");
+
+				const sql2 =
+					"SELECT t.id, sn.date FROM transaction t JOIN (systemnote sn) ON t.id = sn.recordid";
+				expect(extractReferencedTables(sql2)).toContain("systemnote");
+
+				const sql3 = "SELECT sn.id, sn.field FROM (systemnote sn)";
+				expect(extractReferencedTables(sql3)).toContain("systemnote");
+			});
 		});
 
 		describe("pagination helpers", () => {
@@ -298,6 +397,68 @@ describe("SuiteQL, Search & Query Utilities", () => {
 				expect(ensureSuiteQLPagination(queryWithBlockComment, 50)).toBe(
 					"SELECT id FROM customer FETCH FIRST 50 ROWS ONLY",
 				);
+			});
+		});
+
+		describe("hasMainlineFilter", () => {
+			it("should return true when mainline filter is genuinely present in masked SQL", () => {
+				const { maskedSql, literals } = maskStringLiterals(
+					"SELECT id FROM transactionline WHERE mainline = 'T'",
+				);
+				expect(hasMainlineFilter(maskedSql, literals)).toBe(true);
+			});
+
+			it("should return false when mainline = T is spoofed inside a string literal", () => {
+				const { maskedSql, literals } = maskStringLiterals(
+					"SELECT id FROM transactionline WHERE memo = 'mainline = T'",
+				);
+				expect(hasMainlineFilter(maskedSql, literals)).toBe(false);
+			});
+
+			it("should return true when both memo literal and genuine mainline filter are present", () => {
+				const { maskedSql, literals } = maskStringLiterals(
+					"SELECT id FROM transactionline WHERE memo = 'mainline = T' AND tl.mainline = 'F'",
+				);
+				expect(hasMainlineFilter(maskedSql, literals)).toBe(true);
+			});
+
+			it("should reject unquoted identifiers, booleans, and double-quoted memo spoofing", () => {
+				const { maskedSql: m1, literals: l1 } = maskStringLiterals(
+					'SELECT tl.id FROM transactionline tl WHERE tl.memo = "mainline = T"',
+				);
+				expect(hasMainlineFilter(m1, l1)).toBe(false);
+
+				const { maskedSql: m2, literals: l2 } = maskStringLiterals(
+					"SELECT tl.id FROM transactionline tl WHERE tl.mainline = TOTAL",
+				);
+				expect(hasMainlineFilter(m2, l2)).toBe(false);
+
+				const { maskedSql: m3, literals: l3 } = maskStringLiterals(
+					"SELECT tl.id FROM transactionline tl WHERE tl.mainline = false",
+				);
+				expect(hasMainlineFilter(m3, l3)).toBe(false);
+
+				const { maskedSql: m4, literals: l4 } = maskStringLiterals(
+					"SELECT tl.id FROM transactionline tl WHERE tl.mainline = t.id",
+				);
+				expect(hasMainlineFilter(m4, l4)).toBe(false);
+			});
+
+			it("should accept Yoda syntax and reject mainline expressions outside WHERE/ON clauses", () => {
+				const { maskedSql: m1, literals: l1 } = maskStringLiterals(
+					"SELECT tl.id FROM transactionline tl WHERE 'T' = tl.mainline",
+				);
+				expect(hasMainlineFilter(m1, l1)).toBe(true);
+
+				const { maskedSql: m2, literals: l2 } = maskStringLiterals(
+					"SELECT tl.id, CASE WHEN tl.mainline = 'T' THEN 1 ELSE 0 END AS flag FROM transactionline tl",
+				);
+				expect(hasMainlineFilter(m2, l2)).toBe(false);
+
+				const { maskedSql: m3, literals: l3 } = maskStringLiterals(
+					"SELECT tl.id FROM transactionline tl ORDER BY (CASE WHEN tl.mainline = 'T' THEN 1 ELSE 0 END)",
+				);
+				expect(hasMainlineFilter(m3, l3)).toBe(false);
 			});
 		});
 
@@ -383,6 +544,17 @@ describe("SuiteQL, Search & Query Utilities", () => {
 					"SELECT a.id, a.quantity * a.rate AS total FROM transactionline a WHERE a.mainline = 'F'",
 				);
 				expect(arithRes.valid).toBe(true);
+
+				const sumArithRes = validateSuiteQL(
+					"SELECT SUM(a * b) AS grand_total FROM item",
+				);
+				expect(sumArithRes.valid).toBe(true);
+			});
+
+			it("should reject quoted alias and parenthesized wildcards", () => {
+				expect(validateSuiteQL('SELECT "item".* FROM item').valid).toBe(false);
+				expect(validateSuiteQL("SELECT (*) FROM item").valid).toBe(false);
+				expect(validateSuiteQL("SELECT (item.*) FROM item").valid).toBe(false);
 			});
 
 			it("should reject queries with MySQL/Postgres LIMIT (Gate 2 Syntax Mandate)", () => {
@@ -589,6 +761,33 @@ describe("SuiteQL, Search & Query Utilities", () => {
 				expect(res.reason).toContain(
 					"Missing 'mainline' filter on 'transactionline'",
 				);
+			});
+
+			it("should reject transactionline queries where 'mainline = T' exists only inside a string literal", () => {
+				const res = validateSuiteQL(
+					"SELECT tl.id, tl.item FROM transactionline tl WHERE tl.memo = 'mainline = T'",
+				);
+				expect(res.valid).toBe(false);
+				expect(res.reason).toContain(
+					"Missing 'mainline' filter on 'transactionline'",
+				);
+			});
+
+			it("should reject transactionline queries where 'tl.mainline = ''F''' is masked inside a string literal", () => {
+				const res = validateSuiteQL(
+					"SELECT tl.id, tl.item FROM transactionline tl WHERE tl.memo = 'tl.mainline = ''F'''",
+				);
+				expect(res.valid).toBe(false);
+				expect(res.reason).toContain(
+					"Missing 'mainline' filter on 'transactionline'",
+				);
+			});
+
+			it("should accept transactionline queries containing memo literal AND genuine mainline filter", () => {
+				const res = validateSuiteQL(
+					"SELECT tl.id, tl.item FROM transactionline tl WHERE tl.memo = 'mainline = T' AND tl.mainline = 'F'",
+				);
+				expect(res.valid).toBe(true);
 			});
 
 			it("should reject unindexed transaction + transactionline joins", () => {

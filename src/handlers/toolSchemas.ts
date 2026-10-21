@@ -18,6 +18,10 @@ export const RunSuiteQLArgsSchema = z.object({
 		),
 	sqlQueries: z
 		.array(z.string())
+		.max(
+			10,
+			"[Batch Limit Exceeded] A maximum of 10 queries can be executed in parallel.",
+		)
 		.optional()
 		.describe(
 			"Optional array of SuiteQL query strings to execute concurrently in parallel (max 10).",
@@ -275,8 +279,16 @@ export type GetSystemNotesArgs = z.infer<typeof GetSystemNotesArgsSchema>;
  */
 export const UploadFileArgsSchema = z.object({
 	paths: z
-		.union([z.string().trim().min(1), z.array(z.string().trim().min(1))])
-		.describe("Relative or absolute path(s) to the local file(s) to upload."),
+		.union([
+			z.string().trim().min(1),
+			z
+				.array(z.string().trim().min(1))
+				.min(1)
+				.max(10, "A maximum of 10 files can be uploaded concurrently."),
+		])
+		.describe(
+			"Relative or absolute path(s) to the local file(s) to upload (max 10).",
+		),
 	projectPath: z
 		.string()
 		.trim()
