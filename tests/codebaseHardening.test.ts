@@ -380,11 +380,12 @@ describe("Codebase Hardening Exhaustive E2E Suite", () => {
 				expect(toolNames).toContain("netsuite_upload_file");
 				expect(toolNames).toContain("netsuite_status");
 				expect(toolNames).toContain("netsuite_auth");
+				expect(toolNames).toContain("netsuite_call_official");
 
 				// Mutation tools must be strictly filtered out
 				expect(toolNames).not.toContain("netsuite_create_record");
 				expect(toolNames).not.toContain("netsuite_update_record");
-				expect(toolNames.length).toBe(8);
+				expect(toolNames.length).toBe(9);
 
 				// Description must include Production environment badge
 				const statusTool = result.tools.find(
@@ -393,7 +394,7 @@ describe("Codebase Hardening Exhaustive E2E Suite", () => {
 				expect(statusTool?.description).toContain("Env: Production");
 			});
 
-			it("Gate 1: should expose all 10 tools during tool discovery in Sandbox", async () => {
+			it("Gate 1: should expose all 11 tools during tool discovery in Sandbox", async () => {
 				mockOAuthManager.getAccountId.mockResolvedValue("9260916-sb1"); // Sandbox
 				const listHandler = registeredHandlers.get("tools/list");
 				expect(listHandler).toBeDefined();
@@ -405,7 +406,8 @@ describe("Codebase Hardening Exhaustive E2E Suite", () => {
 
 				expect(toolNames).toContain("netsuite_create_record");
 				expect(toolNames).toContain("netsuite_update_record");
-				expect(toolNames.length).toBe(10);
+				expect(toolNames).toContain("netsuite_call_official");
+				expect(toolNames.length).toBe(11);
 
 				const statusTool = result.tools.find(
 					(t) => t.name === "netsuite_status",

@@ -425,6 +425,40 @@ export const UpdateRecordArgsSchema = z
 	.passthrough();
 export type UpdateRecordArgs = z.infer<typeof UpdateRecordArgsSchema>;
 
+/**
+ * 11. netsuite_call_official
+ * Universal gateway to inspect and invoke Oracle NetSuite official native tools (e.g. reports, saved searches).
+ */
+export const CallOfficialArgsSchema = z.object({
+	action: z
+		.enum(["call", "list", "schema"])
+		.optional()
+		.default("call")
+		.describe(
+			"Action to perform: 'call' (execute an official tool), 'list' (list all available official tools with descriptions), or 'schema' (retrieve input parameters schema for a specific tool).",
+		),
+	toolName: z
+		.string()
+		.trim()
+		.optional()
+		.describe(
+			"The official NetSuite tool name to invoke or inspect (e.g. 'ns_runReport', 'ns_runSavedSearch', 'ns_listAllReports', 'ns_listSavedSearches', 'ns_getSubsidiaries', etc.). Required when action is 'call' or 'schema'.",
+		),
+	parameters: z
+		.record(z.string(), z.unknown())
+		.optional()
+		.default({})
+		.describe(
+			"Key-value object containing the arguments to pass to the official NetSuite tool.",
+		),
+	format: z
+		.enum(["markdown", "compact_json"])
+		.optional()
+		.default("markdown")
+		.describe("Output format: 'markdown' (default) or 'compact_json'."),
+});
+export type CallOfficialArgs = z.infer<typeof CallOfficialArgsSchema>;
+
 // ---------------------------------------------------------------------------
 // Automatic MCP InputSchema Derivation from Zod Schemas
 // ---------------------------------------------------------------------------
@@ -548,13 +582,20 @@ export const UPDATE_RECORD_TOOL = {
 	inputSchema: createToolInputSchema(UpdateRecordArgsSchema),
 };
 
+export const CALL_OFFICIAL_TOOL = {
+	name: "netsuite_call_official",
+	description:
+		"[Official Fallback & Extension Gateway] Secondary gateway to invoke Oracle NetSuite's official native tools (e.g. ns_runReport, ns_runSavedSearch, ns_listAllReports, ns_getSubsidiaries). ALWAYS use primary custom tools (netsuite_run_suiteql, netsuite_get_record, netsuite_get_metadata, etc.) first. Use this tool ONLY when custom tools lack the required capability (e.g. native reports, saved searches) or when custom tools encounter an unresolvable error.",
+	inputSchema: createToolInputSchema(CallOfficialArgsSchema),
+};
+
 /** Set of tools restricted strictly to Sandbox / Test environments. */
 export const SANDBOX_MUTATION_TOOLS = new Set([
 	"netsuite_create_record",
 	"netsuite_update_record",
 ]);
 
-/** All Authoritative Tools exposed by NetSuite MCP Server (8 Core + 2 Sandbox Mutation). */
+/** All Authoritative Tools exposed by NetSuite MCP Server (8 Core + 2 Sandbox Mutation + 1 Official Gateway). */
 export const LOCAL_TOOLS = [
 	RUN_SUITEQL_TOOL,
 	GET_METADATA_TOOL,
@@ -566,4 +607,5 @@ export const LOCAL_TOOLS = [
 	AUTH_TOOL,
 	CREATE_RECORD_TOOL,
 	UPDATE_RECORD_TOOL,
+	CALL_OFFICIAL_TOOL,
 ];

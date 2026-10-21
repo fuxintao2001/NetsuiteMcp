@@ -2,7 +2,7 @@
 
 > 🤖 **Role & Scope**: This document is the authoritative engineering charter and code generation specification for AI Coding Agents (such as Google Antigravity, Claude Code, Cursor, and Windsurf) developing, maintaining, and refactoring **NetSuite MCP Server** (`@suiteinsider/netsuite-mcp`).
 >
-> 🎯 **Core Objective**: Guide AI Agents to write high-resilience, strict TypeScript/Node.js server code, maintain the 8 authoritative MCP tools (plus 2 Sandbox mutation tools), enforce runtime safety guards (`suiteqlGuard`), manage Redis caching and Redlock distributed locks, and preserve a 100/100 system architecture benchmark score.
+> 🎯 **Core Objective**: Guide AI Agents to write high-resilience, strict TypeScript/Node.js server code, maintain the 8 authoritative MCP tools (plus 2 Sandbox mutation tools and 1 official gateway), enforce runtime safety guards (`suiteqlGuard`), manage Redis caching and Redlock distributed locks, and preserve a 100/100 system architecture benchmark score.
 
 ---
 
@@ -61,11 +61,12 @@ src/
 ├── mcp/                    # NetSuite low-level communication layer
 │   └── tools.ts            # NetSuiteMCPTools: SuiteQL, REST Web Services, HTTP boundary & ConcurrencyLimiter(5)
 ├── handlers/               # MCP protocol dispatch layer
-│   ├── tools.ts            # 8 authoritative core tools (+ 2 Sandbox mutation tools) registry & dispatcher
+│   ├── tools.ts            # 8 authoritative core tools (+ 2 Sandbox mutation tools + 1 official gateway) registry & dispatcher
 │   ├── toolSchemas.ts      # Zod parameter schemas, inferred types, and MCP JSON inputSchemas
 │   ├── recordHandlers.ts   # Record inspection, natural key resolution, metadata dictionary, and system notes
 │   ├── queryHandlers.ts    # Real-time SuiteScript execution logs & error stack tracing
 │   ├── authHandlers.ts     # OAuth authentication status, logout, and diagnostic dashboard
+│   ├── officialHandlers.ts # Universal gateway for Oracle NetSuite official native tools (reports, saved searches)
 │   ├── uploadHandlers.ts   # SuiteCloud file upload & production write barrier
 │   ├── prompts.ts          # MCP Prompts templates
 │   └── resources.ts        # MCP read-only resources registration & retrieval

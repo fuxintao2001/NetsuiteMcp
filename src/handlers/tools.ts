@@ -20,6 +20,7 @@ import {
 } from "../utils/suiteqlGuard.js";
 import { SUITEQL_TEMPLATES } from "../utils/suiteqlTemplates.js";
 import { handleAuth, handleStatus } from "./authHandlers.js";
+import { handleCallOfficial } from "./officialHandlers.js";
 import { handleGetScriptLogs } from "./queryHandlers.js";
 import {
 	handleCreateRecord,
@@ -30,6 +31,8 @@ import {
 } from "./recordHandlers.js";
 import {
 	AuthArgsSchema,
+	type CallOfficialArgs,
+	CallOfficialArgsSchema,
 	CreateRecordArgsSchema,
 	GetMetadataArgsSchema,
 	GetRecordArgsSchema,
@@ -67,7 +70,11 @@ const DESTRUCTIVE_TOOLS = new Set([
 	"netsuite_update_record",
 ]);
 
-const IDEMPOTENT_TOOLS = new Set([...READ_ONLY_TOOLS, "netsuite_auth"]);
+const IDEMPOTENT_TOOLS = new Set([
+	...READ_ONLY_TOOLS,
+	"netsuite_auth",
+	"netsuite_call_official",
+]);
 
 /**
  * Generate standard MCP tool annotations.
@@ -442,6 +449,18 @@ const TOOL_DEFINITIONS: AnyToolDefinition[] = [
 				ctx.deps.mcpTools,
 				ctx.deps.oauthManager,
 				ctx.deps.resolveCustomRecordRectype,
+			),
+	}),
+	defineTool({
+		name: "netsuite_call_official",
+		schema: CallOfficialArgsSchema,
+		requiresAuth: true,
+		execute: async (args, ctx) =>
+			handleCallOfficial(
+				args as unknown as CallOfficialArgs,
+				ctx.deps.mcpTools,
+				ctx.accountId,
+				ctx.isSandbox,
 			),
 	}),
 ];

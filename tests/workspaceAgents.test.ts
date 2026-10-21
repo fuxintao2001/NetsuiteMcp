@@ -66,7 +66,7 @@ describe("Workspace Agents E2E Acceptance Suite", () => {
 			expect(agentsContent).toMatch(/read_file/);
 		});
 
-		it("AC-1.2: All 10 NetSuite MCP tools (8 core + 2 sandbox mutation) are documented in AGENTS.template.md", () => {
+		it("AC-1.2: All 11 NetSuite MCP tools (8 core + 2 sandbox mutation + 1 official gateway) are documented in AGENTS.template.md", () => {
 			const agentsContent = fs.readFileSync(agentsTemplatePath, "utf-8");
 
 			const coreTools = [
@@ -78,6 +78,7 @@ describe("Workspace Agents E2E Acceptance Suite", () => {
 				"netsuite_upload_file",
 				"netsuite_status",
 				"netsuite_auth",
+				"netsuite_call_official",
 			];
 
 			const sandboxMutationTools = [
@@ -86,7 +87,7 @@ describe("Workspace Agents E2E Acceptance Suite", () => {
 			];
 
 			const allTools = [...coreTools, ...sandboxMutationTools];
-			expect(allTools).toHaveLength(10);
+			expect(allTools).toHaveLength(11);
 
 			for (const tool of allTools) {
 				expect(

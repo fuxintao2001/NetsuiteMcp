@@ -120,7 +120,7 @@ The server registers 7 official MCP resource URIs. Read these resources via MCP 
 
 ## 🧰 5. Authoritative Tool Execution SOP
 
-The server exposes 8 authoritative core tools (plus 2 sandbox mutation tools in Sandbox environments) with strict orthogonal boundaries (zero bloat, zero deprecated aliases):
+The server exposes 8 authoritative core tools (plus 2 sandbox mutation tools and 1 official gateway) with strict orthogonal boundaries (zero bloat, zero deprecated aliases):
 
 1. **Tool Execution Hierarchy & Parameter Contracts**:
    - **SuiteQL Queries**: `netsuite_run_suiteql` (Direct 1-turn execution; accepts `sqlQuery` with optional semicolon `;` separation, batch `sqlQueries: [...]` array up to 10 concurrent queries via the 5-thread worker pool, safe row `limit` [default 100], `templateId`, `templateParams`, and `customRecordMappings`).
@@ -131,6 +131,7 @@ The server exposes 8 authoritative core tools (plus 2 sandbox mutation tools in 
    - **File Upload**: `netsuite_upload_file` (Upload single or batch file paths via `paths` [string or string[] array] to NetSuite FileCabinet via SuiteCloud CLI; supports `projectPath`, `authId`, `dryRun: true` pre-flight syntax preview, `skipValidation`, and requires `allowProduction: true` for Production uploads).
    - **Account Status & Error Diagnostics**: `netsuite_status` (Check active account ID, environment type [Sandbox vs. Production], authentication mode, token lifespan, and error diagnostics frequency summary via `includeErrors: true`).
    - **Authentication Management**: `netsuite_auth` (Manage OAuth 2.0 PKCE lifecycle via `action: "login" | "logout" | "refresh_cache"`, optional `accountId`, `clientId`, and `table` for selective Redis cache invalidation).
+   - **Official Native Tools Gateway (Fallback & Extension)**: `netsuite_call_official` (Universal gateway to inspect and invoke Oracle NetSuite official native tools such as `ns_runReport`, `ns_runSavedSearch`, `ns_listAllReports`, `ns_getSubsidiaries`; supports `action: "call" | "list" | "schema"`, `toolName`, `parameters`, and `format: "markdown" | "compact_json"`. Mutation tools are physically blocked in Production. ALWAYS prioritize primary custom tools first; use this gateway ONLY when custom tools lack the required capability or encounter an unresolvable error).
    - **Record Creation (Sandbox Only)**: `netsuite_create_record` (Create new business records in Sandbox/Test environments with required `recordType` and `record` field-value map; physically blocked in Production).
    - **Record Update (Sandbox Only)**: `netsuite_update_record` (Update existing records in Sandbox/Test environments with `recordType`, numeric internal ID or document number `tranid` in `id`, and `record` field-value map; physically blocked in Production).
 2. **Parallel Batch Execution (`sqlQueries`, `tables`, `ids`, `scriptIds`, `recordIds`, `paths`)**:

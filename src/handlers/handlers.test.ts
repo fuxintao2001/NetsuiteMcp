@@ -133,12 +133,13 @@ describe("MCP Handler Wires", () => {
 			expect(names).toContain("netsuite_upload_file");
 			expect(names).toContain("netsuite_status");
 			expect(names).toContain("netsuite_auth");
+			expect(names).toContain("netsuite_call_official");
 			expect(names).not.toContain("netsuite_create_record");
 			expect(names).not.toContain("netsuite_update_record");
-			expect(names.length).toBe(8);
+			expect(names.length).toBe(9);
 		});
 
-		it("should list 10 authoritative tools in Sandbox environment", async () => {
+		it("should list 11 authoritative tools in Sandbox environment", async () => {
 			mockOAuthManager.getAccountId.mockResolvedValue("9260916-sb1"); // Sandbox
 			const listFn = registeredHandlers.get("tools/list");
 
@@ -153,9 +154,10 @@ describe("MCP Handler Wires", () => {
 			expect(names).toContain("netsuite_upload_file");
 			expect(names).toContain("netsuite_status");
 			expect(names).toContain("netsuite_auth");
+			expect(names).toContain("netsuite_call_official");
 			expect(names).toContain("netsuite_create_record");
 			expect(names).toContain("netsuite_update_record");
-			expect(names.length).toBe(10);
+			expect(names.length).toBe(11);
 		});
 
 		it("should attach standard MCP annotations to tools", async () => {
