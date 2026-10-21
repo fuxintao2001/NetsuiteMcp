@@ -233,7 +233,7 @@ export function runSync({ dryRun = false, shouldPush = false } = {}) {
 
 						if (hasChanges) {
 							execSync(
-								'git commit -m "docs(agents): 同步8大权威工具、严格SuiteQL标准与自然键自愈规约"',
+								'git commit -m "docs(agents): 同步10大权威工具 (8大核心+2大沙箱变更)、严格SuiteQL标准与自然键自愈规约"',
 								{ cwd: projectPath, stdio: "pipe" },
 							);
 							const currentBranch = execSync("git rev-parse --abbrev-ref HEAD", {

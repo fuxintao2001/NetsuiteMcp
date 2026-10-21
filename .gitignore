@@ -64,4 +64,5 @@ temp-sdk/
 
 # Local agent hook symlinks
 .agents/scripts
+.agents/teamwork/
 

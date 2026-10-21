@@ -36,6 +36,26 @@
             "timeout": 15
           }
         ]
+      },
+      {
+        "matcher": "write_file",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node scripts/suitescript-safe-check.js",
+            "timeout": 15
+          }
+        ]
+      },
+      {
+        "matcher": "edit_file",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node scripts/suitescript-safe-check.js",
+            "timeout": 15
+          }
+        ]
       }
     ]
   }
