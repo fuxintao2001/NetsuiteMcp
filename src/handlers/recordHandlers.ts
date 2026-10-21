@@ -1203,7 +1203,7 @@ async function inspectSingleRecordSystemNotes(
 		if (TRANSACTION_RECORD_TYPES.has(lowerType)) {
 			recordTypeId = -30;
 		} else if (ENTITY_RECORD_TYPES.has(lowerType)) {
-			recordTypeId = -2;
+			recordTypeId = -9;
 		} else if (ITEM_RECORD_TYPES.has(lowerType)) {
 			recordTypeId = -10;
 		} else if (resolveRectype) {

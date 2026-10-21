@@ -1368,29 +1368,6 @@ describe("MCP Handler Wires", () => {
 				);
 			});
 
-			it("should accept 'query' as alias for 'sqlQuery' in netsuite_run_suiteql", async () => {
-				const callFn = registeredHandlers.get("tools/call");
-				mockMCPTools.executeTool.mockResolvedValueOnce({
-					data: [{ id: "1", entityid: "CUST1" }],
-				});
-
-				await callFn?.({
-					params: {
-						name: "netsuite_run_suiteql",
-						arguments: {
-							query: "SELECT id FROM customer FETCH FIRST 5 ROWS ONLY",
-						},
-					},
-				});
-
-				expect(mockMCPTools.executeTool).toHaveBeenCalledWith(
-					"ns_runCustomSuiteQL",
-					expect.objectContaining({
-						sqlQuery: "SELECT id FROM customer FETCH FIRST 5 ROWS ONLY",
-					}),
-				);
-			});
-
 			it("should execute multiple semicolon-separated queries in parallel in netsuite_run_suiteql", async () => {
 				const callFn = registeredHandlers.get("tools/call");
 
@@ -1756,7 +1733,7 @@ describe("MCP Handler Wires", () => {
 				);
 			});
 
-			it("should inject recordtypeid = -2 when recordType is entity and -10 when item", async () => {
+			it("should inject recordtypeid = -9 when recordType is entity and -10 when item", async () => {
 				const callFn = registeredHandlers.get("tools/call");
 				mockMCPTools.executeTool
 					.mockResolvedValueOnce({ data: [] })
@@ -1773,7 +1750,7 @@ describe("MCP Handler Wires", () => {
 					"ns_runCustomSuiteQL",
 					expect.objectContaining({
 						sqlQuery: expect.stringContaining(
-							"sn.recordtypeid = -2 AND sn.recordid = 100",
+							"sn.recordtypeid = -9 AND sn.recordid = 100",
 						),
 					}),
 				);

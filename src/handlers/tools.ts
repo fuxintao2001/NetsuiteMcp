@@ -181,7 +181,6 @@ const TOOL_DEFINITIONS: AnyToolDefinition[] = [
 		execute: async (args, ctx) => {
 			const {
 				sqlQuery,
-				query,
 				sqlQueries,
 				templateId,
 				templateParams,
@@ -189,7 +188,7 @@ const TOOL_DEFINITIONS: AnyToolDefinition[] = [
 				customRecordMappings,
 			} = args;
 
-			let singleQuery = sqlQuery || query;
+			let singleQuery = sqlQuery;
 			if (templateId) {
 				const template = SUITEQL_TEMPLATES.find((t) => t.id === templateId);
 				if (!template) {
