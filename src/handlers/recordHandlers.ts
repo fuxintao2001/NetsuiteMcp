@@ -1166,17 +1166,52 @@ const TRANSACTION_RECORD_TYPES = new Set([
 	"assemblyunbuild",
 ]);
 
+const ENTITY_RECORD_TYPES = new Set([
+	"entity",
+	"customer",
+	"vendor",
+	"employee",
+	"contact",
+	"partner",
+	"lead",
+	"prospect",
+]);
+
+const ITEM_RECORD_TYPES = new Set([
+	"item",
+	"inventoryitem",
+	"noninventoryitem",
+	"serviceitem",
+	"assemblyitem",
+	"kititem",
+	"otherchargeitem",
+	"giftcertificateitem",
+]);
+
 async function inspectSingleRecordSystemNotes(
 	rawRecordId: string,
 	recordType: string | undefined,
 	limit: number,
 	mcpTools: NetSuiteMCPTools,
+	resolveRectype?: (type: string) => number | null | Promise<number | null>,
 ): Promise<string> {
 	let recordId = rawRecordId.trim();
 	let recordTypeId: number | undefined;
 
-	if (recordType && TRANSACTION_RECORD_TYPES.has(recordType.toLowerCase())) {
-		recordTypeId = -30;
+	if (recordType) {
+		const lowerType = recordType.toLowerCase().trim();
+		if (TRANSACTION_RECORD_TYPES.has(lowerType)) {
+			recordTypeId = -30;
+		} else if (ENTITY_RECORD_TYPES.has(lowerType)) {
+			recordTypeId = -2;
+		} else if (ITEM_RECORD_TYPES.has(lowerType)) {
+			recordTypeId = -10;
+		} else if (resolveRectype) {
+			const resolved = await resolveRectype(recordType);
+			if (resolved !== null && resolved !== undefined) {
+				recordTypeId = resolved;
+			}
+		}
 	}
 
 	const isNumeric = /^-?\d+$/.test(recordId);
@@ -1247,6 +1282,7 @@ async function inspectSingleRecordSystemNotes(
 export async function handleGetSystemNotes(
 	args: Record<string, unknown>,
 	mcpTools: NetSuiteMCPTools,
+	resolveRectype?: (type: string) => number | null | Promise<number | null>,
 ): Promise<ToolResponse> {
 	const parsed = GetSystemNotesArgsSchema.safeParse(args);
 	if (!parsed.success) {
@@ -1278,6 +1314,7 @@ export async function handleGetSystemNotes(
 				recordType,
 				limit,
 				mcpTools,
+				resolveRectype,
 			);
 			return textResult(res, res.startsWith("❌"));
 		} catch (err: unknown) {
@@ -1302,6 +1339,7 @@ export async function handleGetSystemNotes(
 							recordType,
 							limit,
 							mcpTools,
+							resolveRectype,
 						);
 					} catch (err: unknown) {
 						const msg = err instanceof Error ? err.message : String(err);

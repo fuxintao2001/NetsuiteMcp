@@ -653,27 +653,25 @@ const SUITEQL_TABLE_CATALOG: SuiteQLTableCatalogEntry[] = [
 		tableName: "scriptnote",
 		domain: "System & Logs",
 		description: "SuiteScript execution logs (Debug, Audit, Error).",
-		keyFields: [
-			"id",
-			"script",
-			"scripttype",
-			"title",
-			"detail",
-			"type",
-			"date",
-		],
+		keyFields: ["internalId", "date", "scriptType", "type", "title", "detail"],
+		bestPractice:
+			"Prefer using the dedicated tool 'netsuite_get_script_logs' to query logs with automatic index optimization.",
 	},
 	{
 		tableName: "customrecordtype",
 		domain: "Customization",
 		description: "Custom record type definitions in the account.",
-		keyFields: ["internalid", "scriptid", "recordname", "description"],
+		keyFields: ["internalid", "scriptid", "name", "description"],
+		bestPractice:
+			"Key columns are 'internalid', 'scriptid', and 'name'. Do not query non-existent columns like 'recordname' or 'id'.",
 	},
 	{
-		tableName: "customfield",
+		tableName: "savedsearch",
 		domain: "Customization",
-		description: "Custom field definitions.",
-		keyFields: ["id", "scriptid", "fieldtype", "label"],
+		description: "Saved searches defined in NetSuite. Queryable in SuiteQL.",
+		keyFields: ["id", "name", "scriptid", "searchtype", "owner"],
+		bestPractice:
+			"Filter by 'scriptid' or 'searchtype'. Columns 'title' and 'recordtype' do not exist in SuiteQL.",
 	},
 ];
 

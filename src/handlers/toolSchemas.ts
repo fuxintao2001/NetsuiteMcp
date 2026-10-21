@@ -16,6 +16,13 @@ export const RunSuiteQLArgsSchema = z.object({
 		.describe(
 			"The SuiteQL query string to execute. Follows Oracle NetSuite dialect rules. Multiple queries can be separated by ';'.",
 		),
+	query: z
+		.string()
+		.trim()
+		.optional()
+		.describe(
+			"Alternative alias for 'sqlQuery' to execute a SuiteQL query string directly.",
+		),
 	sqlQueries: z
 		.array(z.string())
 		.optional()

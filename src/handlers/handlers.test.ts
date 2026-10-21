@@ -1368,6 +1368,29 @@ describe("MCP Handler Wires", () => {
 				);
 			});
 
+			it("should accept 'query' as alias for 'sqlQuery' in netsuite_run_suiteql", async () => {
+				const callFn = registeredHandlers.get("tools/call");
+				mockMCPTools.executeTool.mockResolvedValueOnce({
+					data: [{ id: "1", entityid: "CUST1" }],
+				});
+
+				await callFn?.({
+					params: {
+						name: "netsuite_run_suiteql",
+						arguments: {
+							query: "SELECT id FROM customer FETCH FIRST 5 ROWS ONLY",
+						},
+					},
+				});
+
+				expect(mockMCPTools.executeTool).toHaveBeenCalledWith(
+					"ns_runCustomSuiteQL",
+					expect.objectContaining({
+						sqlQuery: "SELECT id FROM customer FETCH FIRST 5 ROWS ONLY",
+					}),
+				);
+			});
+
 			it("should execute multiple semicolon-separated queries in parallel in netsuite_run_suiteql", async () => {
 				const callFn = registeredHandlers.get("tools/call");
 
@@ -1728,6 +1751,71 @@ describe("MCP Handler Wires", () => {
 					expect.objectContaining({
 						sqlQuery: expect.stringContaining(
 							"sn.recordtypeid = -30 AND sn.recordid = 12345",
+						),
+					}),
+				);
+			});
+
+			it("should inject recordtypeid = -2 when recordType is entity and -10 when item", async () => {
+				const callFn = registeredHandlers.get("tools/call");
+				mockMCPTools.executeTool
+					.mockResolvedValueOnce({ data: [] })
+					.mockResolvedValueOnce({ data: [] });
+
+				await callFn?.({
+					params: {
+						name: "netsuite_get_system_notes",
+						arguments: { recordId: "100", recordType: "customer" },
+					},
+				});
+
+				expect(mockMCPTools.executeTool).toHaveBeenCalledWith(
+					"ns_runCustomSuiteQL",
+					expect.objectContaining({
+						sqlQuery: expect.stringContaining(
+							"sn.recordtypeid = -2 AND sn.recordid = 100",
+						),
+					}),
+				);
+
+				await callFn?.({
+					params: {
+						name: "netsuite_get_system_notes",
+						arguments: { recordId: "200", recordType: "inventoryitem" },
+					},
+				});
+
+				expect(mockMCPTools.executeTool).toHaveBeenCalledWith(
+					"ns_runCustomSuiteQL",
+					expect.objectContaining({
+						sqlQuery: expect.stringContaining(
+							"sn.recordtypeid = -10 AND sn.recordid = 200",
+						),
+					}),
+				);
+			});
+
+			it("should dynamically resolve custom record type ID and inject into systemnote query", async () => {
+				const callFn = registeredHandlers.get("tools/call");
+				mockMCPTools.executeTool.mockResolvedValueOnce({
+					data: [],
+				});
+
+				await callFn?.({
+					params: {
+						name: "netsuite_get_system_notes",
+						arguments: {
+							recordId: "74043",
+							recordType: "customrecord_etissl_carrier",
+						},
+					},
+				});
+
+				expect(mockMCPTools.executeTool).toHaveBeenCalledWith(
+					"ns_runCustomSuiteQL",
+					expect.objectContaining({
+						sqlQuery: expect.stringContaining(
+							"sn.recordtypeid = 54 AND sn.recordid = 74043",
 						),
 					}),
 				);

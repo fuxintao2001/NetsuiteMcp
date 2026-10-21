@@ -164,6 +164,25 @@ describe("SuiteQL, Search & Query Utilities", () => {
 				expect(res.reason).toContain("LISTAGG");
 			});
 
+			it("should reject derived table subqueries in FROM/JOIN clause with CTE guidance", () => {
+				const res1 = validateSuiteQL(
+					"SELECT line_count, COUNT(*) FROM (SELECT item, COUNT(*) AS line_count FROM transactionline GROUP BY item) t GROUP BY line_count",
+				);
+				expect(res1.valid).toBe(false);
+				expect(res1.reason).toContain(
+					"Derived tables / subqueries in FROM or JOIN clauses",
+				);
+				expect(res1.reason).toContain("CTE");
+
+				const res2 = validateSuiteQL(
+					"SELECT t.id, sub.cnt FROM transaction t JOIN (SELECT transaction, COUNT(*) AS cnt FROM transactionline GROUP BY transaction) sub ON t.id = sub.transaction",
+				);
+				expect(res2.valid).toBe(false);
+				expect(res2.reason).toContain(
+					"Derived tables / subqueries in FROM or JOIN clauses",
+				);
+			});
+
 			it("should reject non-existent previousline on transactionline", () => {
 				const res = validateSuiteQL(
 					"SELECT id, previousline FROM transactionline WHERE mainline = 'F'",
@@ -837,6 +856,36 @@ describe("SuiteQL, Search & Query Utilities", () => {
 				expect(diag.selfHealingAction).toContain("netsuite_get_metadata");
 			});
 
+			it("should diagnose invalid or unsupported search errors for FROM subqueries and BUILTIN.DF GROUP BY", () => {
+				const diag1 = diagnoseSuiteQLError(
+					"Search error occurred: Invalid or unsupported search",
+					"SELECT line_count, COUNT(*) FROM (SELECT item, COUNT(*) as line_count FROM customrecord_xxx GROUP BY item) t GROUP BY line_count",
+				);
+				expect(diag1.isDiagnosed).toBe(true);
+				expect(diag1.summary).toContain(
+					"Unsupported Subquery in FROM/JOIN Clause",
+				);
+				expect(diag1.suggestedFix).toContain("WITH");
+
+				const diag2 = diagnoseSuiteQLError(
+					"Search error occurred: Invalid or unsupported search",
+					"SELECT BUILTIN.DF(status) AS lbl, status, COUNT(*) FROM customrecord_xxx GROUP BY status",
+				);
+				expect(diag2.isDiagnosed).toBe(true);
+				expect(diag2.summary).toContain(
+					"Unsupported 'BUILTIN.DF()' in Grouped Query",
+				);
+
+				const diag3 = diagnoseSuiteQLError(
+					"Search error occurred: Invalid or unsupported search",
+					"SELECT id FROM customrecord_xxx",
+				);
+				expect(diag3.isDiagnosed).toBe(true);
+				expect(diag3.summary).toContain(
+					"Invalid or Unsupported Search Specification",
+				);
+			});
+
 			it("should handle unknown generic errors gracefully", () => {
 				const diag = diagnoseSuiteQLError("Some bizarre internal error");
 				expect(diag.isDiagnosed).toBe(false);
@@ -852,6 +901,32 @@ describe("SuiteQL, Search & Query Utilities", () => {
 					true,
 				);
 				expect(all.some((t) => t.tableName === "transaction")).toBe(true);
+			});
+
+			it("should contain savedsearch, customrecordtype without recordname, and no customfield", () => {
+				const searches = searchSuiteQLCatalog("savedsearch");
+				expect(searches.some((s) => s.tableName === "savedsearch")).toBe(true);
+				const savedsearch = searches.find((s) => s.tableName === "savedsearch");
+				expect(savedsearch?.keyFields).toContain("scriptid");
+				expect(savedsearch?.keyFields).toContain("name");
+				expect(savedsearch?.keyFields).not.toContain("title");
+
+				const customrecord = searchSuiteQLCatalog("customrecordtype").find(
+					(c) => c.tableName === "customrecordtype",
+				);
+				expect(customrecord?.keyFields).toContain("name");
+				expect(customrecord?.keyFields).not.toContain("recordname");
+
+				const scriptnote = searchSuiteQLCatalog("scriptnote").find(
+					(s) => s.tableName === "scriptnote",
+				);
+				expect(scriptnote?.keyFields).toContain("internalId");
+				expect(scriptnote?.keyFields).not.toContain("id");
+
+				const customfieldMatches = searchSuiteQLCatalog("customfield");
+				expect(
+					customfieldMatches.some((c) => c.tableName === "customfield"),
+				).toBe(false);
 			});
 
 			it("should filter catalog by keyword accurately across domains and fields", () => {

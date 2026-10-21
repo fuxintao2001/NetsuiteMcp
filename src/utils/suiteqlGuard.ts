@@ -500,6 +500,15 @@ function validateSuiteQLInternal(sqlQuery: string): SuiteQLValidationResult {
 		};
 	}
 
+	// Dialect Linter 4: Subquery in FROM or JOIN clause (Derived Tables / Inline Views)
+	if (/\b(?:FROM|JOIN)\s*\(\s*SELECT\b/i.test(withoutTrailingSemicolon)) {
+		return {
+			valid: false,
+			reason:
+				"Derived tables / subqueries in FROM or JOIN clauses ('FROM (SELECT ...)') are strictly unsupported by Oracle NetSuite SuiteQL. Please rewrite the query using a Common Table Expression (CTE: `WITH cte_name AS (SELECT ...) SELECT ... FROM cte_name`) or flatten into direct joins.",
+		};
+	}
+
 	// Check for DDL/DML disallowed keywords in the masked SQL (ignores string literal contents)
 	const match = DISALLOWED_KEYWORDS_REGEX.exec(withoutTrailingSemicolon);
 	if (match) {
@@ -908,6 +917,50 @@ export function diagnoseSuiteQLError(
 				"SELECT t.id, tl.item, i.itemid FROM transaction t JOIN transactionline tl ON t.id = tl.transaction JOIN item i ON tl.item = i.id",
 			selfHealingAction:
 				"Call netsuite_get_metadata to verify foreign keys and join through linking tables (such as transactionline).",
+		};
+	}
+
+	// 0f. Invalid or unsupported search (Derived table / inline view, BUILTIN.DF in GROUP BY, or unsupported query construct)
+	if (/invalid or unsupported search/i.test(err)) {
+		if (/\b(?:FROM|JOIN)\s*\(\s*SELECT\b/i.test(sql)) {
+			return {
+				isDiagnosed: true,
+				summary: "Unsupported Subquery in FROM/JOIN Clause (Derived Table)",
+				rootCause:
+					"NetSuite SuiteQL does not support derived tables or inline subqueries in the FROM or JOIN clause (e.g. 'FROM (SELECT ...)').",
+				officialGuidance:
+					"Rewrite using a Common Table Expression (CTE): `WITH cte_name AS (SELECT ...) SELECT ... FROM cte_name` or flatten the query into direct joins.",
+				suggestedFix:
+					"WITH summary AS (SELECT item, COUNT(*) AS cnt FROM customrecord_xxx GROUP BY item) SELECT * FROM summary",
+				selfHealingAction:
+					"Replace 'FROM (SELECT ...)' with a CTE (`WITH cte_name AS (...) SELECT ...`) or flatten the query.",
+			};
+		}
+		if (/BUILTIN\.DF\s*\(/i.test(sql) && /\bGROUP\s+BY\b/i.test(sql)) {
+			return {
+				isDiagnosed: true,
+				summary: "Unsupported 'BUILTIN.DF()' in Grouped Query",
+				rootCause:
+					"NetSuite SuiteQL does not support applying 'BUILTIN.DF()' directly on grouped expressions in aggregate queries.",
+				officialGuidance:
+					"Query the underlying numeric ID in the grouped query, or wrap with a CTE (`WITH data AS (SELECT col, COUNT(*) AS cnt FROM ... GROUP BY col) SELECT BUILTIN.DF(col), cnt FROM data`).",
+				suggestedFix:
+					"WITH grp AS (SELECT status, COUNT(*) AS cnt FROM customrecord_xxx GROUP BY status) SELECT BUILTIN.DF(status), cnt FROM grp",
+				selfHealingAction:
+					"Remove BUILTIN.DF from the GROUP BY query or wrap the aggregation in a CTE.",
+			};
+		}
+		return {
+			isDiagnosed: true,
+			summary: "Invalid or Unsupported Search Specification",
+			rootCause:
+				"NetSuite SuiteQL rejected the query structure (typically caused by FROM subqueries, unsupported window functions, or unsupported functions in GROUP BY clauses).",
+			officialGuidance:
+				"Ensure queries follow Oracle NetSuite SuiteQL standards: avoid derived tables in FROM, avoid unsupported functions in GROUP BY, and verify valid column references via netsuite_get_metadata.",
+			suggestedFix:
+				"Inspect referenced tables using netsuite_get_metadata, eliminate nested FROM subqueries, and simplify GROUP BY expressions.",
+			selfHealingAction:
+				"1. Flatten FROM subqueries into CTEs (`WITH ...`). 2. Verify column names with netsuite_get_metadata.",
 		};
 	}
 

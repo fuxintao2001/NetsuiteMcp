@@ -181,6 +181,7 @@ const TOOL_DEFINITIONS: AnyToolDefinition[] = [
 		execute: async (args, ctx) => {
 			const {
 				sqlQuery,
+				query,
 				sqlQueries,
 				templateId,
 				templateParams,
@@ -188,7 +189,7 @@ const TOOL_DEFINITIONS: AnyToolDefinition[] = [
 				customRecordMappings,
 			} = args;
 
-			let singleQuery = sqlQuery;
+			let singleQuery = sqlQuery || query;
 			if (templateId) {
 				const template = SUITEQL_TEMPLATES.find((t) => t.id === templateId);
 				if (!template) {
@@ -403,6 +404,7 @@ const TOOL_DEFINITIONS: AnyToolDefinition[] = [
 			handleGetSystemNotes(
 				args as unknown as Record<string, unknown>,
 				ctx.deps.mcpTools,
+				ctx.deps.resolveCustomRecordRectype,
 			),
 	}),
 	defineTool({
