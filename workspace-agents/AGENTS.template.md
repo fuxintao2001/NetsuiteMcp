@@ -21,6 +21,13 @@ AI agents must unconditionally enforce a **Strict Zero Hallucination** policy:
      - `entity`: uses `recordtype` (`customer`, `vendor`, `employee`).
      - `item`: uses **`itemtype`** (`Assembly`, `InvtPart`, `NonInvtPart`, `Service`, `Kit`, etc.) and **`subtype`** (`Sale`, `Purchase`, `Resale`). **`item` NEVER HAS `recordtype`**.
      - `createdfrom`: exists exclusively on `transactionline`, NEVER on `transaction` header — regardless of table alias (`t`, `tr`, `tran`, `tx`).
+   - **SuiteScript 2.x/2.1 Standard Module Invariants (`N/log`)**:
+     - The `N/log` module exposes **ONLY 4 standard logging methods**:
+       - `log.debug(options)`: Diagnostic and debugging details.
+       - `log.audit(options)`: Business milestone notifications and audit tracking.
+       - `log.error(options)`: Caught exceptions and operational business errors.
+       - `log.emergency(options)`: Fatal system failures and catastrophic outages.
+     - ❌ **`log.warn()` IS STRICTLY PROHIBITED (Does Not Exist)**: NetSuite SuiteScript `N/log` does not provide a `log.warn()` method (unlike browser `console.warn` or Java SLF4J). Calling `log.warn()` immediately triggers a runtime fatal crash `TypeError: log.warn is not a function`. Always use `log.audit()` for business alerts or `log.error()` for error states.
    - Every technical proposal or schema reference should cite its official source (`📖 Official Source: [...]`).
 3. **Permission Hard-Stop**:
    - On authorization errors (`INSUFFICIENT_PERMISSION`, HTTP 403, `Permission Violation`), immediately cease further tool calls. Never mock or fake data. Report the failed record type and required NetSuite permissions.
@@ -173,6 +180,7 @@ When NetSuite MCP tools return errors, the response includes structured diagnost
 | `[suiteqlGuard] Use FETCH FIRST N ROWS ONLY` | MySQL/Postgres `LIMIT` or bare invalid `OFFSET` syntax | Replace with Oracle-standard `FETCH FIRST N ROWS ONLY`, `ROWNUM <= N`, or `OFFSET M ROWS FETCH NEXT N ROWS ONLY`. Standard `OFFSET M ROWS FETCH` syntax passes cleanly. |
 | `PERMISSION DENIED — HARD STOP` | Role lacks NetSuite permission (HTTP 403 / INSUFFICIENT_PERMISSION) | **Immediately halt tool execution.** Never mock or fake data. Consult `netsuite://reference/permissions`, report the missing permission key, and advise role adjustment. |
 | `[Production Safety Violation]` | Record creation/update attempted in Production environment | Inform user that mutations are permitted exclusively in Sandbox environments (`netsuite_create_record` and `netsuite_update_record` are blocked in Prod). |
+| `TypeError: log.warn is not a function` | Attempting to call non-existent `log.warn()` on NetSuite `N/log` module | Replace `log.warn(...)` with `log.audit(...)` (for business notices/milestones) or `log.error(...)` (for errors). SuiteScript `N/log` only supports `debug`, `audit`, `error`, and `emergency`. |
 | `NETWORK_OR_TIMEOUT` (ETIMEDOUT, ECONNRESET, 504 Gateway Timeout) | Transient network jitter, connection drop, or gateway timeout | Do NOT modify SQL. Retry after brief delay (exponential backoff, <= 2 retries) or reduce pagination row limit. Call `netsuite_status` to inspect error patterns. |
 
 **Self-Healing Protocol**:

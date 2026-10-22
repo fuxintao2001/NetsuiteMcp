@@ -41,6 +41,7 @@
      - `SAFE-SQL-001` / `002`: Wildcard projections (`SELECT *`) and non-Oracle SQL dialects.
      - `SAFE-SQL-003`: Prohibited `JOIN SystemNote` cartesian product timeouts (Pitfall 11).
      - `SAFE-SCH-001`: Mandatory `mainline` filter predicates on transaction queries to prevent amount inflation.
+     - `SAFE-API-002`: Prohibited `log.warn()` usage (`N/log` supports only `debug`, `audit`, `error`, `emergency`; calling `warn` triggers runtime `TypeError`).
 
 ---
 

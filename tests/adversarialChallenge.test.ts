@@ -282,6 +282,7 @@ describe("Adversarial Empirical Challenge Suite", () => {
 							for (let i = 0; i < 10; i++) {
 								record.load({ type: 'salesorder', id: i });
 							}
+							log.warn({ title: 'test', details: 'unsupported' });
 							eval("console.log('dangerous')");
 						}
 						return { execute };
@@ -311,6 +312,7 @@ describe("Adversarial Empirical Challenge Suite", () => {
 				expect(runBad.stdout.trim()).toBe("{}");
 				// Must flag violations on stderr
 				expect(runBad.stderr).toMatch(/SAFE-GOV-001/);
+				expect(runBad.stderr).toMatch(/SAFE-API-002/);
 				expect(runBad.stderr).toMatch(/OWASP-INJ-001/);
 			} finally {
 				fs.rmSync(tempDir, { recursive: true, force: true });

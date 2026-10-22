@@ -295,6 +295,18 @@ export function analyzeSuiteScriptContent(content, filename = "anonymous.js") {
 			});
 		}
 
+		// Rule 12: Prohibited log.warn() call (SuiteScript N/log has no warn method)
+		if (/\blog\.warn\s*\(/.test(line)) {
+			issues.push({
+				file: filename,
+				line: lineNum,
+				rule: "SAFE-API-002",
+				message:
+					"Invalid method 'log.warn()': NetSuite N/log only exposes debug(), audit(), error(), and emergency(). Calling log.warn() causes runtime 'TypeError: log.warn is not a function'. Use log.audit() or log.error().",
+				severity: "ERROR",
+			});
+		}
+
 		// Update block closures based on net brace changes
 		if (inLoopDepth > 0) {
 			const opens = (line.match(/\{/g) || []).length;
