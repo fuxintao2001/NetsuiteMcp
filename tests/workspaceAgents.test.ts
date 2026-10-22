@@ -341,6 +341,38 @@ describe("Workspace Agents E2E Acceptance Suite", () => {
 				`Self-Healing SOP must cover at least 12 distinct diagnostic categories matching suiteqlGuard.ts. Matched: ${matchedCount}. Missing: ${missingCategories.join(", ")}`,
 			).toBeGreaterThanOrEqual(12);
 		});
+
+		it("AC-1.7: NetSuite Official Automated Testing SOP (SCUTF, 4-tier pyramid, non-intrusive path mapping, GraalJS guardrails) is documented in AGENTS.template.md and safe-guide-standards.md", () => {
+			const agentsContent = fs.readFileSync(agentsTemplatePath, "utf-8");
+
+			// 1. Verify Section 7 exists in AGENTS.template.md
+			expect(agentsContent).toMatch(
+				/##\s*🧪\s*7\.\s*NetSuite Official Automated Testing Standard SOP/i,
+			);
+
+			// 2. Verify 4-tier testing pyramid components
+			expect(agentsContent).toMatch(/Tier 1.*Local Static & SAFE/i);
+			expect(agentsContent).toMatch(/Tier 2.*Unit Testing.*SCUTF/i);
+			expect(agentsContent).toMatch(/Tier 3.*SDF Project.*Validation/i);
+			expect(agentsContent).toMatch(/Tier 4.*Automated Sandbox.*Closed-Loop/i);
+
+			// 3. Verify non-intrusive testing & zero source alteration mandate
+			expect(agentsContent).toMatch(/Non-Intrusive Testing & Zero Source Code Alteration/i);
+			expect(agentsContent).toContain("moduleNameMapper");
+			expect(agentsContent).toContain("^/SuiteScripts/(.*)$");
+			expect(agentsContent).toContain("@oracle/suitecloud-unit-testing");
+
+			// 4. Verify GraalJS vs Node.js runtime defect prevention (SAFE Pitfall 108)
+			expect(agentsContent).toMatch(/GraalJS.*V8.*Pitfall 108/i);
+			expect(agentsContent).toMatch(/Symbol\.iterator|function\*/);
+
+			// 5. Verify safe-guide-standards.md documents 4-tier testing pyramid and non-intrusive path mapping
+			const safeStandardsPath = path.join(rulesDir, "safe-guide-standards.md");
+			const safeContent = fs.readFileSync(safeStandardsPath, "utf-8");
+			expect(safeContent).toMatch(/Four-Tier Testing Pyramid/i);
+			expect(safeContent).toContain("@oracle/suitecloud-unit-testing");
+			expect(safeContent).toContain("moduleNameMapper");
+		});
 	});
 
 	// =========================================================================

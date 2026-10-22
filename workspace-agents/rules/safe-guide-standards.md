@@ -45,12 +45,20 @@
 
 ---
 
-## 5. SuiteScript Unit Testing Standards (@oracle/suitecloud-unit-testing)
+## 5. SuiteScript Automated Testing Standards (@oracle/suitecloud-unit-testing)
 
-1. **Official Unit Testing Mocking**:
-   - When authoring complex SuiteScript 2.1 scripts (Map/Reduce, UserEvent, Suitelet, RESTlet), adhere to Oracle's official unit testing standard using `@oracle/suitecloud-unit-testing` with Jest or Vitest.
-2. **Local Isolation**:
-   - Always mock NetSuite native modules (`N/record`, `N/search`, `N/query`, `N/log`, `N/runtime`) with official stubs so business logic can be thoroughly verified locally before uploading to NetSuite File Cabinet.
+1. **Four-Tier Testing Pyramid**:
+   - **Tier 1 (Local SAFE Pre-Flight Check)**: Run `node scripts/suitescript-safe-check.js` to catch loop governance, SQL dialect, `log.warn()` prohibition, and security flaws locally before upload.
+   - **Tier 2 (Non-Intrusive Unit Testing)**: Author unit tests in `__tests__/*.test.js` using `@oracle/suitecloud-unit-testing` and Jest. Mock NetSuite native modules (`N/record`, `N/record/instance`, `N/search`, `N/query`, `N/runtime`, `N/url`, `N/currentRecord`) with official stubs.
+   - **Tier 3 (SDF Project Validation)**: Execute `suitecloud project:validate` to verify Manifest, Deploy XML, custom objects, and script deployment dependencies offline.
+   - **Tier 4 (Automated Sandbox Closed-Loop Verification)**: Verify deployed scripts in Sandbox using MCP tools (`netsuite_upload_file` ➔ `netsuite_create_record`/`netsuite_update_record` ➔ `netsuite_get_script_logs` ➔ `netsuite_get_system_notes` ➔ teardown) without manual UI clicking.
+2. **Source Code Immortality (Non-Intrusive Testing)**:
+   - ❌ NEVER alter production SuiteScript source files for test compatibility (no converting AMD `define` to CommonJS, no changing FileCabinet `/SuiteScripts/...` paths to relative paths, no injecting test branches).
+   - ✅ Configure `jest.config.js` with `SuiteCloudJestConfiguration` and `moduleNameMapper` mapping `^/SuiteScripts/(.*)$` and `^SuiteScripts/(.*)$` to `<rootDir>/src/FileCabinet/SuiteScripts/$1`.
+3. **GraalJS vs Node.js/V8 Runtime Guardrails (SAFE Pitfall 108)**:
+   - Prohibit generator functions (`function*`) and `Symbol.iterator`; use standard ES array iteration methods.
+   - Inject `global.log = { debug: jest.fn(), audit: jest.fn(), error: jest.fn(), emergency: jest.fn() }` in Jest setup.
+   - Client Scripts execute in browser; use `console.log()` / `console.table()` and DevTools (F12). `N/log` is ignored on forms and `log.warn()` triggers runtime `TypeError`.
 
 ---
 

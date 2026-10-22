@@ -10,7 +10,7 @@
 AI agents must unconditionally enforce a **Strict Zero Hallucination** policy:
 
 1. **Hierarchy of Authoritative Truth**:
-   - **Tier 1 (Authoritative Standard)**: Oracle NetSuite Official Documentation (Help Center, SuiteAnswers, Records Catalog, SuiteScript 2.1 API Reference, SAFE Guide 2025.2). This unconditionally supersedes third-party forum posts, outdated tutorials, and LLM intuition.
+   - **Tier 1 (Authoritative Standard)**: Oracle NetSuite Official Documentation (Help Center, SuiteAnswers, Records Catalog, SuiteScript 2.1 API Reference, SAFE Guide 2025.2, SuiteCloud SDK & `@oracle/suitecloud-unit-testing`). This unconditionally supersedes third-party forum posts, outdated tutorials, and LLM intuition.
    - **Tier 2 (Account Live Schema)**: Real-time metadata retrieved directly from the active NetSuite account via official tool `netsuite_get_metadata` (for database tables and record types, with automatic offline fallback).
    - **Tier 3 (Curated Agent Skills)**: Antigravity Skills located at `~/.gemini/config/skills/`.
    - **Tier 4 (LLM Parametric Knowledge)**: General training knowledge — MUST always be verified against Tier 1/2 before proposing code changes.
@@ -57,6 +57,9 @@ When writing, debugging, or refactoring code (SuiteScript, TypeScript, JavaScrip
    - ❌ **PROHIBITED**: Narrating code evolution history, migration trajectories, or past vs present comparisons (strictly prohibit narratives like "in the previous version it was X, now we upgraded to Y", "previously we used A, now refactored to B", "compared to earlier versions...").
    - ❌ **PROHIBITED**: Inserting changelog commentary, historical diff reflections, or superseded implementation post-mortems into code comments, technical responses, or documentation.
    - ✅ **MANDATE**: In all code comments, technical responses, and documentation, **describe ONLY the current, definitive state and logic of the latest code**. Treat the current codebase as the sole authoritative, standalone implementation. Explain directly its latest architecture, data flow, parameter semantics, and business logic, completely excising all version iteration narratives.
+5. **Non-Intrusive Testing & Zero Source Code Alteration**:
+   - ❌ **STRICTLY PROHIBITED**: Modifying production SuiteScript business code to make tests pass or run in Node.js (e.g., converting AMD `define()` into CommonJS `module.exports`, changing FileCabinet virtual paths like `/SuiteScripts/tools/common_api` into relative filesystem paths, wrapping code in `if (isTest)` branches, or adding dummy test export properties).
+   - ✅ **MANDATE**: SuiteScript production files MUST remain 100% pure AMD/ES2022 code conforming to NetSuite runtime. All test harness compatibility (AMD transpilation, virtual path resolution, module stubs) MUST be resolved exclusively within test configuration (`jest.config.js`) and test specifications (`__tests__/*.test.js`).
 
 ---
 
@@ -76,6 +79,7 @@ To ensure high-density reasoning without context bloat, deep domain knowledge is
 | **SDF Roles & Permissions Config** | `~/.gemini/config/skills/netsuite-sdf-roles-and-permissions/SKILL.md`<br>Resource: `netsuite://reference/permissions` | Role permission XML (`customrole*`, `permkey`, `permlevel`), least-privilege role design, SDF object deployment, and 403 permission self-healing. |
 | **SDF Project Documentation** | `~/.gemini/config/skills/netsuite-sdf-project-documentation/SKILL.md` | SDF architecture diagrams, manifest analysis, object dependency graphing, and deployment troubleshooting. |
 | **UIF SPA Component Development** | `~/.gemini/config/skills/netsuite-uif-spa-reference/SKILL.md` | Modern NetSuite UIF SPA development, `@uif-js/core` and `@uif-js/component` APIs and hooks. |
+| **SuiteScript Automated Testing (SCUTF)** | `~/.gemini/config/skills/netsuite-sdf-safe-guide/references/06-testing-suiteapps.md` | Non-intrusive unit testing with `@oracle/suitecloud-unit-testing`, Jest stubs, 4-tier testing pyramid, virtual path mapping, and GraalJS vs V8 defect prevention. |
 | **Generative UI Component Library** | Resource: `netsuite://templates/generative-ui` | Production-ready HTML/Tailwind templates for NetSuite financial variance, transaction flow graphs, and multi-location inventory maps conforming to Antigravity theme standards. |
 
 ### 3.1 Authoritative MCP Resource Library (Direct Read via MCP)
@@ -181,6 +185,9 @@ When NetSuite MCP tools return errors, the response includes structured diagnost
 | `PERMISSION DENIED — HARD STOP` | Role lacks NetSuite permission (HTTP 403 / INSUFFICIENT_PERMISSION) | **Immediately halt tool execution.** Never mock or fake data. Consult `netsuite://reference/permissions`, report the missing permission key, and advise role adjustment. |
 | `[Production Safety Violation]` | Record creation/update attempted in Production environment | Inform user that mutations are permitted exclusively in Sandbox environments (`netsuite_create_record` and `netsuite_update_record` are blocked in Prod). |
 | `TypeError: log.warn is not a function` | Attempting to call non-existent `log.warn()` on NetSuite `N/log` module | Replace `log.warn(...)` with `log.audit(...)` (for business notices/milestones) or `log.error(...)` (for errors). SuiteScript `N/log` only supports `debug`, `audit`, `error`, and `emergency`. |
+| `Cannot find module '/SuiteScripts/...'` | Jest cannot resolve FileCabinet absolute root path | Add `moduleNameMapper` in `jest.config.js` mapping `'^/SuiteScripts/(.*)$'` and `'^SuiteScripts/(.*)$'` to `'<rootDir>/src/FileCabinet/SuiteScripts/$1'`. NEVER alter SuiteScript source paths. |
+| `Code passes Jest tests but fails in NetSuite at runtime` | GraalJS (ES2022) vs Node.js (V8) runtime differences (SAFE Pitfall 108) | Remove native iterators (`function*`, `Symbol.iterator`); use standard Array methods (`.map()`, `.filter()`). Add `global.log` stubs. Run Sandbox MCP integration test. |
+| `TypeError: Record.save is not a function` / `setValue is not a function` | Incomplete or unmocked NetSuite module stub in Jest | Import and mock `N/record/instance` stub or mock `record.load.mockReturnValue({ save: jest.fn(), setValue: jest.fn() })`. |
 | `NETWORK_OR_TIMEOUT` (ETIMEDOUT, ECONNRESET, 504 Gateway Timeout) | Transient network jitter, connection drop, or gateway timeout | Do NOT modify SQL. Retry after brief delay (exponential backoff, <= 2 retries) or reduce pagination row limit. Call `netsuite_status` to inspect error patterns. |
 
 **Self-Healing Protocol**:
@@ -189,7 +196,127 @@ When NetSuite MCP tools return errors, the response includes structured diagnost
 
 ---
 
-## 🔒 7. Environment & Write Operations
+## 🧪 7. NetSuite Official Automated Testing Standard SOP
+
+AI agents and developers must strictly follow Oracle NetSuite's official automated testing standards, eliminating intrusive source code hacks and ad-hoc manual UI testing:
+
+### 7.1 The 4-Tier NetSuite Automated Testing Pyramid
+
+```
+                  ┌──────────────────────────────────────────────┐
+                  │ Tier 4: Automated Sandbox Closed-Loop (MCP)  │  ◄── End-to-End verification via MCP tools
+                  ├──────────────────────────────────────────────┤
+                  │ Tier 3: SDF Project Validation (SuiteCloud)  │  ◄── suitecloud project:validate
+                  ├──────────────────────────────────────────────┤
+                  │ Tier 2: Non-Intrusive Unit Tests (SCUTF)     │  ◄── @oracle/suitecloud-unit-testing + Jest
+                  ├──────────────────────────────────────────────┤
+                  │ Tier 1: Local Static & SAFE Pre-Flight Check │  ◄── scripts/suitescript-safe-check.js
+                  └──────────────────────────────────────────────┘
+```
+
+1. **Tier 1: Local Static & SAFE Pre-Flight Gate (`suitescript-safe-check.js`)**:
+   - Executes sub-second local AST static checks before code touches NetSuite.
+   - Hard-blocks loop governance exhaustion (`SAFE-GOV-001`), unindexed queries, non-Oracle SQL dialects, `log.warn()` runtime crashes (`SAFE-API-002`), and OWASP vulnerabilities.
+2. **Tier 2: Non-Intrusive Unit Testing Gate (SCUTF — `@oracle/suitecloud-unit-testing` + Jest)**:
+   - Executes local unit tests using official Oracle NetSuite stubs (`N/record`, `N/record/instance`, `N/search`, `N/query`, `N/runtime`, `N/url`, `N/currentRecord`, `N/ui/serverWidget`).
+   - Zero governance unit consumption, zero network latency, and deterministic assertions across all business branches.
+3. **Tier 3: SDF Project Structure Validation Gate (`suitecloud project:validate`)**:
+   - Validates `manifest.xml`, `deploy.xml`, custom object XML definitions, script deployment dependencies, and account feature requirements offline via SuiteCloud CLI.
+4. **Tier 4: Automated Sandbox Closed-Loop Verification Gate (MCP Toolchain)**:
+   - Programmatic end-to-end execution and assertion in Sandbox without tedious manual NetSuite UI clicking.
+   - Closed loop: Pre-flight check ➔ `netsuite_upload_file` ➔ Programmatic trigger via `netsuite_create_record` / `netsuite_update_record` ➔ Programmatic log assertion via `netsuite_get_script_logs` ➔ State audit via `netsuite_get_system_notes` ➔ Test fixture teardown.
+
+### 7.2 Non-Intrusive Test Configuration & Virtual Path Mapping
+
+**Source Code Immortality Mandate**: Under NO circumstances should production SuiteScript files be altered to satisfy Jest or Node.js runtimes. AMD `define()` syntax is transpiled automatically on the fly by SCUTF's Jest transform. FileCabinet virtual root paths (`/SuiteScripts/...`) MUST be resolved in `jest.config.js` via `moduleNameMapper`:
+
+```javascript
+// jest.config.js — Canonical NetSuite SuiteCloud Unit Testing Configuration
+const SuiteCloudJestConfiguration = require("@oracle/suitecloud-unit-testing/jest-configuration/SuiteCloudJestConfiguration");
+
+module.exports = SuiteCloudJestConfiguration.build({
+    projectFolder: 'src',
+    projectType: SuiteCloudJestConfiguration.ProjectType.ACP,
+    moduleNameMapper: {
+        '^/SuiteScripts/(.*)$': '<rootDir>/src/FileCabinet/SuiteScripts/$1',
+        '^SuiteScripts/(.*)$': '<rootDir>/src/FileCabinet/SuiteScripts/$1'
+    }
+});
+```
+
+### 7.3 Official Module Mocking Standards (`@oracle/suitecloud-unit-testing`)
+
+1. **Mock Lifecycle Isolation**:
+   - Every test file in `__tests__/*.test.js` MUST call `jest.clearAllMocks()` in `beforeEach(() => { ... })` to prevent cross-test state leakage.
+2. **Canonical Mocking Structure**:
+   ```javascript
+   import SalesOrderService from 'SuiteScripts/Services/salesOrderService';
+   import record from 'N/record';
+   import Record from 'N/record/instance';
+
+   jest.mock('N/record');
+   jest.mock('N/record/instance');
+
+   describe('SalesOrderService Unit Tests', () => {
+       beforeEach(() => {
+           jest.clearAllMocks();
+       });
+
+       it('should update sales order memo and save successfully', () => {
+           record.load.mockReturnValue(Record);
+           Record.save.mockReturnValue(1001);
+
+           const result = SalesOrderService.updateMemo({ id: 1001, memo: 'Approved' });
+
+           expect(record.load).toHaveBeenCalledWith({ type: record.Type.SALES_ORDER, id: 1001 });
+           expect(Record.setValue).toHaveBeenCalledWith({ fieldId: 'memo', value: 'Approved' });
+           expect(Record.save).toHaveBeenCalled();
+           expect(result).toBe(1001);
+       });
+   });
+   ```
+
+### 7.4 GraalJS vs Node.js/V8 Runtime Pitfalls (SAFE Pitfall 108)
+
+SuiteScript 2.1 executes in **GraalJS (ES2022)** in NetSuite, while Jest executes in **Node.js (V8)**. Prevent subtle cross-engine defects:
+
+1. **Prohibit Native Iterators**:
+   - ❌ NEVER use generator functions (`function*`) or `Symbol.iterator`. GraalJS in NetSuite does not support native iterators and fails at runtime even if Jest passes.
+   - ✅ Use standard ES array iteration methods (`.map()`, `.filter()`, `.forEach()`, `for...of` over standard arrays).
+2. **Global Logging Stubs**:
+   - If legacy scripts reference global `log` or `util`, declare stubs in Jest setup:
+     ```javascript
+     global.log = { debug: jest.fn(), audit: jest.fn(), error: jest.fn(), emergency: jest.fn() };
+     ```
+3. **Client Script vs Server Script Logging Boundary**:
+   - Server-side scripts (UserEvent, Suitelet, Scheduled, Map/Reduce) use `N/log`.
+   - Client Scripts run in the **browser**: use `console.log()` / `console.table()` and browser DevTools (F12). `N/log` is ignored on forms, and calling `log.warn()` crashes with `TypeError`.
+4. **Governance Emulation**:
+   - Jest has no concept of NetSuite governance units. Mock `runtime.getCurrentScript().getRemainingUsage()` to test re-scheduling logic, and verify real governance consumption in Tier 4 Sandbox testing.
+
+### 7.5 Automated Sandbox Closed-Loop Verification Protocol (Zero UI Clicking)
+
+When verifying SuiteScripts in Sandbox environments, execute this fully automated protocol using MCP tools:
+
+1. **Upload Code**: Run pre-flight checks ➔ Upload script via `netsuite_upload_file`.
+2. **Programmatic Execution**:
+   - *UserEvent / Client Scripts*: Invoke `netsuite_create_record` or `netsuite_update_record` with reproducible test fixtures in Sandbox to trigger the script hook automatically.
+   - *Suitelets / RESTlets*: Invoke the script endpoint URL via HTTP or test harness.
+   - *Scheduled / Map/Reduce*: Deploy or trigger task execution.
+3. **Programmatic Log Assertion**:
+   - Call `netsuite_get_script_logs` with `scriptId`, filtering by `type: "ERROR"` to assert 0 errors, and `type: "AUDIT"` to verify expected business milestone completions and governance unit usage.
+4. **State & Audit Verification**:
+   - Call `netsuite_run_suiteql` or `netsuite_get_system_notes` to inspect updated field values and audit lines, ensuring database state matches expectations.
+5. **Automated Teardown**:
+   - Inactivate or delete the test record created in Step 2 to preserve zero Sandbox data pollution.
+
+### 7.6 Continuous Testing & NetSuite Phased Release Protocol
+
+- During NetSuite semi-annual major upgrades (20xx.1 in January, 20xx.2 in July), execute automated test suites against **SDN Leading Environment** and **Release Preview** (`system.beta.netsuite.com`) during Phase 0 (2-3 weeks before customer accounts are upgraded) to detect platform behavioral shifts before production impact.
+
+---
+
+## 🔒 8. Environment & Write Operations
 
 {{WRITE_TOOLS_TABLE}}
 
@@ -197,7 +324,7 @@ When NetSuite MCP tools return errors, the response includes structured diagnost
 
 ---
 
-## ⚙️ 8. Antigravity Native Customization Architecture (.agents/)
+## ⚙️ 9. Antigravity Native Customization Architecture (.agents/)
 
 This workspace adheres strictly to the official Google Antigravity Customization Architecture (`agy-customizations`):
 
