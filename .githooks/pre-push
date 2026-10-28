@@ -1,16 +1,11 @@
 #!/bin/sh
-# Git pre-push hook: When pushing NetsuiteMcp, ensure dist is built, all workspace environments are synced, and post-push log cleanup is scheduled.
-
-# 1. Capture refs being pushed from stdin (must be read upfront)
-REFS_INPUT=$(cat)
-
-# 2. Spawn detached background watcher to clean error logs after git push completes successfully
-if [ -n "$REFS_INPUT" ]; then
-	nohup node scripts/post-push-watcher.js "$PPID" "$1" "$2" "$REFS_INPUT" >/dev/null 2>&1 &
-fi
+# Git pre-push hook: When pushing NetsuiteMcp, ensure dist is built, all workspace environments are synced, and error logs are cleaned.
 
 echo "\n⚡ [Git Hook: pre-push] 确保构建最新 dist/ 产物并触发 MCP 热重载..."
 npm run build
 
 echo "\n🔄 [Git Hook: pre-push] 自动检查并同步各环境 AGENTS 与规约..."
 node scripts/sync-agents.js --push
+
+echo "\n🧹 [Git Hook: pre-push] 清空历史错误日志与诊断报告..."
+node scripts/clean-error-logs.js

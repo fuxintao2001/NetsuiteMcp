@@ -1,8 +1,11 @@
 #!/bin/sh
-# Git post-commit hook: 每次提交代码均自动重新编译最新 dist/ 并同步规约至所有客户端工作区
+# Git post-commit hook: 每次提交代码均自动重新编译最新 dist/、同步规约至所有客户端工作区并清空错误日志
 echo "\n⚡ [Git Hook: post-commit] 自动构建最新 dist/ 产物并触发 MCP 热重载..."
 npm run build
 
 echo "\n🔄 [Git Hook: post-commit] 自动同步各环境 AGENTS 与规约..."
 node scripts/sync-agents.js --push
+
+echo "\n🧹 [Git Hook: post-commit] 清空历史错误日志与诊断报告..."
+node scripts/clean-error-logs.js
 

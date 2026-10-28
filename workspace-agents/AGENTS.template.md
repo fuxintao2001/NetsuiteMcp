@@ -71,7 +71,7 @@ To ensure high-density reasoning without context bloat, deep domain knowledge is
 |:---|:---|:---|
 | **SuiteScript 2.1 & SAFE Guide Review** | `~/.gemini/config/skills/netsuite-sdf-safe-guide/SKILL.md`<br>Resource: `netsuite://safe/governance-units` | Enforce 12 SAFE principles, 14 script types, governance budgets, `N/query` over `N/search`, and 140+ pitfalls. Never load records in loops; use Map/Reduce for bulk processing. |
 | **SuiteScript Records & Fields Schema** | `~/.gemini/config/skills/netsuite-suitescript-records-reference/SKILL.md`<br>Resource: `netsuite://records/reference` | Lookup exact field IDs, sublists, mandatory fields, and search filters across all 272 standard records. Zero guesswork on field names. |
-| **SuiteQL Modeling & Anti-Slow-Query** | `~/.gemini/config/skills/netsuite-ai-connector-instructions/SKILL.md`<br>Resource: `netsuite://guides/suiteql`<br>Resource: `netsuite://queries/golden-templates` | Follow SuiteQL safety checklist: explicit column projections (no `SELECT *`), mandatory `mainline = 'F'`, pagination via `FETCH FIRST N ROWS ONLY`, `ROWNUM <= N`, or Oracle-standard `OFFSET M ROWS FETCH NEXT N ROWS ONLY`, driving index filters. Zero implicit SQL rewriting. |
+| **SuiteQL Modeling & Anti-Slow-Query** | `~/.gemini/config/skills/netsuite-ai-connector-instructions/SKILL.md`<br>Resource: `netsuite://guides/suiteql`<br>Resource: `netsuite://queries/golden-templates` | Follow SuiteQL safety checklist: explicit column projections (no `SELECT *`), mandatory `mainline = 'F'`, situational pagination via `FETCH FIRST N ROWS ONLY` or `ROWNUM <= N` when needed (no pagination for ID point lookups or aggregations), Oracle booleans (`'T'`/`'F'`), string concatenation (`||`), CTEs for subqueries, driving index filters. Zero implicit SQL rewriting. |
 | **SuiteQL Built-in Functions Reference** | Resource: `netsuite://reference/suiteql-builtins` | Authoritative signatures, parameter schemas, SAFE restrictions, and examples for NetSuite2 functions (`BUILTIN.DF`, `BUILTIN.CF`, `BUILTIN.HIERARCHY`, `BUILTIN.PERIOD`, `BUILTIN.CONSOLIDATE`, `BUILTIN.CURRENCY`). |
 | **SuiteScript 1.0 → 2.1 Modernization** | `~/.gemini/config/skills/netsuite-suitescript-upgrade/SKILL.md` | 125+ API mappings, 34 object conversions, modern ES6+ features, breaking behavioral changes migration. |
 | **OWASP & Secure Coding Standards** | `~/.gemini/config/skills/netsuite-owasp-secure-coding/SKILL.md` | Context-aware output encoding, SQL injection prevention, CSP headers, credential protection, parameter sanitization. |
@@ -122,7 +122,14 @@ The server registers 7 official MCP resource URIs. Read these resources via MCP 
    - **Only Permitted Sequential Boundary**:
      - Split across turns ONLY when a downstream call's required parameter (e.g., an unknown internal ID or unverified custom column name) must be extracted from an upstream call's output.
 3. **SuiteQL Guardrails & Zero-Transpile Standard**:
-   - Ensure all queries conform strictly to [SuiteQL Guardrails](file://{{PROJECT_PATH}}/.agents/rules/suiteql-guardrails.md) (No `SELECT *`, explicit `mainline = 'F'`, situational pagination via `FETCH FIRST N ROWS ONLY` or `ROWNUM <= N` when needed, index driving filter).
+   - Ensure all queries conform strictly to [SuiteQL Guardrails](file://{{PROJECT_PATH}}/.agents/rules/suiteql-guardrails.md):
+     - **No `SELECT *`**: Explicit column projections only.
+     - **Mandatory `mainline` filter**: Always specify `tl.mainline = 'F'` (line items) or `'T'` (header summary) when querying `transactionline`.
+     - **Situational Pagination**: Transparently passed without implicit rewriting; add `FETCH FIRST N ROWS ONLY` or `ROWNUM <= N` dynamically for open scans or sampling; omit for single-record lookups (`id = 123`) or aggregations (`COUNT(*)`, `SUM(amount)`).
+     - **NetSuite Booleans**: All boolean fields are `CHAR(1)` with `'T'` or `'F'` (never `true`, `false`, `1`, `0`).
+     - **String Concatenation**: Exclusively use Oracle `||` or `CONCAT(a, b)` (never `+`, which causes `ORA-01722`).
+     - **No Derived Tables**: NetSuite SuiteQL strictly disallows inline subqueries in `FROM (SELECT ...)`; always use Common Table Expressions (`WITH cte AS (...) SELECT ... FROM cte`).
+     - **No `BUILTIN.DF` in `GROUP BY`**: Group by raw numeric ID, and call `BUILTIN.DF` in outer query or CTE projection.
    - The server performs **zero implicit rewriting** of queries. Queries with non-standard syntax (e.g., bare `LIMIT`) are strictly rejected at runtime with actionable remediation guidance.
 4. **Primary Query Mechanism**:
    - SuiteQL (`netsuite_run_suiteql`) is the authoritative and primary query mechanism for all business data retrieval.
@@ -168,6 +175,8 @@ When NetSuite MCP tools return errors, the response includes structured diagnost
 | `[suiteqlGuard] Prohibited 'JOIN SystemNote'` | Multi-table JOIN with SystemNote causes Cartesian timeout (>45s, Pitfall 11) | Split into standalone `systemnote` query with `WHERE recordid = ...` or call `netsuite_get_system_notes`. |
 | `[suiteqlGuard] Unindexed 'systemnote' scan` | Scanning `systemnote` without `recordid` filter forces full-table scan across tens of millions of audit logs | Filter `systemnote` strictly by `WHERE recordid = :id` and narrow date range, or call `netsuite_get_system_notes`. |
 | `[suiteqlGuard] Derived tables / subqueries in FROM/JOIN unsupported` | NetSuite SuiteQL strictly disallows inline views / subqueries in `FROM (SELECT ...)` or `JOIN (SELECT ...)` | Rewrite query using Common Table Expression (CTE: `WITH cte_name AS (SELECT ...) SELECT ... FROM cte_name`) or flatten into direct joins. |
+| `[suiteqlGuard] Boolean Literal Syntax Error (Use 'T' / 'F')` | NetSuite SuiteQL fields are `CHAR(1)`; boolean literals `true`/`false`/`1`/`0` cause `ORA-00904: invalid identifier` | Replace boolean literals: use `='T'` or `='F'` (e.g. `isinactive = 'F'`). |
+| `[suiteqlGuard] String Concatenation Operator (Use '||')` | `+` operator in SuiteQL is arithmetic only; string concatenation with `+` causes `ORA-01722: invalid number` | Use Oracle concatenation operator `||` or `CONCAT(a, b)` (e.g. `col1 || ' ' || col2`). |
 | `[suiteqlGuard] Unsupported 'BUILTIN.DF()' in Grouped Query` | NetSuite SuiteQL does not support `BUILTIN.DF()` directly in `GROUP BY` expressions | Group by underlying numeric ID, or wrap aggregation in CTE (`WITH grp AS (SELECT col, COUNT(*) AS cnt FROM ... GROUP BY col) SELECT BUILTIN.DF(col), cnt FROM grp`). |
 | `[suiteqlGuard] Duplicate Column Alias in SELECT Clause` (`QUERY_DUPLICATE_ALIAS`) | Two or more projected columns share identical `AS alias` names | Assign unique alias names to each projected column (e.g. `AS col1`, `AS col2`). |
 | `[suiteqlGuard] Ambiguous Column Reference in Joined Tables` (`ambiguous column`) | Projected column exists in multiple joined tables (e.g. `id`, `subsidiary`, `memo`) | Prefix ambiguous column name with appropriate table alias (e.g. `t.id` or `tl.id`). |
@@ -333,7 +342,7 @@ This workspace adheres strictly to the official Google Antigravity Customization
   - `PostToolUse`: Automated code formatting and SAFE Guide static checks (`scripts/suitescript-safe-check.js`).
 - **Modular Directory Rules ([`.agents/rules/`](file://{{PROJECT_PATH}}/.agents/rules))**:
   - [Fast-Path Routing](file://{{PROJECT_PATH}}/.agents/rules/fast-path-routing.md): 1-turn direct execution on standard tables.
-  - [SuiteQL Guardrails](file://{{PROJECT_PATH}}/.agents/rules/suiteql-guardrails.md): 7 golden SQL defense rules.
+  - [SuiteQL Guardrails](file://{{PROJECT_PATH}}/.agents/rules/suiteql-guardrails.md): 10 golden SQL defense rules and 5 critical syntax traps.
   - [SAFE Guide Standards](file://{{PROJECT_PATH}}/.agents/rules/safe-guide-standards.md): SAFE Guide 2025.2 & OWASP secure coding directives.
   - [Environment Locks](file://{{PROJECT_PATH}}/.agents/rules/environment-locks.md): Production write lockout & upload card gates.
   - [Generative UI](file://{{PROJECT_PATH}}/.agents/rules/generative-ui.md): Antigravity Generative UI styling, CSS theme variables, and `<agent-embed>` directives.
