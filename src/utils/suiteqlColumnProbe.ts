@@ -159,7 +159,9 @@ export async function probeSuspiciousColumns(
 							errMsg.includes("Unknown identifier") ||
 							errMsg.includes("was not found") ||
 							errMsg.includes("Invalid search type") ||
-							errMsg.includes("Search error occurred")
+							errMsg.includes("Search error occurred") ||
+							errMsg.includes("Failed to parse SQL") ||
+							errMsg.includes("near: FETCH")
 						) {
 							await cacheService.set(accountId, cacheKey, "invalid", 86400);
 							invalidCols.push({

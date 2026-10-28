@@ -4,6 +4,7 @@ import { recordsReferenceService } from "./recordsReference.js";
 import {
 	findColumnHint,
 	getPseudoTableRemediation,
+	getTableNameRemediation,
 } from "./suiteqlColumnHints.js";
 
 const { Parser } = pkg;
@@ -1106,6 +1107,54 @@ function validateSuiteQLInternal(sqlQuery: string): SuiteQLValidationResult {
 		}
 	}
 
+	// Anti-Pattern 9: Known non-existent columns on standard NetSuite2.com tables
+	if (
+		tables.includes("account") &&
+		/\bacctname\b/i.test(withoutTrailingSemicolon)
+	) {
+		return {
+			valid: false,
+			reason:
+				"Invalid column 'acctname' on 'account': In NetSuite2.com SuiteQL, 'acctname' does NOT exist on the 'account' table. Use 'fullname', 'accountsearchdisplaynamecopy', or 'accountsearchdisplayname' instead.",
+		};
+	}
+
+	if (
+		tables.includes("customer") &&
+		/\bcredithold\b/i.test(withoutTrailingSemicolon)
+	) {
+		return {
+			valid: false,
+			reason:
+				"Invalid column 'credithold' on 'customer': In NetSuite2.com SuiteQL, 'credithold' does NOT exist on the 'customer' table. Use 'creditholdoverride' (with BUILTIN.DF(creditholdoverride) for display status) or 'oncredithold' instead.",
+		};
+	}
+
+	if (tables.includes("inventorybalance")) {
+		if (
+			tables.includes("bin") ||
+			/\b(?:ib|inventorybalance)\.bin\b/i.test(withoutTrailingSemicolon)
+		) {
+			return {
+				valid: false,
+				reason:
+					"Invalid column 'bin' or 'JOIN bin' on 'inventorybalance': In NetSuite2.com SuiteQL, table 'bin' is not queryable and column 'ib.bin' does not exist. Query 'binnumber' and 'BUILTIN.DF(binnumber)' directly on 'inventorybalance' without joining 'bin'.",
+			};
+		}
+	}
+
+	if (
+		tables.includes("scriptnote") &&
+		(/\b(?:sn|scriptnote)\.time\b/i.test(withoutTrailingSemicolon) ||
+			(tables.length === 1 && /\btime\b/i.test(withoutTrailingSemicolon)))
+	) {
+		return {
+			valid: false,
+			reason:
+				"Invalid column 'time' on 'ScriptNote': In NetSuite2.com SuiteQL, 'ScriptNote' has only 6 columns (internalId, date, scriptType, detail, type, title) and does NOT have a 'time' column. Use TO_CHAR(sn.date, 'YYYY-MM-DD HH24:MI:SS') to extract both date and time.",
+		};
+	}
+
 	return { valid: true, tables, hasPagination };
 }
 
@@ -1413,6 +1462,18 @@ export function diagnoseSuiteQLError(
 				rootCause: `Table '${tableName}' does not exist as a SuiteQL queryable table. Schema and field metadata cannot be queried with SQL pseudo-catalog tables in NetSuite.`,
 				officialGuidance: pseudoAdvice,
 				selfHealingAction: `Call netsuite_get_metadata({ table: 'target_record', source: 'remote' }) instead of querying '${tableName}'.`,
+			};
+		}
+
+		const tableRemediation = getTableNameRemediation(tableName);
+		if (tableRemediation) {
+			return {
+				isDiagnosed: true,
+				summary: `Invalid Table Name '${tableName}' (Use '${tableRemediation.targetTable}')`,
+				rootCause: tableRemediation.guidance,
+				officialGuidance: `Replace '${tableName}' with '${tableRemediation.targetTable}' in your SuiteQL query.`,
+				suggestedFix: tableRemediation.suggestedFix,
+				selfHealingAction: `Rewrite the query using table '${tableRemediation.targetTable}'.`,
 			};
 		}
 

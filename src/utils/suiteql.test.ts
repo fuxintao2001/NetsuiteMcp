@@ -863,6 +863,33 @@ describe("SuiteQL, Search & Query Utilities", () => {
 				);
 				expect(res.valid).toBe(true);
 			});
+
+			it("should reject non-existent columns acctname on account, credithold on customer, bin on inventorybalance, and time on ScriptNote", () => {
+				const acctRes = validateSuiteQL(
+					"SELECT id, acctnumber, acctname FROM account FETCH FIRST 10 ROWS ONLY",
+				);
+				expect(acctRes.valid).toBe(false);
+				expect(acctRes.reason).toContain("acctname");
+				expect(acctRes.reason).toContain("fullname");
+
+				const custRes = validateSuiteQL(
+					"SELECT id, companyname, credithold FROM customer WHERE id = 166",
+				);
+				expect(custRes.valid).toBe(false);
+				expect(custRes.reason).toContain("creditholdoverride");
+
+				const binRes = validateSuiteQL(
+					"SELECT ib.item, ib.bin FROM inventorybalance ib LEFT JOIN bin b ON ib.bin = b.id",
+				);
+				expect(binRes.valid).toBe(false);
+				expect(binRes.reason).toContain("binnumber");
+
+				const snRes = validateSuiteQL(
+					"SELECT sn.date, sn.time, sn.title FROM ScriptNote sn FETCH FIRST 10 ROWS ONLY",
+				);
+				expect(snRes.valid).toBe(false);
+				expect(snRes.reason).toContain("TO_CHAR(sn.date");
+			});
 		});
 
 		describe("assertValidSuiteQL", () => {
@@ -1101,6 +1128,22 @@ describe("SuiteQL, Search & Query Utilities", () => {
 				expect(diag.selfHealingAction).toContain("netsuite_get_metadata");
 			});
 
+			it("should diagnose misnamed ERP tables currencyexchangerate and unitsset with verified table replacements", () => {
+				const diagCurr = diagnoseSuiteQLError(
+					"Error executing SuiteQL query: Invalid search type: currencyexchangerate",
+				);
+				expect(diagCurr.isDiagnosed).toBe(true);
+				expect(diagCurr.summary).toContain("Use 'currencyrate'");
+				expect(diagCurr.suggestedFix).toContain("FROM currencyrate");
+
+				const diagUnits = diagnoseSuiteQLError(
+					"Error executing SuiteQL query: Invalid search type: unitsset",
+				);
+				expect(diagUnits.isDiagnosed).toBe(true);
+				expect(diagUnits.summary).toContain("Use 'unitstype'");
+				expect(diagUnits.suggestedFix).toContain("FROM unitstype");
+			});
+
 			it("should handle unknown generic errors gracefully", () => {
 				const diag = diagnoseSuiteQLError("Some bizarre internal error");
 				expect(diag.isDiagnosed).toBe(false);
@@ -1142,6 +1185,29 @@ describe("SuiteQL, Search & Query Utilities", () => {
 				expect(
 					customfieldMatches.some((c) => c.tableName === "customfield"),
 				).toBe(false);
+
+				const accountEntry = searchSuiteQLCatalog("account").find(
+					(a) => a.tableName === "account",
+				);
+				expect(accountEntry?.keyFields).toContain("fullname");
+				expect(accountEntry?.keyFields).toContain(
+					"accountsearchdisplaynamecopy",
+				);
+				expect(accountEntry?.keyFields).not.toContain("acctname");
+
+				const customerEntry = searchSuiteQLCatalog("customer").find(
+					(c) => c.tableName === "customer",
+				);
+				expect(customerEntry?.keyFields).toContain("creditholdoverride");
+				expect(customerEntry?.keyFields).toContain("oncredithold");
+				expect(customerEntry?.keyFields).not.toContain("credithold");
+
+				const asmBomEntry = searchSuiteQLCatalog("assemblyitembom").find(
+					(a) => a.tableName === "assemblyitembom",
+				);
+				expect(asmBomEntry?.keyFields).toContain("assembly");
+				expect(asmBomEntry?.keyFields).toContain("billofmaterials");
+				expect(asmBomEntry?.keyFields).not.toContain("id");
 			});
 
 			it("should filter catalog by keyword accurately across domains and fields", () => {

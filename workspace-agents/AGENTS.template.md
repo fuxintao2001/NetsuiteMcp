@@ -71,7 +71,7 @@ To ensure high-density reasoning without context bloat, deep domain knowledge is
 |:---|:---|:---|
 | **SuiteScript 2.1 & SAFE Guide Review** | `~/.gemini/config/skills/netsuite-sdf-safe-guide/SKILL.md`<br>Resource: `netsuite://safe/governance-units` | Enforce 12 SAFE principles, 14 script types, governance budgets, `N/query` over `N/search`, and 140+ pitfalls. Never load records in loops; use Map/Reduce for bulk processing. |
 | **SuiteScript Records & Fields Schema** | `~/.gemini/config/skills/netsuite-suitescript-records-reference/SKILL.md`<br>Resource: `netsuite://records/reference` | Lookup exact field IDs, sublists, mandatory fields, and search filters across all 272 standard records. Zero guesswork on field names. |
-| **SuiteQL Modeling & Anti-Slow-Query** | `~/.gemini/config/skills/netsuite-ai-connector-instructions/SKILL.md`<br>Resource: `netsuite://guides/suiteql`<br>Resource: `netsuite://queries/golden-templates` | Follow SuiteQL safety checklist: explicit column projections (no `SELECT *`), mandatory `mainline = 'F'`, situational pagination via `FETCH FIRST N ROWS ONLY` or `ROWNUM <= N` when needed (no pagination for ID point lookups or aggregations), Oracle booleans (`'T'`/`'F'`), string concatenation (`||`), CTEs for subqueries, driving index filters. Zero implicit SQL rewriting. |
+| **SuiteQL Modeling & Anti-Slow-Query** | `~/.gemini/config/skills/netsuite-ai-connector-instructions/SKILL.md`<br>Resource: `netsuite://guides/suiteql`<br>Resource: `netsuite://queries/golden-templates` | Master Oracle NetSuite SuiteQL standards via official SSOT skills and resources. Follow [SuiteQL Guardrails](file://{{PROJECT_PATH}}/.agents/rules/suiteql-guardrails.md) for 5 core fail-fast boundaries. 100% transparent execution with zero implicit rewriting. |
 | **SuiteQL Built-in Functions Reference** | Resource: `netsuite://reference/suiteql-builtins` | Authoritative signatures, parameter schemas, SAFE restrictions, and examples for NetSuite2 functions (`BUILTIN.DF`, `BUILTIN.CF`, `BUILTIN.HIERARCHY`, `BUILTIN.PERIOD`, `BUILTIN.CONSOLIDATE`, `BUILTIN.CURRENCY`). |
 | **SuiteScript 1.0 → 2.1 Modernization** | `~/.gemini/config/skills/netsuite-suitescript-upgrade/SKILL.md` | 125+ API mappings, 34 object conversions, modern ES6+ features, breaking behavioral changes migration. |
 | **OWASP & Secure Coding Standards** | `~/.gemini/config/skills/netsuite-owasp-secure-coding/SKILL.md` | Context-aware output encoding, SQL injection prevention, CSP headers, credential protection, parameter sanitization. |
@@ -121,16 +121,10 @@ The server registers 7 official MCP resource URIs. Read these resources via MCP 
      - When executing independent read-only actions across different tools (e.g., `netsuite_get_record` + `netsuite_get_script_logs` + `netsuite_get_system_notes`), emit all `tool_calls` concurrently in the **exact same assistant turn**.
    - **Only Permitted Sequential Boundary**:
      - Split across turns ONLY when a downstream call's required parameter (e.g., an unknown internal ID or unverified custom column name) must be extracted from an upstream call's output.
-3. **SuiteQL Guardrails & Zero-Transpile Standard**:
-   - Ensure all queries conform strictly to [SuiteQL Guardrails](file://{{PROJECT_PATH}}/.agents/rules/suiteql-guardrails.md):
-     - **No `SELECT *`**: Explicit column projections only.
-     - **Mandatory `mainline` filter**: Always specify `tl.mainline = 'F'` (line items) or `'T'` (header summary) when querying `transactionline`.
-     - **Situational Pagination**: Transparently passed without implicit rewriting; add `FETCH FIRST N ROWS ONLY` or `ROWNUM <= N` dynamically for open scans or sampling; omit for single-record lookups (`id = 123`) or aggregations (`COUNT(*)`, `SUM(amount)`).
-     - **NetSuite Booleans**: All boolean fields are `CHAR(1)` with `'T'` or `'F'` (never `true`, `false`, `1`, `0`).
-     - **String Concatenation**: Exclusively use Oracle `||` or `CONCAT(a, b)` (never `+`, which causes `ORA-01722`).
-     - **No Derived Tables**: NetSuite SuiteQL strictly disallows inline subqueries in `FROM (SELECT ...)`; always use Common Table Expressions (`WITH cte AS (...) SELECT ... FROM cte`).
-     - **No `BUILTIN.DF` in `GROUP BY`**: Group by raw numeric ID, and call `BUILTIN.DF` in outer query or CTE projection.
-   - The server performs **zero implicit rewriting** of queries. Queries with non-standard syntax (e.g., bare `LIMIT`) are strictly rejected at runtime with actionable remediation guidance.
+3. **SuiteQL Guardrails & Transparent Execution Standard**:
+   - Ensure all queries conform strictly to [SuiteQL Guardrails](file://{{PROJECT_PATH}}/.agents/rules/suiteql-guardrails.md) and official MCP resources (`netsuite://guides/suiteql`, `netsuite://reference/suiteql-builtins`, `netsuite://queries/golden-templates`).
+   - **Zero Implicit Rewriting Contract**: The server executes SuiteQL transparently without silent query alteration, dialect auto-conversion, or stealth pagination injection. Queries violating syntax or security invariants (such as `SELECT *`, non-Oracle `LIMIT`, missing `mainline` on `transactionline`, or unindexed audit joins) trigger immediate Fail-Fast rejection with structured diagnostics (`[suiteqlGuard]`).
+   - **Explicit AI Self-Healing**: Upon receiving a rejection error, the AI agent must inspect the failure diagnostic, explicitly rewrite the SQL statement, and re-execute.
 4. **Primary Query Mechanism**:
    - SuiteQL (`netsuite_run_suiteql`) is the authoritative and primary query mechanism for all business data retrieval.
 
@@ -165,7 +159,7 @@ The server exposes 8 authoritative core tools (plus 2 sandbox mutation tools and
 
 ## 🔄 6. Self-Healing Error Recovery SOP
 
-When NetSuite MCP tools return errors, the response includes structured diagnostic tags. Execute the corresponding self-healing actions without repeating failing requests:
+When NetSuite MCP tools return errors, the response includes structured diagnostic tags. NetSuite MCP Server adheres strictly to **Transparent Execution & Fail-Fast Static Interception** (zero background auto-correction). The AI agent must diagnose the exact root cause, **explicitly rewrite the code or query**, and re-execute:
 
 | Diagnostic Tag / Pattern | Root Cause | Mandated Self-Healing Action |
 |:---|:---|:---|
@@ -200,8 +194,9 @@ When NetSuite MCP tools return errors, the response includes structured diagnost
 | `NETWORK_OR_TIMEOUT` (ETIMEDOUT, ECONNRESET, 504 Gateway Timeout) | Transient network jitter, connection drop, or gateway timeout | Do NOT modify SQL. Retry after brief delay (exponential backoff, <= 2 retries) or reduce pagination row limit. Call `netsuite_status` to inspect error patterns. |
 
 **Self-Healing Protocol**:
-1. Limit auto-recovery retries to at most **2 turns**. If still failing, explain the exact root cause to the user.
-2. Every retry MUST incorporate substantive corrections based on diagnostics. Blind retries are strictly prohibited.
+1. **Zero Implicit Background Corrections**: The server will never silently rewrite or inject SQL in the background. Every correction must be explicitly authored by the AI agent in the next turn.
+2. Limit auto-recovery retries to at most **2 turns**. If still failing, explain the exact root cause to the user.
+3. Every retry MUST incorporate substantive, explicit corrections based on diagnostics. Blind retries are strictly prohibited.
 
 ---
 
@@ -342,7 +337,7 @@ This workspace adheres strictly to the official Google Antigravity Customization
   - `PostToolUse`: Automated code formatting and SAFE Guide static checks (`scripts/suitescript-safe-check.js`).
 - **Modular Directory Rules ([`.agents/rules/`](file://{{PROJECT_PATH}}/.agents/rules))**:
   - [Fast-Path Routing](file://{{PROJECT_PATH}}/.agents/rules/fast-path-routing.md): 1-turn direct execution on standard tables.
-  - [SuiteQL Guardrails](file://{{PROJECT_PATH}}/.agents/rules/suiteql-guardrails.md): 10 golden SQL defense rules and 5 critical syntax traps.
+  - [SuiteQL Guardrails](file://{{PROJECT_PATH}}/.agents/rules/suiteql-guardrails.md): Official SSOT quick-reference index and fail-fast interception boundaries.
   - [SAFE Guide Standards](file://{{PROJECT_PATH}}/.agents/rules/safe-guide-standards.md): SAFE Guide 2025.2 & OWASP secure coding directives.
   - [Environment Locks](file://{{PROJECT_PATH}}/.agents/rules/environment-locks.md): Production write lockout & upload card gates.
   - [Generative UI](file://{{PROJECT_PATH}}/.agents/rules/generative-ui.md): Antigravity Generative UI styling, CSS theme variables, and `<agent-embed>` directives.

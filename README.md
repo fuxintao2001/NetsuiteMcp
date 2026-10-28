@@ -40,7 +40,7 @@
 | :--- | :--- |
 | **OAuth 令牌频死与休眠断连**：NetSuite Access Token 仅 1 小时有效期；Mac 笔记本合盖休眠时网络中断导致后台刷新频繁失效。 | **OAuth 2.0 PKCE 自动续期 + macOS 休眠守卫 + 后台 Daemon**：无 Client Secret 泄露风险；LaunchAgent/systemd 守护进程保障 24/7 主动轮转；内置 DarkWake/休眠网络探针与零感静默重连 (`trySilentReauth`)。 |
 | **宽表全量投影导致 LLM 上下文爆炸**：NetSuite REST 记录动辄上百个字段与嵌套数组，极易撑爆 LLM Token 上下文窗口。 | **上下文极致瘦身 (`contextSlimmer`)**：自动剥离 `null`、`undefined` 与空数组噪点；实体与 SuiteQL 结果秒级转为高密度紧凑 Markdown 表格，**Token 消耗立减 50%+**。 |
-| **SuiteQL 方言陷阱与慢查询超时**：大模型常习惯性生成 MySQL 方言（如裸 `LIMIT`/`OFFSET`）或触发全表扫描（如跨表 `JOIN SystemNote`），导致 45s+ 网关超时崩溃。 | **AST 级 SQL 运行时守卫 (`suiteqlGuard`)**：零底层隐式改写，语法树前置强校验；硬拦截 `SELECT *`、裸方言与跨表审计关联；强制约束 `tl.mainline` 过滤并自动注入保底分页 (`FETCH FIRST 100 ROWS ONLY`)。 |
+| **SuiteQL 方言陷阱与慢查询超时**：大模型常习惯性生成 MySQL 方言（如裸 `LIMIT`/`OFFSET`）或触发全表扫描（如跨表 `JOIN SystemNote`），导致 45s+ 网关超时崩溃。 | **AST 级 SQL 运行时守卫 (`suiteqlGuard`)**：100% 透明执行与零隐式改写，语法树前置强校验；Fail-Fast 硬拦截 `SELECT *`、裸方言、未约束 `tl.mainline` 与跨表审计关联；AI 显式感知并修正重试。 |
 | **生产环境误操作与盲目写变更**：AI 助手在生产账套误触写操作或盲目上传测试脚本，造成生产数据污染。 | **双重沙箱生产写保护屏障**：基于账号特征自动识别环境分类（Production vs Sandbox）；只读工具原生支持全域查询；脚本部署工具强制要求显式传入 `allowProduction: true` 二次确认。 |
 | **多租户多实例并发冲突与死锁**：同时操作多个 NetSuite 账号或多 IDE 客户端并发调用时，本地 Session 相互覆盖并触发刷新竞态。 | **纯 Redis 缓存 + Redlock 分布式锁**：按账号完全隔离 Session 与元数据 (`ns:<accountId>:*`)；采用归一化锁键（`formatNetSuiteAccountHost`）加锁保障 Token 刷新原子性。 |
 
@@ -112,7 +112,7 @@
    - **方言智能纠偏**：硬拦截 MySQL 习惯的裸 `LIMIT`/`OFFSET`，引导使用 Oracle 官方标准的 `FETCH FIRST N ROWS ONLY` 或 `ROWNUM <= N`。
    - **交易行翻倍防护**：关联 `transactionline` 时强制校验并引导 `tl.mainline = 'F'` 或 `'T'`。
    - **慢查询硬拦截**：硬阻断跨表关联 `systemnote`（Oracle SAFE 避坑陷阱 11），引导调用专用审计工具。
-   - **自动保底分页**：未显式包含分页约束的查询自动注入 `FETCH FIRST 100 ROWS ONLY`。
+   - **情景化显式分页**：坚决杜绝底层自动静默改写或暗中注入分页；AI 依据探索采样或单据检索需求显式声明标准 Oracle 分页（`FETCH FIRST N ROWS ONLY` 或 `ROWNUM <= N`）。
 4. **双重沙箱生产写保护屏障**：
    - 单一权威环境判定：账号含 `_sb`、`-sb`、`tstdrv` 判定为沙箱，其余均为生产。
    - 脚本部署工具（`netsuite_upload_file`）部署到生产账套时强制要求显式传入 `allowProduction: true` 二次确认。
@@ -259,7 +259,7 @@
 
 | 工具名称 | 功能描述 | MCP 注解声明 | 环境权限 |
 | :--- | :--- | :--- | :---: |
-| [`netsuite_run_suiteql`](#1-netsuite_run_suiteql) | 执行只读 SuiteQL 查询。受 AST 守卫保护，自动注入保底分页，支持多语句及并行查询。 | `readOnlyHint: true`, `idempotentHint: true` | 全环境 |
+| [`netsuite_run_suiteql`](#1-netsuite_run_suiteql) | 执行只读 SuiteQL 查询。透明执行与 AST 守卫保护，支持多语句及并行查询。 | `readOnlyHint: true`, `idempotentHint: true` | 全环境 |
 | [`netsuite_get_metadata`](#2-netsuite_get_metadata) | 反查数据库表结构、字段类型、有效列名与 272 类标准实体元数据字典。 | `readOnlyHint: true`, `idempotentHint: true` | 全环境 |
 | [`netsuite_get_record`](#3-netsuite_get_record) | 按内部 ID 或单据编号 (tranid) 检索记录，清洗噪点，输出紧凑表格并附直达 Web UI 链接。 | `readOnlyHint: true`, `idempotentHint: true` | 全环境 |
 | [`netsuite_get_script_logs`](#4-netsuite_get_script_logs) | 索引优化检索 SuiteScript 脚本执行日志（ScriptNote），支持按等级、脚本与时间范围过滤。 | `readOnlyHint: true`, `idempotentHint: true` | 全环境 |
@@ -278,9 +278,10 @@
 - **输入参数**：
   - `sqlQuery` (`string`, 可选): 要执行的 SuiteQL 查询字符串，支持以 `;` 分隔多条语句。
   - `sqlQueries` (`string[]`, 可选): 可选的并发并行执行查询数组（最多 10 条）。
-  - `limit` (`number`, 可选): 可选的安全最大行数限制（默认 100）。
+  - `templateId` (`string`, 可选): 经过验证的 Oracle SAFE 黄金模板 ID。
+  - `templateParams` (`record`, 可选): 绑定到黄金模板的命名参数键值对。
   - `customRecordMappings` (`array`, 可选): 自定义记录映射关系（`rectype` 与 `scriptId`）。
-- **守卫规则**：零底层隐式改写；严禁 `SELECT *`；拦截裸 `LIMIT`/`OFFSET` 并引导标准 Oracle 语法；关联 `transactionline` 必须约束 `tl.mainline`；严禁跨表关联 `systemnote`；自动保底追加 `FETCH FIRST 100 ROWS ONLY`。
+- **守卫规则**：100% 透明执行与零底层隐式改写；严禁 `SELECT *`；拦截裸 `LIMIT`/`OFFSET` 并引导标准 Oracle 语法；关联 `transactionline` 必须显式约束 `tl.mainline`；严禁跨表关联 `systemnote`；未遵循规范时 Fail-Fast 拦截，由 AI 显式修改重写。
 
 ### 2. `netsuite_get_metadata`
 探查 NetSuite 数据库表结构、字段合法列名与数据类型。具备 2ms Redis 缓存加速及 272 类标准实体离线字典。

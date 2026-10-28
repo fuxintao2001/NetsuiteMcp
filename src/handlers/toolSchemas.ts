@@ -42,13 +42,13 @@ export const RunSuiteQLArgsSchema = z.object({
 		.trim()
 		.optional()
 		.describe(
-			"Optional verified Oracle SAFE golden template ID (e.g. 'transaction_lines', 'transaction_lineage', 'multi_location_inventory', 'general_ledger_impact', 'script_execution_errors', 'audit_system_notes', 'entity_balance_summary', 'item_inventory_status').",
+			"Optional verified Oracle SAFE golden template ID (e.g. 'transaction_lines', 'transaction_lineage_downstream', 'multi_location_stock', 'bin_inventory_balance', 'script_error_logs', 'system_notes_standalone', 'gl_impact_lines', 'customer_balance_aging', 'record_deployed_scripts').",
 		),
 	templateParams: z
 		.record(z.string(), z.string())
 		.optional()
 		.describe(
-			"Optional parameter key-value pairs to bind into the golden template (e.g. { ':tranType': \"'SalesOrd'\", ':tranId': '6257', ':docNumber': \"'SO10023'\" }).",
+			"Optional parameter key-value pairs to bind into the golden template (e.g. { ':tranType': 'SalesOrd', ':tranId': '6257', ':docNumber': 'SO10023' }).",
 		),
 });
 export type RunSuiteQLArgs = z.infer<typeof RunSuiteQLArgsSchema>;
@@ -500,20 +500,8 @@ export function createToolInputSchema<T extends z.ZodObject<z.ZodRawShape>>(
 
 export const RUN_SUITEQL_TOOL = {
 	name: "netsuite_run_suiteql",
-	description: `Execute read-only Oracle NetSuite SuiteQL queries and return tabular results. Supports single-turn parallel batch execution via 'sqlQueries' array or ';' separated statements.
-MANDATORY OFFICIAL SYNTAX RULES:
-1. PROJECTION: NEVER use 'SELECT *'. Always specify explicit column names.
-2. PAGINATION (Situational, Not Mandatory): NetSuite does NOT support MySQL/Postgres 'LIMIT' or 'OFFSET'. Pagination is NOT mandatory. Intelligently judge based on context: for exploratory queries or scanning large transactional tables, explicitly author Oracle standard 'FETCH FIRST N ROWS ONLY' or 'WHERE ROWNUM <= N'. For unique key lookups, small lookup tables, or aggregations (COUNT/SUM), omit pagination. Queries are executed transparently without automatic rewriting.
-3. BOOLEANS: NetSuite boolean fields are stored as 'T' or 'F' (e.g. isinactive = 'F', mainline = 'T', taxline = 'F'). NEVER use bare true/false or 1/0.
-4. STRING CONCAT: Use Oracle standard '||' or CONCAT(a, b). NEVER use '+'.
-5. TRANSACTION LINES: When querying 'transactionline', MUST filter 'tl.mainline = 'T'' (header summary) or 'tl.mainline = 'F'' (item lines) to prevent duplicate sums.
-6. LINEAGE: 'createdfrom' exists ONLY on 'transactionline', NEVER on 'transaction'.
-7. ITEMS: 'item' table has 'itemtype' and 'subtype', NEVER 'recordtype'.
-8. SUBQUERIES IN FROM: Derived tables 'FROM (SELECT ...)' are prohibited. Use Common Table Expressions (WITH cte AS (...) SELECT ... FROM cte).
-9. BUILTIN.DF IN GROUP BY: NEVER use 'BUILTIN.DF()' inside GROUP BY. Group by raw numeric ID, or wrap aggregation in a CTE.
-10. AUDIT: NEVER JOIN 'systemnote' directly (causes 45s+ timeouts). Use 'netsuite_get_system_notes'.
-11. UNKNOWN SCHEMA: If not 100% sure of column names, MUST call 'netsuite_get_metadata' first before writing SQL.
-12. PARALLEL BATCHING: When retrieving multiple independent datasets, pass an array in 'sqlQueries' to execute concurrently in 1 turn.`,
+	description:
+		"Execute read-only Oracle NetSuite SuiteQL queries and return tabular results. Supports single-turn parallel batch execution via 'sqlQueries' array or ';' separated statements. Operates under transparent execution with zero implicit rewriting or stealth pagination injection. Enforces fail-fast static guardrails: explicit columns (no SELECT *), mandatory tl.mainline on transactionline, no cross-table JOIN systemnote, and Oracle dialect. If rejected, AI must explicitly rewrite the query. Refer to 'netsuite://guides/suiteql' and 'netsuite://queries/golden-templates' for official syntax and patterns.",
 	inputSchema: createToolInputSchema(RunSuiteQLArgsSchema),
 };
 

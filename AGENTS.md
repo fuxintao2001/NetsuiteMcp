@@ -171,16 +171,18 @@ When executing read-only operations (SuiteQL queries, metadata reconnaissance, r
 
 ### 4.1 SuiteQL Runtime Guard Contract (`src/utils/suiteqlGuard.ts`)
 
-All SuiteQL queries executed through this server undergo static AST and regex validation:
+All SuiteQL queries executed through `netsuite_run_suiteql` undergo static AST and regex pre-flight validation adhering to the **Transparent Execution & Fail-Fast Contract**:
 
-1. **Zero Implicit Dialect Rewriting**: The server never silently rewrites non-standard SQL dialects. Queries using bare MySQL/Postgres `LIMIT` or bare `OFFSET` are strictly rejected at runtime with remediation guidance to enforce Oracle NetSuite standard syntax.
-2. **Wildcard Projection Block**: `SELECT *` and `SELECT alias.*` are strictly blocked to prevent wide-table token explosion.
-3. **Mandatory `mainline` Filter Check**: Queries referencing `transactionline` must include `tl.mainline = 'F'` or `'T'` to prevent duplicate row and amount inflation.
-4. **Zero Implicit Query Rewriting & Situational Pagination**: The server executes SuiteQL queries transparently without automatic SQL rewriting or silent pagination injection, ensuring the AI model has full awareness and determinism over executed SQL statements. Pagination is never mandatory; AI models dynamically judge whether to include Oracle-compliant pagination (`FETCH FIRST N ROWS ONLY` or `ROWNUM <= N`) based on data volume, query nature (e.g., exploratory sampling vs. unique entity lookup/aggregations), and response payload requirements.
-5. **Slow-Query Hard Block (SAFE Pitfall 11)**: Joining `systemnote` with transactional tables (`JOIN systemnote`) is strictly blocked to prevent 45s+ full-table scan timeouts; use standalone `systemnote` queries or `netsuite_get_system_notes`.
+1. **Zero Implicit Dialect Rewriting & Stealth Mutation**: The server strictly guarantees 100% transparent query execution. It **never** silently translates non-standard dialects (e.g. converting bare `LIMIT` to `FETCH FIRST`), **never** stealthily injects pagination clauses, and **never** silently appends filters. AI agents maintain absolute awareness and determinism over executed SQL.
+2. **Fail-Fast Static Interception**: When a query violates Oracle NetSuite syntax or safety invariants, the server immediately rejects the query with structured remediation guidance (`[suiteqlGuard]`). AI agents must explicitly correct their SQL statements and retry.
+3. **Wildcard Projection Block**: `SELECT *` and `SELECT alias.*` are strictly blocked to prevent wide-table token explosion and context bloat.
+4. **Mandatory `mainline` Filter Check**: Queries referencing `transactionline` must specify `tl.mainline = 'F'` (line items) or `'T'` (header summary) to eliminate row inflation and duplicate amounts.
+5. **Slow-Query Hard Block (SAFE Pitfall 11)**: Multi-table joins with `systemnote` (`JOIN systemnote`) are strictly blocked to prevent 45s+ full-table scan timeouts; query `systemnote` standalone by `recordid` or call `netsuite_get_system_notes`.
 6. **Core Schema Invariant Remediation**:
    - Rejects `item.recordtype` ➔ directs to `itemtype` and `subtype`.
    - Rejects `transaction.createdfrom` ➔ directs to `transactionline.createdfrom`.
+7. **Official SSOT Protocol Anchoring**:
+   - For syntax rules, built-in functions, and date arithmetic, refer directly to official Skills (`netsuite-ai-connector-instructions`, `netsuite-sdf-safe-guide`) and MCP resources (`netsuite://guides/suiteql`, `netsuite://reference/suiteql-builtins`, `netsuite://queries/golden-templates`).
 
 ### 4.2 Dual-Gate Production Write Protection (`src/utils/environment.ts`)
 
@@ -215,7 +217,7 @@ npm run test:compliance
 
 ## 🔄 6. Structured Error Diagnostics & Self-Healing SOP
 
-When an MCP tool returns an error, AI Agents must follow the structured diagnostic tag and execute targeted self-healing without blind retries:
+When an MCP tool returns an error, AI Agents must follow the structured diagnostic tag and execute targeted self-healing by explicitly correcting the code or query without blind retries (the server performs zero implicit background corrections):
 
 | Diagnostic Tag / Error Pattern | Root Cause Category | Mandated Self-Healing Action |
 | :--- | :--- | :--- |

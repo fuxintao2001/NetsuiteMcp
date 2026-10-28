@@ -22,7 +22,10 @@ import {
 	formatSuiteQLErrorResponse,
 	splitSuiteQLStatements,
 } from "../utils/suiteqlGuard.js";
-import { SUITEQL_TEMPLATES } from "../utils/suiteqlTemplates.js";
+import {
+	SUITEQL_TEMPLATES,
+	suiteqlTemplateService,
+} from "../utils/suiteqlTemplates.js";
 import { handleAuth, handleStatus } from "./authHandlers.js";
 import { handleCallOfficial } from "./officialHandlers.js";
 import { handleGetScriptLogs } from "./queryHandlers.js";
@@ -200,7 +203,7 @@ const TOOL_DEFINITIONS: AnyToolDefinition[] = [
 
 			let singleQuery = sqlQuery;
 			if (templateId) {
-				const template = SUITEQL_TEMPLATES.find((t) => t.id === templateId);
+				const template = suiteqlTemplateService.getTemplate(templateId);
 				if (!template) {
 					const available = SUITEQL_TEMPLATES.map((t) => `'${t.id}'`).join(
 						", ",
@@ -210,13 +213,10 @@ const TOOL_DEFINITIONS: AnyToolDefinition[] = [
 						true,
 					);
 				}
-				let rendered = template.sqlTemplate;
-				if (templateParams && typeof templateParams === "object") {
-					for (const [key, val] of Object.entries(templateParams)) {
-						rendered = rendered.replaceAll(key, String(val));
-					}
-				}
-				singleQuery = rendered;
+				singleQuery = suiteqlTemplateService.renderTemplate(
+					template,
+					templateParams,
+				);
 			}
 
 			const queriesFromSingle = singleQuery

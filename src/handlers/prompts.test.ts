@@ -174,6 +174,9 @@ describe("MCP Prompt Handlers", () => {
 		);
 		expect(text).toContain("entity");
 		expect(text).toContain("Verified Oracle SAFE Golden Query Pattern");
+		expect(text).toContain("Official SSOT Protocol");
+		expect(text).toContain("netsuite://guides/suiteql");
+		expect(text).toContain("Transparent Execution");
 	});
 
 	it("should throw for unknown prompt", async () => {

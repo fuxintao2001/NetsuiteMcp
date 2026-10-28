@@ -144,11 +144,29 @@ export async function resolveNaturalKeyToInternalId(
 		return null;
 	}
 
-	// 3. Customer / Vendor / Entity
-	if (recType === "customer" || recType === "vendor" || recType === "entity") {
+	// 3. Customer / Vendor / Employee / Partner / Contact / Job / Entity
+	const specificEntityTables = new Set([
+		"customer",
+		"vendor",
+		"employee",
+		"partner",
+		"contact",
+		"job",
+	]);
+	if (
+		specificEntityTables.has(recType) ||
+		recType === "lead" ||
+		recType === "prospect" ||
+		recType === "entity"
+	) {
 		try {
 			const upperKey = safeKey.toUpperCase();
-			const sql = `SELECT id FROM entity WHERE UPPER(entityid) = '${upperKey}' FETCH FIRST 2 ROWS ONLY`;
+			const targetTable = specificEntityTables.has(recType)
+				? recType
+				: recType === "lead" || recType === "prospect"
+					? "customer"
+					: "entity";
+			const sql = `SELECT id FROM ${targetTable} WHERE UPPER(entityid) = '${upperKey}' FETCH FIRST 2 ROWS ONLY`;
 			const res = await mcpTools.executeTool("ns_runCustomSuiteQL", {
 				sqlQuery: sql,
 			});
@@ -166,7 +184,7 @@ export async function resolveNaturalKeyToInternalId(
 	}
 
 	// 4. Item
-	if (recType === "item" || recType === "inventoryitem") {
+	if (ITEM_RECORD_TYPES.has(recType)) {
 		try {
 			const upperKey = safeKey.toUpperCase();
 			const sql = `SELECT id FROM item WHERE UPPER(itemid) = '${upperKey}' FETCH FIRST 2 ROWS ONLY`;
@@ -364,12 +382,30 @@ export async function resolveNaturalKeysBatch(
 		return resultMap;
 	}
 
-	if (recType === "customer" || recType === "vendor" || recType === "entity") {
+	const specificBatchEntityTables = new Set([
+		"customer",
+		"vendor",
+		"employee",
+		"partner",
+		"contact",
+		"job",
+	]);
+	if (
+		specificBatchEntityTables.has(recType) ||
+		recType === "lead" ||
+		recType === "prospect" ||
+		recType === "entity"
+	) {
 		try {
 			const inList = safeKeys
 				.map((k) => `'${k.replace(/'/g, "''").toUpperCase()}'`)
 				.join(", ");
-			const sql = `SELECT id, entityid FROM entity WHERE UPPER(entityid) IN (${inList})`;
+			const targetTable = specificBatchEntityTables.has(recType)
+				? recType
+				: recType === "lead" || recType === "prospect"
+					? "customer"
+					: "entity";
+			const sql = `SELECT id, entityid FROM ${targetTable} WHERE UPPER(entityid) IN (${inList})`;
 			const res = await mcpTools.executeTool("ns_runCustomSuiteQL", {
 				sqlQuery: sql,
 			});
@@ -388,7 +424,7 @@ export async function resolveNaturalKeysBatch(
 		return resultMap;
 	}
 
-	if (recType === "item" || recType === "inventoryitem") {
+	if (ITEM_RECORD_TYPES.has(recType)) {
 		try {
 			const inList = safeKeys
 				.map((k) => `'${k.replace(/'/g, "''").toUpperCase()}'`)
@@ -1217,17 +1253,17 @@ async function inspectSingleRecordSystemNotes(
 	const isNumeric = /^-?\d+$/.test(recordId);
 	if (!isNumeric) {
 		try {
-			const safeTranid = recordId.replace(/'/g, "''");
-			const upperTranid = safeTranid.toUpperCase();
-			const lookupSql = `SELECT id FROM transaction WHERE UPPER(tranid) = '${upperTranid}' FETCH FIRST 2 ROWS ONLY`;
-			const lookupRes = await mcpTools.executeTool("ns_runCustomSuiteQL", {
-				sqlQuery: lookupSql,
-			});
-			assertNoMcpError(lookupRes);
-			const rows = mcpTools.extractDataArray(lookupRes);
-			if (rows.length > 0 && rows[0]?.id) {
-				recordId = String(rows[0].id);
-				recordTypeId = -30;
+			const lookupType = recordType?.trim() || "transaction";
+			const resolved = await resolveNaturalKeyToInternalId(
+				lookupType,
+				recordId,
+				mcpTools,
+			);
+			if (resolved?.id) {
+				recordId = resolved.id;
+				if (recordTypeId === undefined && lookupType === "transaction") {
+					recordTypeId = -30;
+				}
 			} else {
 				return `❌ Record '${rawRecordId}' could not be resolved to a numeric internal ID. Please verify the document number (tranid) or provide the numeric internal ID directly.`;
 			}

@@ -273,22 +273,20 @@ ${tmpl.sqlTemplate}
 \`\`\``;
 				}
 
-				const promptText = `You are a SuiteQL specialist following Oracle SAFE Guide (2025.2) and NetSuite2.com standards.
-Generate a valid, high-performance SuiteQL query for the following requirement:
+				const promptText = `You are a NetSuite SuiteQL Specialist adhering strictly to Oracle SAFE Guide standards and NetSuite2.com schema.
+Generate a valid, production-ready SuiteQL query for the following requirement:
 
 - **Requirement**: ${req}
 - **Target Domain / Record**: ${recType}${groundingContext}${templateContext}
 
-## Mandatory SuiteQL Guardrails:
-1. NO \`SELECT *\` — specify explicit column names from the provided schema.
-2. Booleans: NetSuite boolean flags are stored as 'T' or 'F' (e.g. \`tl.mainline = 'F'\`, \`tl.taxline = 'F'\`, \`isinactive = 'F'\`). NEVER use bare \`true\`/\`false\` or \`1\`/\`0\`.
-3. String Concatenation: Use Oracle standard \`||\` or \`CONCAT(a, b)\` (NEVER \`+\`).
-4. Lineage: Join on \`transactionline.createdfrom\` (NOT transaction.createdfrom).
-5. Inventory: Query cross-item location stock via \`aggregateitemlocation\` (NOT \`inventoryitemlocations\`).
-6. Display Values & Grouping: Use \`BUILTIN.DF(fieldName)\` for display labels. NEVER place \`BUILTIN.DF()\` inside \`GROUP BY\` (group by raw ID or use a CTE instead).
-7. Subqueries: Derived tables \`FROM (SELECT ...)\` are prohibited. Use CTEs (\`WITH cte AS (...) SELECT ... FROM cte\`).
-8. Situational Pagination: Intelligently determine whether pagination is needed. Append \`FETCH FIRST N ROWS ONLY\` or \`WHERE ROWNUM <= N\` for broad exploration or large table scans; omit pagination for unique entity lookups, configuration tables, or aggregate queries (COUNT, SUM).
-9. Output the query with parameter placeholders and explain each column choice.`;
+## Engineering Directives & Standards:
+1. **Official SSOT Protocol**: Anchor syntax, built-ins, and patterns directly to official MCP resources (\`netsuite://guides/suiteql\`, \`netsuite://reference/suiteql-builtins\`, \`netsuite://queries/golden-templates\`).
+2. **Transparent Execution**: The server executes SuiteQL transparently without implicit SQL alteration or silent pagination injection.
+3. **Core Interception Guardrails**:
+   - Explicit column projections only (NEVER use \`SELECT *\`).
+   - Transaction lines must specify \`tl.mainline = 'F'\` (lines) or \`tl.mainline = 'T'\` (header summary).
+   - Apply situational pagination (\`FETCH FIRST N ROWS ONLY\` or \`ROWNUM <= N\`) for exploratory scans; omit for single-entity or aggregate queries.
+4. Output the finalized query with parameter placeholders and concise column rationale.`;
 
 				return {
 					messages: [

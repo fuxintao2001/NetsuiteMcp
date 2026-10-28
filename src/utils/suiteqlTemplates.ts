@@ -9,6 +9,7 @@
 
 export interface SuiteQLTemplate {
 	id: string;
+	aliases?: string[];
 	name: string;
 	category:
 		| "transactions"
@@ -21,6 +22,98 @@ export interface SuiteQLTemplate {
 	params: Record<string, string>;
 	bestPractices: string[];
 	officialSource: string;
+}
+
+const NUMERIC_TEMPLATE_PARAMS = new Set([
+	":tranid",
+	":upstreamtranid",
+	":itemid",
+	":locationid",
+	":recordid",
+	":customerid",
+]);
+
+/**
+ * Formats a raw template parameter value into a safe Oracle SuiteQL literal.
+ */
+export function formatSuiteQLTemplateParamValue(
+	paramKey: string,
+	rawValue: string | undefined,
+): string {
+	if (rawValue === undefined || rawValue === null) {
+		return "NULL";
+	}
+	const trimmed = String(rawValue).trim();
+	if (trimmed.length === 0 || trimmed.toUpperCase() === "NULL") {
+		return "NULL";
+	}
+	// Already single-quoted literal (e.g. "'SalesOrd'" or "''")
+	if (trimmed.startsWith("'") && trimmed.endsWith("'") && trimmed.length >= 2) {
+		return trimmed;
+	}
+	const normalizedKey = (
+		paramKey.startsWith(":") ? paramKey : `:${paramKey}`
+	).toLowerCase();
+	if (
+		NUMERIC_TEMPLATE_PARAMS.has(normalizedKey) &&
+		/^-?\d+(?:\.\d+)?$/.test(trimmed)
+	) {
+		return trimmed;
+	}
+	// If it's a pure number and not a string-typed code/docNumber parameter, allow numeric binding
+	if (
+		/^-?\d+(?:\.\d+)?$/.test(trimmed) &&
+		normalizedKey !== ":docnumber" &&
+		normalizedKey !== ":customercode" &&
+		normalizedKey !== ":trantype" &&
+		normalizedKey !== ":scriptid" &&
+		normalizedKey !== ":recordtype"
+	) {
+		return trimmed;
+	}
+	return `'${trimmed.replace(/'/g, "''")}'`;
+}
+
+/**
+ * Renders a SuiteQLTemplate by binding provided parameters and replacing any
+ * omitted optional placeholders with NULL.
+ */
+export function renderSuiteQLTemplate(
+	template: SuiteQLTemplate,
+	params?: Record<string, string>,
+): string {
+	const normalizedInput = new Map<string, string>();
+	if (params && typeof params === "object") {
+		for (const [k, v] of Object.entries(params)) {
+			const cleanKey = (k.startsWith(":") ? k : `:${k}`).toLowerCase();
+			normalizedInput.set(cleanKey, String(v));
+		}
+	}
+
+	let rendered = template.sqlTemplate;
+	// Bind all declared template parameters (longest key first to avoid prefix collisions)
+	const declaredKeys = Object.keys(template.params).sort(
+		(a, b) => b.length - a.length,
+	);
+	for (const key of declaredKeys) {
+		const lookupKey = (key.startsWith(":") ? key : `:${key}`).toLowerCase();
+		const rawVal = normalizedInput.get(lookupKey);
+		const formatted = formatSuiteQLTemplateParamValue(key, rawVal);
+		rendered = rendered.replaceAll(key, formatted);
+	}
+
+	// Also bind any extra caller-provided parameters not listed in template.params
+	if (params && typeof params === "object") {
+		for (const [k, v] of Object.entries(params)) {
+			const colonKey = k.startsWith(":") ? k : `:${k}`;
+			if (rendered.includes(colonKey)) {
+				const formatted = formatSuiteQLTemplateParamValue(colonKey, String(v));
+				rendered = rendered.replaceAll(colonKey, formatted);
+			}
+		}
+	}
+
+	return rendered;
 }
 
 export const SUITEQL_TEMPLATES: SuiteQLTemplate[] = [
@@ -69,6 +162,7 @@ FETCH FIRST 100 ROWS ONLY`,
 	},
 	{
 		id: "transaction_lineage_downstream",
+		aliases: ["transaction_lineage"],
 		name: "Transaction Lineage (Downstream Linked Documents)",
 		category: "transactions",
 		description:
@@ -102,6 +196,7 @@ ORDER BY
 	},
 	{
 		id: "multi_location_stock",
+		aliases: ["multi_location_inventory"],
 		name: "Multi-Location Inventory Balances (All Item Types)",
 		category: "inventory",
 		description:
@@ -137,6 +232,7 @@ FETCH FIRST 100 ROWS ONLY`,
 	},
 	{
 		id: "bin_inventory_balance",
+		aliases: ["item_inventory_status"],
 		name: "Bin-Level Inventory & Batch Balances",
 		category: "inventory",
 		description:
@@ -146,30 +242,32 @@ FETCH FIRST 100 ROWS ONLY`,
   BUILTIN.DF(ib.item) AS item_name,
   ib.location AS location_id,
   BUILTIN.DF(ib.location) AS location_name,
-  b.binnumber,
+  ib.binnumber AS bin_id,
+  BUILTIN.DF(ib.binnumber) AS bin_number,
   ib.inventorynumber AS lot_serial_id,
   BUILTIN.DF(ib.inventorynumber) AS lot_serial_number,
   ib.quantityavailable,
-  ib.quantityonhand
+  ib.quantityonhand,
+  ib.quantitypicked
 FROM 
   inventorybalance ib
-  LEFT JOIN bin b ON ib.bin = b.id
 WHERE 
   ib.item = :itemId
 ORDER BY 
-  ib.location, b.binnumber ASC
+  ib.location, ib.binnumber ASC
 FETCH FIRST 100 ROWS ONLY`,
 		params: {
 			":itemId": "Item internal ID (numeric)",
 		},
 		bestPractices: [
-			"Query inventorybalance and join bin on ib.bin = b.id for accurate bin storage data.",
+			"Query inventorybalance directly using ib.binnumber and BUILTIN.DF(ib.binnumber); do NOT join the 'bin' table (which is not exposed in SuiteQL).",
 			"Use BUILTIN.DF(ib.inventorynumber) to resolve the actual lot/serial string.",
 		],
 		officialSource: "NetSuite2.com Records Catalog inventorybalance",
 	},
 	{
 		id: "script_error_logs",
+		aliases: ["script_execution_errors"],
 		name: "Script Execution Error Logs",
 		category: "system_debug",
 		description:
@@ -186,7 +284,7 @@ FROM
   LEFT JOIN Script s ON sn.scripttype = s.id
 WHERE 
   sn.type IN (\x27ERROR\x27, \x27EMERGENCY\x27)
-  AND (s.scriptid = :scriptId OR :scriptId IS NULL)
+  AND (UPPER(s.scriptid) = UPPER(:scriptId) OR :scriptId IS NULL)
 ORDER BY 
   sn.date DESC
 FETCH FIRST 50 ROWS ONLY`,
@@ -203,6 +301,7 @@ FETCH FIRST 50 ROWS ONLY`,
 	},
 	{
 		id: "system_notes_standalone",
+		aliases: ["audit_system_notes"],
 		name: "Standalone System Audit Trail (SystemNote)",
 		category: "system_debug",
 		description:
@@ -234,6 +333,7 @@ FETCH FIRST 50 ROWS ONLY`,
 	},
 	{
 		id: "gl_impact_lines",
+		aliases: ["general_ledger_impact"],
 		name: "General Ledger (GL) Impact Lines",
 		category: "accounting",
 		description:
@@ -266,19 +366,23 @@ ORDER BY
 	},
 	{
 		id: "customer_balance_aging",
+		aliases: ["entity_balance_summary"],
 		name: "Customer Balance & Credit Limit Status",
 		category: "relationships",
 		description:
-			"Check customer financial standing: balance, unbilled orders, credit limit, and hold status.",
+			"Check customer financial standing: balance, overdue balance, unbilled orders, credit limit, and hold status.",
 		sqlTemplate: `SELECT 
   c.id,
   c.entityid AS customer_number,
   c.companyname,
   c.balance,
+  c.overduebalance,
   c.unbilledorders,
   c.creditlimit,
-  c.credithold,
-  BUILTIN.DF(c.credithold) AS credithold_status,
+  c.creditholdoverride,
+  BUILTIN.DF(c.creditholdoverride) AS credithold_status,
+  c.oncredithold,
+  c.daysoverduesearch AS days_overdue,
   BUILTIN.DF(c.terms) AS payment_terms
 FROM 
   customer c
@@ -290,14 +394,15 @@ FETCH FIRST 10 ROWS ONLY`,
 			":customerCode": "Customer code/entityid (e.g. \x27CUST001\x27)",
 		},
 		bestPractices: [
-			"Use customer.unbilledorders to see pipeline commitment against credit limit.",
-			"BUILTIN.DF(c.credithold) displays human-readable status (Auto Hold, On Hold, Off).",
+			"Use customer.unbilledorders and customer.overduebalance to see pipeline commitment and overdue exposure against credit limit.",
+			"In NetSuite2.com SuiteQL, credit hold status is exposed via c.creditholdoverride (with BUILTIN.DF(c.creditholdoverride)) and c.oncredithold, NOT c.credithold.",
 		],
 		officialSource:
 			"Oracle NetSuite Records Catalog & SAFE Guide Section 3.3.7 (Tim Dietrich SuiteQL Library)",
 	},
 	{
 		id: "record_deployed_scripts",
+		aliases: ["deployed_scripts"],
 		name: "Scripts Deployed to Record Type (User Events, Client & Action Scripts)",
 		category: "system_debug",
 		description:
@@ -342,7 +447,24 @@ export class SuiteQLTemplateService {
 	}
 
 	getTemplate(id: string): SuiteQLTemplate | undefined {
-		return SUITEQL_TEMPLATES.find((t) => t.id === id);
+		const cleanId = id.trim().toLowerCase();
+		return SUITEQL_TEMPLATES.find(
+			(t) =>
+				t.id.toLowerCase() === cleanId ||
+				t.aliases?.some((a) => a.toLowerCase() === cleanId),
+		);
+	}
+
+	renderTemplate(
+		templateOrId: SuiteQLTemplate | string,
+		params?: Record<string, string>,
+	): string | undefined {
+		const tmpl =
+			typeof templateOrId === "string"
+				? this.getTemplate(templateOrId)
+				: templateOrId;
+		if (!tmpl) return undefined;
+		return renderSuiteQLTemplate(tmpl, params);
 	}
 
 	searchTemplates(keyword: string): SuiteQLTemplate[] {
@@ -350,6 +472,7 @@ export class SuiteQLTemplateService {
 		return SUITEQL_TEMPLATES.filter(
 			(t) =>
 				t.id.toLowerCase().includes(kw) ||
+				t.aliases?.some((a) => a.toLowerCase().includes(kw)) ||
 				t.name.toLowerCase().includes(kw) ||
 				t.description.toLowerCase().includes(kw) ||
 				t.sqlTemplate.toLowerCase().includes(kw),

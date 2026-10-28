@@ -319,7 +319,7 @@ export async function handleUploadFile(
 			const inList = fileNames
 				.map((n) => `'${n.replace(/'/g, "''")}'`)
 				.join(", ");
-			const sql = `SELECT f.id AS file_id, f.name AS file_name, s.id AS script_id, s.scriptid AS script_text_id, s.name AS script_name, s.scripttype AS script_type, sd.primarykey AS deploy_id, sd.scriptid AS deploy_text_id, sd.title AS deploy_title FROM file f LEFT JOIN Script s ON s.scriptfile = f.id LEFT JOIN ScriptDeployment sd ON sd.script = s.id WHERE f.name IN (${inList}) ORDER BY f.name, s.name`;
+			const sql = `SELECT f.id AS file_id, f.name AS file_name, s.id AS script_id, s.scriptid AS script_text_id, s.name AS script_name, s.scripttype AS script_type, sd.primarykey AS deploy_id, sd.scriptid AS deploy_text_id, sd.title AS deploy_title FROM file f LEFT JOIN Script s ON s.scriptfile = f.id LEFT JOIN ScriptDeployment sd ON sd.script = s.id WHERE f.name IN (${inList}) ORDER BY f.name, s.name FETCH FIRST 50 ROWS ONLY`;
 			const res = await mcpTools.executeTool("ns_runCustomSuiteQL", {
 				sqlQuery: sql,
 			});

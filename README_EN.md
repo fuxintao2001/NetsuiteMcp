@@ -40,7 +40,7 @@ In traditional "AI + NetSuite ERP" integration setups, developers and organizati
 | :--- | :--- |
 | **Fragile OAuth Tokens & Laptop Sleep Drops**: NetSuite Access Tokens expire after only 1 hour; laptop lid closures and sleeping disconnect networks, causing background token refresh failures and constant manual re-logins. | **OAuth 2.0 PKCE Auto-Rotation + macOS Sleep Guard + Background Daemon**: Zero Client Secret exposure; LaunchAgent/systemd daemons maintain 24/7 proactive renewal; built-in DarkWake/sleep network detection and zero-touch silent reconnect (`trySilentReauth`). |
 | **Wide-Table Projections Causing LLM Context Bloat**: NetSuite REST records frequently carry hundreds of empty fields and nested arrays, quickly exhausting the LLM's token context window. | **Extreme Context Slimming (`contextSlimmer`)**: Automatically strips `null`, `undefined`, and empty array noise; converts entity and SuiteQL payloads into high-density Markdown tables, **reducing token consumption by 50%+**. |
-| **SuiteQL Dialect Pitfalls & Slow Query Timeouts**: LLMs habitually generate MySQL dialects (such as naked `LIMIT`/`OFFSET`) or trigger catastrophic full-table scans (e.g., cross-table `JOIN SystemNote`), causing 45s+ gateway timeouts. | **AST-Level SQL Runtime Guard (`suiteqlGuard`)**: Zero implicit dialect rewriting with strict AST pre-validation; hard-blocks `SELECT *`, naked dialects, and cross-table audit joins; enforces `tl.mainline` filtering and automatically injects safe fallback pagination (`FETCH FIRST 100 ROWS ONLY`). |
+| **SuiteQL Dialect Pitfalls & Slow Query Timeouts**: LLMs habitually generate MySQL dialects (such as naked `LIMIT`/`OFFSET`) or trigger catastrophic full-table scans (e.g., cross-table `JOIN SystemNote`), causing 45s+ gateway timeouts. | **AST-Level SQL Runtime Guard (`suiteqlGuard`)**: 100% transparent execution and zero implicit rewriting with strict AST pre-validation; Fail-Fast hard-blocks `SELECT *`, naked dialects, missing `tl.mainline`, and cross-table audit joins; AI explicitly diagnoses and fixes SQL. |
 | **Production Account Misoperation Disasters**: AI assistants mistakenly execute write actions or deploy untested scripts directly to production environments. | **Dual Sandbox/Production Defense Barrier**: Automatically identifies environment types (Production vs Sandbox) via account identifiers; read-only operations natively enabled; script deployments to production strictly demand explicit confirmation (`allowProduction: true`). |
 | **Multi-Tenant Concurrent Collisions & Deadlocks**: Concurrently operating multiple NetSuite accounts across multiple IDE instances leads to session overwrites and refresh race conditions. | **Pure Redis Cache + Redlock Distributed Lock**: Complete session and metadata isolation per account (`ns:<accountId>:*`); normalized lock keys (`formatNetSuiteAccountHost`) guarantee atomicity during token rotation. |
 
@@ -112,7 +112,7 @@ The server's protocol architecture, tool orthogonality, and defensive mechanisms
    - **Dialect Remediation**: Hard-blocks MySQL naked `LIMIT`/`OFFSET`, guiding models to official Oracle `FETCH FIRST N ROWS ONLY` or `ROWNUM <= N`.
    - **Transaction Line Duplication Guard**: Enforces `tl.mainline = 'F'` or `'T'` filtering on `transactionline` joins to prevent inflated line counts and amounts.
    - **Slow Query Shield**: Hard-blocks cross-table `systemnote` joins (SAFE Pitfall 11), directing agents to dedicated audit tools.
-   - **Automatic Fallback Pagination**: Injects `FETCH FIRST 100 ROWS ONLY` when queries lack explicit limit constraints.
+   - **Situational Explicit Pagination**: Firmly eliminates automatic backend rewriting or stealth pagination injection; AI agents explicitly declare Oracle-standard pagination (`FETCH FIRST N ROWS ONLY` or `ROWNUM <= N`) based on query intent.
 4. **Dual Sandbox/Production Defense Barrier**:
    - Single authoritative classification: account IDs containing `_sb`, `-sb`, or `tstdrv` are classified as Sandbox; all others as Production.
    - Script deployment (`netsuite_upload_file`) requires explicit user confirmation via `allowProduction: true` when targeting production.
@@ -259,7 +259,7 @@ In accordance with **Zero-Bloat and orthogonal duty principles**, all obsolete a
 
 | Tool Name | Description | MCP Annotation Hints |
 | :--- | :--- | :--- |
-| [`netsuite_run_suiteql`](#1-netsuite_run_suiteql) | Execute read-only SuiteQL queries protected by AST guard with automatic fallback pagination, multi-statement, and parallel support. | `readOnlyHint: true`, `idempotentHint: true` |
+| [`netsuite_run_suiteql`](#1-netsuite_run_suiteql) | Execute read-only SuiteQL queries under transparent execution and AST guard protection, supporting multi-statement and parallel execution. | `readOnlyHint: true`, `idempotentHint: true` |
 | [`netsuite_get_metadata`](#2-netsuite_get_metadata) | Inspect database table schemas, column types, and authoritative 272 standard record definitions. | `readOnlyHint: true`, `idempotentHint: true` |
 | [`netsuite_get_record`](#3-netsuite_get_record) | Inspect records by ID or tranid, prune noise, and generate deep-links to NetSuite Web UI. | `readOnlyHint: true`, `idempotentHint: true` |
 | [`netsuite_get_script_logs`](#4-netsuite_get_script_logs) | Query SuiteScript execution logs (`ScriptNote`) with index optimization by level, script ID, and date range. | `readOnlyHint: true`, `idempotentHint: true` |
@@ -276,9 +276,10 @@ Executes read-only Oracle NetSuite SuiteQL queries and returns tabular results a
 - **Input Parameters**:
   - `sqlQuery` (`string`, optional): SuiteQL query string to execute. Multiple statements separated by `;` are supported.
   - `sqlQueries` (`string[]`, optional): Array of SuiteQL query strings to execute concurrently in parallel (max 10).
-  - `limit` (`number`, optional): Safe maximum row limit (default: 100).
+  - `templateId` (`string`, optional): Certified Oracle SAFE golden template ID.
+  - `templateParams` (`record`, optional): Parameter key-value pairs to bind into the golden template.
   - `customRecordMappings` (`array`, optional): Custom record mappings (`rectype` and `scriptId`).
-- **Guard Rules**: Zero implicit rewriting; `SELECT *` strictly prohibited; naked `LIMIT`/`OFFSET` blocked with Oracle guidance; `transactionline` joins must filter `tl.mainline`; direct `JOIN systemnote` blocked; safe `FETCH FIRST 100 ROWS ONLY` automatically appended if pagination is omitted.
+- **Guard Rules**: 100% transparent execution with zero implicit rewriting; `SELECT *` strictly prohibited; naked `LIMIT`/`OFFSET` blocked with Oracle guidance; `transactionline` joins must explicitly filter `tl.mainline`; direct `JOIN systemnote` blocked; queries violating rules fail fast for explicit AI self-healing.
 
 ### 2. `netsuite_get_metadata`
 Inspects NetSuite database table schemas, column names, and data types with 2ms Redis caching and an offline catalog of 272 standard entities.

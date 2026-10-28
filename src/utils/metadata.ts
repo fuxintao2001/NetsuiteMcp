@@ -444,9 +444,17 @@ const SUITEQL_TABLE_CATALOG: SuiteQLTableCatalogEntry[] = [
 		domain: "Manufacturing",
 		description:
 			"Mapping between assembly items and Bill of Materials definitions.",
-		keyFields: ["id", "assembly", "billofmaterials", "default"],
+		keyFields: [
+			"assembly",
+			"billofmaterials",
+			"currentrevision",
+			"masterdefault",
+			"defaultforlocation",
+			"inactive",
+			"memo",
+		],
 		bestPractice:
-			"Standard Advanced BOM link table between assembly item (item.id) and BOM master (bom.id).",
+			"Standard Advanced BOM link table between assembly item (item.id) and BOM master (bom.id). Note: has no 'id' column; use 'assembly' and 'billofmaterials'.",
 	},
 	{
 		tableName: "manufacturingrouting",
@@ -463,12 +471,14 @@ const SUITEQL_TABLE_CATALOG: SuiteQLTableCatalogEntry[] = [
 		keyFields: [
 			"id",
 			"acctnumber",
-			"acctname",
+			"fullname",
+			"accountsearchdisplaynamecopy",
 			"accttype",
 			"currency",
 			"isinactive",
 		],
-		bestPractice: "Join with transactionaccountingline on account.id.",
+		bestPractice:
+			"Join with transactionaccountingline on account.id. Account name is in 'fullname' or 'accountsearchdisplaynamecopy' (NOT 'acctname' or 'name').",
 	},
 	{
 		tableName: "accountingperiod",
@@ -505,9 +515,10 @@ const SUITEQL_TABLE_CATALOG: SuiteQLTableCatalogEntry[] = [
 		keyFields: ["id", "name", "symbol", "isbasecurrency", "isinactive"],
 	},
 	{
-		tableName: "currencyexchangerate",
+		tableName: "currencyrate",
 		domain: "Financials & Accounting",
-		description: "Daily and period consolidated exchange rate tables.",
+		description:
+			"Daily currency exchange rate table (NetSuite2.com table name is 'currencyrate', not 'currencyexchangerate').",
 		keyFields: [
 			"id",
 			"basecurrency",
@@ -548,10 +559,16 @@ const SUITEQL_TABLE_CATALOG: SuiteQLTableCatalogEntry[] = [
 			"phone",
 			"subsidiary",
 			"balance",
+			"overduebalance",
+			"unbilledorders",
 			"creditlimit",
+			"creditholdoverride",
+			"oncredithold",
 			"terms",
 			"isinactive",
 		],
+		bestPractice:
+			"Credit hold status uses 'creditholdoverride' and 'oncredithold' (NOT 'credithold').",
 	},
 	{
 		tableName: "vendor",
@@ -615,19 +632,37 @@ const SUITEQL_TABLE_CATALOG: SuiteQLTableCatalogEntry[] = [
 		tableName: "pricing",
 		domain: "Items & Master Data",
 		description: "Item pricing matrices by currency and price level.",
-		keyFields: ["item", "pricelevel", "currency", "unitprice", "quantityrange"],
+		keyFields: [
+			"internalid",
+			"item",
+			"pricelevel",
+			"currency",
+			"unitprice",
+			"quantity",
+			"priceqty",
+			"saleunit",
+		],
 	},
 	{
 		tableName: "itemvendor",
 		domain: "Items & Master Data",
 		description: "Item preferred vendor relationships and purchase prices.",
-		keyFields: ["item", "vendor", "purchaseprice", "purchaseleadtime"],
+		keyFields: [
+			"item",
+			"vendor",
+			"preferredvendor",
+			"purchaseprice",
+			"vendorcurrencyid",
+			"vendorcode",
+			"subsidiary",
+		],
 	},
 	{
-		tableName: "unitsset",
+		tableName: "unitstype",
 		domain: "Items & Master Data",
-		description: "Unit of measure types and base conversion units.",
-		keyFields: ["id", "name", "isinactive"],
+		description:
+			"Unit of measure types (NetSuite2.com table name is 'unitstype', not 'unitsset').",
+		keyFields: ["id", "name", "isinactive", "externalid", "lastmodifieddate"],
 	},
 
 	// 7. System, Logs & Customization
