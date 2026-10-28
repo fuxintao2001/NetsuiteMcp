@@ -270,6 +270,33 @@ export function runSync({ dryRun = false, shouldPush = false } = {}) {
 		}
 	}
 
+	// ---------------------------------------------------------------------------
+	// 8. Auto-sync projectRoot/.agents/rules/ from workspace-agents/rules/
+	//    Eliminating duplicate maintenance across local and template rules.
+	// ---------------------------------------------------------------------------
+	const rootRulesDir = path.join(projectRoot, ".agents", "rules");
+	if (fs.existsSync(rulesSourceDir) && fs.existsSync(rootRulesDir)) {
+		if (dryRun) {
+			console.log("\n🔍 [DRY RUN] Root .agents/rules/ auto-sync:");
+			console.log(`   - Modular rules aligned to ${rootRulesDir}`);
+		} else {
+			const ruleFiles = fs.readdirSync(rulesSourceDir);
+			for (const rf of ruleFiles) {
+				const srcRulePath = path.join(rulesSourceDir, rf);
+				if (!fs.statSync(srcRulePath).isFile()) continue;
+				if (rf === "environment-locks.template.md") continue;
+
+				const destRulePath = path.join(rootRulesDir, rf);
+				const rawRuleContent = fs.readFileSync(srcRulePath, "utf-8");
+				const rendered = interpolateTemplate(rawRuleContent, {
+					PROJECT_PATH: projectRoot,
+				});
+				fs.writeFileSync(destRulePath, rendered, "utf-8");
+			}
+			console.log("✅ Synced: Root project .agents/rules/ (auto-aligned with workspace-agents/rules/)");
+		}
+	}
+
 	console.log(`\n${"-".repeat(60)}`);
 	console.log(
 		`${dryRun ? "🔍 Dry run" : "✨ Sync"} complete: ${successCount} succeeded, ${errorCount} failed`,

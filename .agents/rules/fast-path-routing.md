@@ -5,7 +5,7 @@
 ## 1. Dual-Path Execution Model & Single-Turn Fan-Out
 
 1. **⚡ Fast-Path (Standard Core Business — Direct 1-Turn Penetration Mandate)**:
-   - For queries involving standard core tables (`transaction`, `transactionline`, `customer`, `vendor`, `item`, `account`, `subsidiary`, `aggregateitemlocation`, `accountingperiod`, `transactionaccountingline`, `employee`):
+   - For queries involving standard core tables (`transaction`, `transactionline`, `customer`, `vendor`, `item`, `account`, `subsidiary`, `aggregateitemlocation`, `accountingperiod`, `transactionaccountingline`, `employee`, `location`, `department`, `classification`, `currency`):
    - **STRICTLY PROHIBITED**: Calling reconnaissance tools prior to querying standard core tables.
    - **MANDATORY**: Construct precise Oracle NetSuite SuiteQL and call **`netsuite_run_suiteql` directly on Turn 1**. Zero pre-flight roundtrips.
 
@@ -18,8 +18,11 @@
    - **STRICTLY PROHIBITED**: Executing read-only calls sequentially one-by-one across multiple conversation turns.
    - **MANDATORY (Batch-Parameter First)**:
      - **Multiple SuiteQL Queries**: Pass `sqlQueries: ["SELECT ... FROM transaction ...", "SELECT ... FROM customer ..."]` (or separate with semicolons `;` in `sqlQuery`) in a single `netsuite_run_suiteql` call.
-     - **Multiple Table Schemas**: Pass `tables: ["table_a", "table_b"]` in a single `netsuite_get_metadata` call.
-     - **Multiple Records**: Pass `ids: ["SO10023", "SO10024"]` in a single `netsuite_get_record` call.
+     - **Multiple Table Schemas**: Pass `tables: ["table_a", "table_b"]` in a single `netsuite_get_metadata` call (up to 10 tables).
+     - **Multiple Records**: Pass `ids: ["SO10023", "SO10024"]` in a single `netsuite_get_record` call (up to 10 records).
+     - **Multiple Script Logs**: Pass `scriptIds: ["customscript_a", "customscript_b"]` in a single `netsuite_get_script_logs` call (up to 10 scripts).
+     - **Multiple Audit System Notes**: Pass `recordIds: ["101", "102"]` in a single `netsuite_get_system_notes` call (up to 10 records).
+     - **Multiple File Uploads**: Pass `paths: ["scripts/a.js", "scripts/b.js"]` in a single `netsuite_upload_file` call.
    - **MANDATORY (Multi-Tool Call Fan-Out)**:
      - When combining different read-only tools without data dependencies (e.g., `netsuite_get_record` + `netsuite_get_script_logs` + `netsuite_get_system_notes`), emit all `tool_calls` concurrently in the **same turn**.
 
@@ -42,6 +45,10 @@ These schemas are certified production standards. AI agents must project directl
 | **`accountingperiod`** | `id`, `periodname`, `startdate`, `enddate`, `closed`, `isquarter`, `isyear`, `alllocked` | Period close validation. |
 | **`transactionaccountingline`** | `transaction`, `account`, `amount`, `debit`, `credit`, `subsidiary`, `posting` | GL impact lines (`posting = 'T'`). |
 | **`employee`** | `id`, `entityid`, `firstname`, `lastname`, `email`, `supervisor`, `department`, `subsidiary`, `isinactive` | HR / employee entity. |
+| **`location`** | `id`, `name`, `fullname`, `subsidiary`, `isinactive`, `makeinventoryavailable` | Warehouse / Location master records. |
+| **`department`** | `id`, `name`, `fullname`, `isinactive` | Department organizational segments. |
+| **`classification`** | `id`, `name`, `fullname`, `isinactive` | Class / Business line tracking segments. |
+| **`currency`** | `id`, `name`, `symbol`, `isbasecurrency`, `isinactive` | Currency definitions and base currency flag. |
 
 ---
 
@@ -70,3 +77,17 @@ SELECT ail.item, BUILTIN.DF(ail.item) AS item_name, BUILTIN.DF(ail.location) AS 
 FROM aggregateitemlocation ail
 WHERE ail.item = 1001
 ```
+
+---
+
+## 4. Companion Rules & Authoritative References
+
+- **Master Charter**: [AGENTS.md](file:///Users/fuxintao/WebstormProjects/NetsuiteMcp/AGENTS.md)
+- **SuiteQL Defense**: [SuiteQL Guardrails](file:///Users/fuxintao/WebstormProjects/NetsuiteMcp/.agents/rules/suiteql-guardrails.md)
+- **SAFE Guide**: [SAFE Guide Standards](file:///Users/fuxintao/WebstormProjects/NetsuiteMcp/.agents/rules/safe-guide-standards.md)
+- **Environment Locks**: [Environment Locks](file:///Users/fuxintao/WebstormProjects/NetsuiteMcp/.agents/rules/environment-locks.md)
+- **Generative UI**: [Generative UI](file:///Users/fuxintao/WebstormProjects/NetsuiteMcp/.agents/rules/generative-ui.md)
+- **MCP Resources**:
+  - `netsuite://queries/golden-templates` — Curated SuiteQL Query Template Library
+  - `netsuite://records/reference` — Oracle NetSuite Official 272 Records Definition Index
+  - `netsuite://guides/suiteql` — SuiteQL Query & Syntax Reference Guide
