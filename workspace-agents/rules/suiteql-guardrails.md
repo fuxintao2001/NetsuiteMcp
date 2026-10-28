@@ -1,6 +1,6 @@
 # SuiteQL Architectural Guardrails (Zero-Shot Pass Standards)
 
-> 🛡️ Strictly enforce these 7 golden rules and defensive syntax patterns to achieve 100% first-pass execution through `suiteqlGuard`:
+> 🛡️ Strictly enforce these golden rules and defensive syntax patterns to achieve 100% first-pass execution through `suiteqlGuard`:
 
 ## 1. Authoritative References & MCP Resources
 
@@ -11,7 +11,7 @@ Read these MCP resources on demand when authoring or debugging SuiteQL:
 
 ---
 
-## 2. Seven Golden SuiteQL Guardrails
+## 2. Core SuiteQL Guardrails (Oracle NetSuite Standards)
 
 1. **Zero Wildcards**: NEVER use `SELECT *`; ALWAYS specify explicit column names.
 2. **Display Value Mapping**: To display friendly names of foreign entities, items, or statuses, use `BUILTIN.DF(field)` (e.g. `BUILTIN.DF(tl.item) AS item_name`) instead of costly multi-table JOINs.
@@ -22,14 +22,24 @@ Read these MCP resources on demand when authoring or debugging SuiteQL:
    - Link downstream transactions via `transactionline.createdfrom = :upstreamId`; NEVER use `transaction.createdfrom` (column does not exist).
 5. **No SystemNote JOINs**:
    - NEVER JOIN `SystemNote` directly with transactional tables (causes Cartesian explosion and 45s+ timeouts). Query `SystemNote` as a standalone table or call `netsuite_get_system_notes`.
-6. **Pagination & Date Standards**:
-   - **Recommended**: `FETCH FIRST N ROWS ONLY` for simple pagination, or Oracle-standard `OFFSET M ROWS FETCH NEXT N ROWS ONLY` for skip-pagination.
-   - **Allowed**: `ROWNUM <= N` as an alternative.
-   - **Prohibited**: MySQL-style `LIMIT N` and bare non-standard `OFFSET N` (without `ROWS FETCH`).
-   - **Parameterized Binding**: `FETCH FIRST ? ROWS ONLY` and `FETCH FIRST :limit ROWS ONLY` are recognized correctly; do not manually append additional pagination clauses.
+6. **Situational Pagination (Not Forced)**:
+   - Pagination is optional and situational, not globally forced. Queries are executed transparently without automatic server-side rewriting.
+   - **When to Paginate**: When sampling or scanning large multi-row tables without narrow indexed filters, use `FETCH FIRST N ROWS ONLY` or Oracle-standard `OFFSET M ROWS FETCH NEXT N ROWS ONLY` (or `ROWNUM <= N`) to prevent token overconsumption and timeouts.
+   - **When to Omit**: Unique ID lookups, single document inspections, small lookup/configuration tables, or aggregation queries (`COUNT(*)`, `SUM(...)`) do not need pagination.
+   - **Prohibited Syntax**: Never use MySQL-style `LIMIT N` or bare non-standard `OFFSET N` (without `ROWS FETCH`).
+   - **Parameterized Binding**: `FETCH FIRST ? ROWS ONLY` and `FETCH FIRST :limit ROWS ONLY` are recognized correctly.
+7. **NetSuite Boolean Literals**:
+   - In NetSuite2.com schema, all boolean flags (`isinactive`, `mainline`, `taxline`, `closed`, `posting`, `isperson`) are stored as `CHAR(1)` with values `'T'` or `'F'`.
+   - NEVER use bare unquoted `true`/`false` or `1`/`0`.
+8. **Oracle String Concatenation**:
+   - Use Oracle standard `||` or `CONCAT(a, b)` for string concatenation.
+   - NEVER use `+` (which is strictly arithmetic in Oracle and causes numeric conversion errors).
+9. **Date & Timestamp Standards**:
    - ALWAYS cast date literals using `TO_DATE('YYYY-MM-DD', 'YYYY-MM-DD')`.
-7. **Driving Index Requirement**:
-   - Queries against large tables MUST filter on at least one indexed column: `type`, `trandate`, `id`, `tranid`, `entity`, `subsidiary`.
+   - Use `SYSDATE` or `CURRENT_DATE` for the current timestamp; date arithmetic uses `SYSDATE - 30` (30 days ago).
+   - NEVER use MySQL/Postgres date functions (`NOW()`, `CURDATE()`, `DATEADD()`, `DATEDIFF()`).
+10. **Driving Index Requirement**:
+    - Queries against large tables MUST filter on at least one indexed column: `type`, `trandate`, `id`, `tranid`, `entity`, `subsidiary`.
 
 ---
 

@@ -124,17 +124,23 @@ describe("toolErrorLogger", () => {
 			).toBe("PERMISSION_DENIED");
 		});
 
-		it("should classify SuiteQL syntax errors", () => {
+		it("should classify SuiteQL syntax, unknown table, and unknown column errors", () => {
 			expect(
 				classifyError(
 					"ns_runCustomSuiteQL",
 					"Table or view does not exist: CUSTOM_TBL",
 				),
-			).toBe("SUITEQL_SYNTAX");
+			).toBe("SUITEQL_UNKNOWN_TABLE");
 			expect(
 				classifyError(
 					"netsuite_run_suiteql",
 					"Invalid column name: custbody_unknown",
+				),
+			).toBe("SUITEQL_UNKNOWN_COLUMN");
+			expect(
+				classifyError(
+					"ns_runCustomSuiteQL",
+					"Syntax error at line 1, column 15: unexpected keyword",
 				),
 			).toBe("SUITEQL_SYNTAX");
 		});

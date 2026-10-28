@@ -11,6 +11,10 @@ import { isPermissionError } from "../utils/errors.js";
 
 export type ToolErrorCategory =
 	| "ARGUMENT_VALIDATION"
+	| "SUITEQL_GUARD_BLOCKED"
+	| "SUITEQL_UNKNOWN_COLUMN"
+	| "SUITEQL_UNKNOWN_TABLE"
+	| "SUITEQL_PERMISSION"
 	| "SUITEQL_SYNTAX"
 	| "PERMISSION_DENIED"
 	| "RECORD_NOT_FOUND"
@@ -28,6 +32,7 @@ export interface ToolErrorEntry {
 	durationMs: number;
 	category: ToolErrorCategory;
 	errorMessage: string;
+	diagnosis?: string | undefined;
 	errorStack?: string | undefined;
 	errorCode?: string | number | undefined;
 	parameters: Record<string, unknown>;
@@ -156,7 +161,37 @@ export function classifyError(
 		lower.includes("guardrail violation") ||
 		lower.includes("suiteql security guardrail")
 	) {
-		return "SUITEQL_SYNTAX";
+		return "SUITEQL_GUARD_BLOCKED";
+	}
+
+	if (
+		lower.includes("permission denied for standard table") ||
+		(toolName === "netsuite_run_suiteql" && lower.includes("permission denied"))
+	) {
+		return "SUITEQL_PERMISSION";
+	}
+
+	if (
+		lower.includes("field not exposed") ||
+		lower.includes("unknown identifier") ||
+		lower.includes("invalid column") ||
+		lower.includes("duplicate alias") ||
+		lower.includes("ambiguous column") ||
+		lower.includes("near: fetch")
+	) {
+		return "SUITEQL_UNKNOWN_COLUMN";
+	}
+
+	if (
+		lower.includes("non-existent or disabled table") ||
+		lower.includes("metadata table") ||
+		lower.includes("table or view does not exist") ||
+		lower.includes("invalid search type") ||
+		(toolName === "netsuite_run_suiteql" &&
+			lower.includes("record") &&
+			lower.includes("was not found"))
+	) {
+		return "SUITEQL_UNKNOWN_TABLE";
 	}
 
 	if (
@@ -179,11 +214,7 @@ export function classifyError(
 		toolName === "netsuite_run_suiteql" ||
 		lower.includes("suiteql") ||
 		lower.includes("invalid_search") ||
-		lower.includes("syntax error") ||
-		lower.includes("table or view does not exist") ||
-		lower.includes("unknown identifier") ||
-		lower.includes("invalid column") ||
-		lower.includes("ambiguous column")
+		lower.includes("syntax error")
 	) {
 		return "SUITEQL_SYNTAX";
 	}

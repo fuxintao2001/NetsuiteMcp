@@ -18,7 +18,6 @@ import {
 import {
 	assertValidSuiteQL,
 	diagnoseSuiteQLError,
-	ensureSuiteQLPagination,
 	extractReferencedTables,
 	formatSuiteQLErrorResponse,
 	hasMainlineFilter,
@@ -250,23 +249,31 @@ describe("SuiteQL, Search & Query Utilities", () => {
 				expect(res.reason).toContain("LISTAGG");
 			});
 
-			it("should reject derived table subqueries in FROM/JOIN clause with CTE guidance", () => {
-				const res1 = validateSuiteQL(
-					"SELECT line_count, COUNT(*) FROM (SELECT item, COUNT(*) AS line_count FROM transactionline GROUP BY item) t GROUP BY line_count",
+			it("should allow derived table subqueries in FROM clause", () => {
+				const res = validateSuiteQL(
+					"SELECT line_count, COUNT(*) FROM (SELECT item, COUNT(*) AS line_count FROM transactionline WHERE mainline = 'F' GROUP BY item) t GROUP BY line_count",
 				);
-				expect(res1.valid).toBe(false);
-				expect(res1.reason).toContain(
-					"Derived tables / subqueries in FROM or JOIN clauses",
-				);
-				expect(res1.reason).toContain("CTE");
+				expect(res.valid).toBe(true);
+			});
 
-				const res2 = validateSuiteQL(
-					"SELECT t.id, sub.cnt FROM transaction t JOIN (SELECT transaction, COUNT(*) AS cnt FROM transactionline GROUP BY transaction) sub ON t.id = sub.transaction",
+			it("should reject duplicate column aliases in SELECT projection without unique AS alias", () => {
+				const res = validateSuiteQL(
+					"SELECT t.id, tl.id, tl.item FROM transaction t JOIN transactionline tl ON t.id = tl.transaction WHERE t.id = 123 AND tl.mainline = 'F'",
 				);
-				expect(res2.valid).toBe(false);
-				expect(res2.reason).toContain(
-					"Derived tables / subqueries in FROM or JOIN clauses",
+				expect(res.valid).toBe(false);
+				expect(res.reason).toContain("Duplicate column alias 'id'");
+
+				const resValid = validateSuiteQL(
+					"SELECT t.id AS tran_id, tl.id AS line_id, tl.item FROM transaction t JOIN transactionline tl ON t.id = tl.transaction WHERE t.id = 123 AND tl.mainline = 'F'",
 				);
+				expect(resValid.valid).toBe(true);
+			});
+
+			it("should permit transactionline query without mainline filter when filtering by unique line key", () => {
+				const res = validateSuiteQL(
+					"SELECT tl.custcol_order_status, tl.quantity FROM transactionline tl WHERE tl.transaction = 6981429 AND tl.uniquekey = 46322085",
+				);
+				expect(res.valid).toBe(true);
 			});
 
 			it("should reject non-existent previousline on transactionline", () => {
@@ -366,37 +373,18 @@ describe("SuiteQL, Search & Query Utilities", () => {
 				).toBe(true);
 			});
 
-			it("should ensure pagination by appending FETCH FIRST when missing", () => {
-				const query = "SELECT id FROM customer WHERE isinactive = 'F'";
-				const withPagination = ensureSuiteQLPagination(query, 50);
-				expect(withPagination).toBe(
-					"SELECT id FROM customer WHERE isinactive = 'F' FETCH FIRST 50 ROWS ONLY",
-				);
+			it("should allow unpaginated queries without error and preserve them without mutation", () => {
+				const query =
+					"SELECT id, companyname FROM customer WHERE isinactive = 'F'";
+				const result = validateSuiteQL(query);
+				expect(result.valid).toBe(true);
+				expect(result.hasPagination).toBe(false);
 
-				const alreadyHas = "SELECT id FROM customer WHERE ROWNUM <= 10";
-				expect(ensureSuiteQLPagination(alreadyHas, 50)).toBe(alreadyHas);
-			});
-
-			it("should safely wrap UNION compound queries with outer subquery pagination", () => {
-				const unionQuery =
-					"SELECT id FROM customer UNION ALL SELECT id FROM vendor";
-				const paginated = ensureSuiteQLPagination(unionQuery, 100);
-				expect(paginated).toBe(
-					"SELECT * FROM (SELECT id FROM customer UNION ALL SELECT id FROM vendor) WHERE ROWNUM <= 100",
-				);
-			});
-
-			it("should strip trailing line and block comments before appending FETCH FIRST", () => {
-				const queryWithLineComment =
-					"SELECT id FROM customer WHERE isinactive = 'F' -- get active customers";
-				expect(ensureSuiteQLPagination(queryWithLineComment, 50)).toBe(
-					"SELECT id FROM customer WHERE isinactive = 'F' FETCH FIRST 50 ROWS ONLY",
-				);
-
-				const queryWithBlockComment = "SELECT id FROM customer /* end note */";
-				expect(ensureSuiteQLPagination(queryWithBlockComment, 50)).toBe(
-					"SELECT id FROM customer FETCH FIRST 50 ROWS ONLY",
-				);
+				const paginatedQuery =
+					"SELECT id, companyname FROM customer FETCH FIRST 50 ROWS ONLY";
+				const paginatedResult = validateSuiteQL(paginatedQuery);
+				expect(paginatedResult.valid).toBe(true);
+				expect(paginatedResult.hasPagination).toBe(true);
 			});
 		});
 
@@ -1071,9 +1059,8 @@ describe("SuiteQL, Search & Query Utilities", () => {
 					"SELECT BUILTIN.DF(status) AS lbl, status, COUNT(*) FROM customrecord_xxx GROUP BY status",
 				);
 				expect(diag2.isDiagnosed).toBe(true);
-				expect(diag2.summary).toContain(
-					"Unsupported 'BUILTIN.DF()' in Grouped Query",
-				);
+				expect(diag2.summary).toContain("BUILTIN.DF()");
+				expect(diag2.suggestedFix).toContain("GROUP BY");
 
 				const diag3 = diagnoseSuiteQLError(
 					"Search error occurred: Invalid or unsupported search",
@@ -1083,6 +1070,35 @@ describe("SuiteQL, Search & Query Utilities", () => {
 				expect(diag3.summary).toContain(
 					"Invalid or Unsupported Search Specification",
 				);
+			});
+
+			it("should diagnose NOT_EXPOSED field errors and provide column hint", () => {
+				const diag = diagnoseSuiteQLError(
+					"Search error occurred: Field 'lineuniquekey' for record 'transactionLine' was not found. Reason: NOT_EXPOSED - Not available for channel SEARCH",
+				);
+				expect(diag.isDiagnosed).toBe(true);
+				expect(diag.summary).toContain("Field Not Exposed to SuiteQL");
+				expect(diag.suggestedFix).toContain("transactionline.uniquekey");
+			});
+
+			it("should diagnose permission denied for standard tables reported as 'not found'", () => {
+				const diag = diagnoseSuiteQLError(
+					"Search error occurred: Record 'subsidiary' was not found.",
+				);
+				expect(diag.isDiagnosed).toBe(true);
+				expect(diag.summary).toContain(
+					"Permission Denied for Standard Table 'subsidiary'",
+				);
+				expect(diag.selfHealingAction).toContain("HALT");
+			});
+
+			it("should diagnose pseudo metadata tables and guide to netsuite_get_metadata", () => {
+				const diag = diagnoseSuiteQLError(
+					"Search error occurred: Record 'customfield' was not found.",
+				);
+				expect(diag.isDiagnosed).toBe(true);
+				expect(diag.summary).toContain("Metadata Table 'customfield'");
+				expect(diag.selfHealingAction).toContain("netsuite_get_metadata");
 			});
 
 			it("should handle unknown generic errors gracefully", () => {

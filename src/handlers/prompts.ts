@@ -281,12 +281,14 @@ Generate a valid, high-performance SuiteQL query for the following requirement:
 
 ## Mandatory SuiteQL Guardrails:
 1. NO \`SELECT *\` — specify explicit column names from the provided schema.
-2. If querying \`transaction\` + \`transactionline\`, ALWAYS include \`tl.mainline = 'F'\` and \`tl.taxline = 'F'\`.
-3. If checking downstream linked transactions, join on \`transactionline.createdfrom\` (NOT transaction.createdfrom).
-4. If querying cross-item location stock, use \`aggregateitemlocation\` (NOT \`inventoryitemlocations\`).
-5. Use \`BUILTIN.DF(fieldName)\` to display friendly names without unnecessary JOINs.
-6. End with \`FETCH FIRST 100 ROWS ONLY\`.
-7. Output the query with parameter placeholders and explain each column choice.`;
+2. Booleans: NetSuite boolean flags are stored as 'T' or 'F' (e.g. \`tl.mainline = 'F'\`, \`tl.taxline = 'F'\`, \`isinactive = 'F'\`). NEVER use bare \`true\`/\`false\` or \`1\`/\`0\`.
+3. String Concatenation: Use Oracle standard \`||\` or \`CONCAT(a, b)\` (NEVER \`+\`).
+4. Lineage: Join on \`transactionline.createdfrom\` (NOT transaction.createdfrom).
+5. Inventory: Query cross-item location stock via \`aggregateitemlocation\` (NOT \`inventoryitemlocations\`).
+6. Display Values & Grouping: Use \`BUILTIN.DF(fieldName)\` for display labels. NEVER place \`BUILTIN.DF()\` inside \`GROUP BY\` (group by raw ID or use a CTE instead).
+7. Subqueries: Derived tables \`FROM (SELECT ...)\` are prohibited. Use CTEs (\`WITH cte AS (...) SELECT ... FROM cte\`).
+8. Situational Pagination: Intelligently determine whether pagination is needed. Append \`FETCH FIRST N ROWS ONLY\` or \`WHERE ROWNUM <= N\` for broad exploration or large table scans; omit pagination for unique entity lookups, configuration tables, or aggregate queries (COUNT, SUM).
+9. Output the query with parameter placeholders and explain each column choice.`;
 
 				return {
 					messages: [

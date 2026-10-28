@@ -315,6 +315,58 @@ describe("MCP Handler Wires", () => {
 			expect(res.content[0].text).toContain("app.netsuite.com");
 		});
 
+		it("should allow mutation tools via netsuite_call_official in Sandbox environment", async () => {
+			mockOAuthManager.getAccountId.mockResolvedValue("9260916-sb1"); // Sandbox
+			mockMCPTools.executeTool.mockResolvedValueOnce({
+				id: "999",
+				entityid: "CUST999",
+			});
+			const callFn = registeredHandlers.get("tools/call");
+
+			const res = await callFn?.({
+				params: {
+					name: "netsuite_call_official",
+					arguments: {
+						action: "call",
+						toolName: "ns_createRecord",
+						parameters: {
+							recordType: "customer",
+							record: { companyname: "Sandbox Official Corp" },
+						},
+					},
+				},
+			});
+
+			expect(res.isError).toBeFalsy();
+			expect(mockMCPTools.executeTool).toHaveBeenCalledWith("ns_createRecord", {
+				recordType: "customer",
+				record: { companyname: "Sandbox Official Corp" },
+			});
+		});
+
+		it("should block mutation tools via netsuite_call_official in Production environment", async () => {
+			mockOAuthManager.getAccountId.mockResolvedValue("5848789"); // Production
+			const callFn = registeredHandlers.get("tools/call");
+
+			const res = await callFn?.({
+				params: {
+					name: "netsuite_call_official",
+					arguments: {
+						action: "call",
+						toolName: "ns_createRecord",
+						parameters: {
+							recordType: "customer",
+							record: { companyname: "Prod Official Corp" },
+						},
+					},
+				},
+			});
+
+			expect(res.isError).toBe(true);
+			expect(res.content[0].text).toContain("[Production Safety Violation]");
+			expect(res.content[0].text).toContain("5848789");
+		});
+
 		it("should include environment suffix in tool descriptions", async () => {
 			mockOAuthManager.getAccountId.mockResolvedValue("9260916");
 			const listFn = registeredHandlers.get("tools/list");

@@ -26,12 +26,6 @@ export const RunSuiteQLArgsSchema = z.object({
 		.describe(
 			"Optional array of SuiteQL query strings to execute concurrently in parallel (max 10).",
 		),
-	limit: z
-		.number()
-		.int()
-		.positive()
-		.optional()
-		.describe("Optional safe maximum row limit (default: 100)."),
 	customRecordMappings: z
 		.array(
 			z.object({
@@ -509,13 +503,17 @@ export const RUN_SUITEQL_TOOL = {
 	description: `Execute read-only Oracle NetSuite SuiteQL queries and return tabular results. Supports single-turn parallel batch execution via 'sqlQueries' array or ';' separated statements.
 MANDATORY OFFICIAL SYNTAX RULES:
 1. PROJECTION: NEVER use 'SELECT *'. Always specify explicit column names.
-2. PAGINATION: Oracle-standard ONLY. Use 'FETCH FIRST N ROWS ONLY' or 'WHERE ROWNUM <= N'. NEVER use MySQL/Postgres 'LIMIT' or 'OFFSET'.
-3. TRANSACTION LINES: When querying 'transactionline', MUST filter 'tl.mainline = 'T'' (header summary) or 'tl.mainline = 'F'' (item lines) to prevent duplicate sums.
-4. LINEAGE: 'createdfrom' exists ONLY on 'transactionline', NEVER on 'transaction'.
-5. ITEMS: 'item' table has 'itemtype' and 'subtype', NEVER 'recordtype'.
-6. AUDIT: NEVER JOIN 'systemnote' directly (causes 45s+ timeouts). Use 'netsuite_get_system_notes'.
-7. UNKNOWN SCHEMA: If not 100% sure of column names, MUST call 'netsuite_get_metadata' first before writing SQL.
-8. PARALLEL BATCHING: When retrieving multiple independent datasets, pass an array in 'sqlQueries' to execute concurrently in 1 turn.`,
+2. PAGINATION (Situational, Not Mandatory): NetSuite does NOT support MySQL/Postgres 'LIMIT' or 'OFFSET'. Pagination is NOT mandatory. Intelligently judge based on context: for exploratory queries or scanning large transactional tables, explicitly author Oracle standard 'FETCH FIRST N ROWS ONLY' or 'WHERE ROWNUM <= N'. For unique key lookups, small lookup tables, or aggregations (COUNT/SUM), omit pagination. Queries are executed transparently without automatic rewriting.
+3. BOOLEANS: NetSuite boolean fields are stored as 'T' or 'F' (e.g. isinactive = 'F', mainline = 'T', taxline = 'F'). NEVER use bare true/false or 1/0.
+4. STRING CONCAT: Use Oracle standard '||' or CONCAT(a, b). NEVER use '+'.
+5. TRANSACTION LINES: When querying 'transactionline', MUST filter 'tl.mainline = 'T'' (header summary) or 'tl.mainline = 'F'' (item lines) to prevent duplicate sums.
+6. LINEAGE: 'createdfrom' exists ONLY on 'transactionline', NEVER on 'transaction'.
+7. ITEMS: 'item' table has 'itemtype' and 'subtype', NEVER 'recordtype'.
+8. SUBQUERIES IN FROM: Derived tables 'FROM (SELECT ...)' are prohibited. Use Common Table Expressions (WITH cte AS (...) SELECT ... FROM cte).
+9. BUILTIN.DF IN GROUP BY: NEVER use 'BUILTIN.DF()' inside GROUP BY. Group by raw numeric ID, or wrap aggregation in a CTE.
+10. AUDIT: NEVER JOIN 'systemnote' directly (causes 45s+ timeouts). Use 'netsuite_get_system_notes'.
+11. UNKNOWN SCHEMA: If not 100% sure of column names, MUST call 'netsuite_get_metadata' first before writing SQL.
+12. PARALLEL BATCHING: When retrieving multiple independent datasets, pass an array in 'sqlQueries' to execute concurrently in 1 turn.`,
 	inputSchema: createToolInputSchema(RunSuiteQLArgsSchema),
 };
 

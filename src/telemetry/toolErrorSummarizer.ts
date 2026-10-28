@@ -225,17 +225,27 @@ export function generateRecommendations(
 	}
 
 	// 2. SuiteQL syntax & schema reconnaissance
-	const suiteqlCount = byCategory.SUITEQL_SYNTAX || 0;
+	const suiteqlCount =
+		(byCategory.SUITEQL_SYNTAX || 0) +
+		(byCategory.SUITEQL_UNKNOWN_COLUMN || 0) +
+		(byCategory.SUITEQL_UNKNOWN_TABLE || 0) +
+		(byCategory.SUITEQL_GUARD_BLOCKED || 0) +
+		(byCategory.SUITEQL_PERMISSION || 0);
+
 	if (suiteqlCount > 0) {
 		const sampleSqlErr = entries.find(
-			(e) => e.category === "SUITEQL_SYNTAX",
+			(e) =>
+				e.category === "SUITEQL_SYNTAX" ||
+				e.category === "SUITEQL_UNKNOWN_COLUMN" ||
+				e.category === "SUITEQL_UNKNOWN_TABLE" ||
+				e.category === "SUITEQL_GUARD_BLOCKED",
 		)?.errorMessage;
 
 		recs.push({
 			area: "SUITEQL_TEMPLATES",
 			priority: "HIGH",
 			title: "沉淀 SuiteQL 黄金查询模板与预检机制 (Golden Templates)",
-			description: `SuiteQL 执行出现 ${suiteqlCount} 次语法或表/字段不存在报错。典型错误：${sampleSqlErr || "字段或表名无效"}。`,
+			description: `SuiteQL 执行出现 ${suiteqlCount} 次报错（包含列名/表名无效、守卫拦截等）。典型错误：${sampleSqlErr || "字段或表名无效"}。`,
 			actionableFix:
 				"在 `src/utils/suiteqlTemplates.ts` 中补强常用业务查询模板；提醒 AI 在执行未知表的查询前，优先调用 `netsuite_get_metadata` 完成表结构勘探（Reconnaissance First）。",
 			affectedTools: ["netsuite_run_suiteql", "netsuite_get_metadata"],
@@ -244,10 +254,16 @@ export function generateRecommendations(
 	}
 
 	// 3. Permission denied
-	const permCount = byCategory.PERMISSION_DENIED || 0;
+	const permCount =
+		(byCategory.PERMISSION_DENIED || 0) + (byCategory.SUITEQL_PERMISSION || 0);
 	if (permCount > 0) {
 		const permTools = Object.keys(byTool).filter((t) =>
-			entries.some((e) => e.tool === t && e.category === "PERMISSION_DENIED"),
+			entries.some(
+				(e) =>
+					e.tool === t &&
+					(e.category === "PERMISSION_DENIED" ||
+						e.category === "SUITEQL_PERMISSION"),
+			),
 		);
 
 		recs.push({
@@ -262,18 +278,41 @@ export function generateRecommendations(
 		});
 	}
 
-	// 4. Production write block
-	const prodBlockCount = byCategory.PRODUCTION_WRITE_BLOCKED || 0;
-	if (prodBlockCount > 0) {
+	// 4. Production write block anomaly & valid blocks
+	const sandboxProdBlocks = entries.filter(
+		(e) =>
+			e.category === "PRODUCTION_WRITE_BLOCKED" && e.environment === "Sandbox",
+	);
+	if (sandboxProdBlocks.length > 0) {
+		const affectedAccts = Array.from(
+			new Set(sandboxProdBlocks.map((e) => e.accountId).filter(Boolean)),
+		);
+		recs.push({
+			area: "ENVIRONMENT_CONFIG",
+			priority: "HIGH",
+			title: "🔴 门禁异常告警：沙箱环境误触发生产写入拦截 (Gate Defect Alert)",
+			description: `检测到 ${sandboxProdBlocks.length} 次在沙箱环境 (${affectedAccts.join(", ")}) 下触发了生产写拦截。`,
+			actionableFix:
+				"沙箱账号包含 '_sb' 或 'tstdrv'，本应允许写操作。请排查工具分发上下文中 isSandbox 的环境推断逻辑，确保上下文正确识别沙箱标识。",
+			affectedTools: Array.from(new Set(sandboxProdBlocks.map((e) => e.tool))),
+			occurrences: sandboxProdBlocks.length,
+		});
+	}
+
+	const trueProdBlocks = entries.filter(
+		(e) =>
+			e.category === "PRODUCTION_WRITE_BLOCKED" && e.environment !== "Sandbox",
+	);
+	if (trueProdBlocks.length > 0) {
 		recs.push({
 			area: "ENVIRONMENT_CONFIG",
 			priority: "MEDIUM",
-			title: "核实运行环境与双门禁拦截 (Environment Isolation)",
-			description: `检测到 ${prodBlockCount} 次生产环境写入拦截（双门禁防护已成功阻断危险操作）。`,
+			title: "生产环境写入拦截生效 (Production Dual-Gate Active)",
+			description: `检测到 ${trueProdBlocks.length} 次生产环境写入拦截（双门禁防护已成功阻断危险操作）。`,
 			actionableFix:
-				"确认当前账号 ID 是否正确。如需执行创建或修改记录，请切换至含有 `_SB` 或 `TSTDRV` 的 Sandbox 沙箱环境。",
-			affectedTools: ["netsuite_create_record", "netsuite_update_record"],
-			occurrences: prodBlockCount,
+				"确认当前账号 ID 是否正确。如需执行创建或修改记录，请切换至含有 `_sb` 或 `tstdrv` 的 Sandbox 沙箱环境。",
+			affectedTools: Array.from(new Set(trueProdBlocks.map((e) => e.tool))),
+			occurrences: trueProdBlocks.length,
 		});
 	}
 
@@ -331,6 +370,10 @@ export async function summarizeToolErrors(
 	const byTool: Record<string, number> = {};
 	const byCategory: Record<ToolErrorCategory, number> = {
 		ARGUMENT_VALIDATION: 0,
+		SUITEQL_GUARD_BLOCKED: 0,
+		SUITEQL_UNKNOWN_COLUMN: 0,
+		SUITEQL_UNKNOWN_TABLE: 0,
+		SUITEQL_PERMISSION: 0,
 		SUITEQL_SYNTAX: 0,
 		PERMISSION_DENIED: 0,
 		RECORD_NOT_FOUND: 0,
@@ -351,11 +394,17 @@ export async function summarizeToolErrors(
 		const env = entry.environment || "Unknown";
 		byEnvironment[env] = (byEnvironment[env] || 0) + 1;
 
-		// Clean and group message pattern (truncate at 120 chars to cluster)
-		const cleanMsg = (entry.errorMessage || "Unknown error")
-			.replace(/[\n\r]+/g, " ")
-			.slice(0, 120)
-			.trim();
+		// Group by diagnosed root cause when available, or clean message snippet
+		const diagMatch = /🔍 \*\*Diagnostic:\*\* ([^\n]+)/.exec(
+			entry.errorMessage || "",
+		);
+		const cleanMsg =
+			entry.diagnosis ||
+			diagMatch?.[1]?.trim() ||
+			(entry.errorMessage || "Unknown error")
+				.replace(/[\n\r]+/g, " ")
+				.slice(0, 120)
+				.trim();
 		if (!messageCounts[cleanMsg]) {
 			messageCounts[cleanMsg] = {
 				count: 0,
@@ -461,7 +510,11 @@ export function formatSummaryToMarkdown(
 	lines.push("| :--- | :--- | :--- |");
 	const categoryLabels: Record<ToolErrorCategory, string> = {
 		ARGUMENT_VALIDATION: "入参校验失败（Zod 拦截 / 参数格式有误）",
-		SUITEQL_SYNTAX: "SuiteQL 语法错误 / 表名列名不存在",
+		SUITEQL_GUARD_BLOCKED: "SuiteQL 本地守卫拦截（全表扫描 / 慢查询防护）",
+		SUITEQL_UNKNOWN_COLUMN: "SuiteQL 未知字段 / 未暴露字段 (NOT_EXPOSED)",
+		SUITEQL_UNKNOWN_TABLE: "SuiteQL 未知表名 / 不支持的元数据表",
+		SUITEQL_PERMISSION: "SuiteQL 标准表角色权限缺失",
+		SUITEQL_SYNTAX: "SuiteQL SQL 语法或方言错误",
 		PERMISSION_DENIED: "NetSuite 权限不足（403 / INSUFFICIENT_PERMISSION）",
 		RECORD_NOT_FOUND: "记录不存在 / 无效 ID",
 		PRODUCTION_WRITE_BLOCKED: "双门禁阻断（严禁生产环境写入记录）",

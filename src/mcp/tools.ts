@@ -15,7 +15,6 @@ import { type JsonSchemaProperty, mapFieldType } from "../utils/metadata.js";
 import { ConcurrencyLimiter, retryWithBackoff } from "../utils/resilience.js";
 import {
 	assertValidSuiteQL,
-	ensureSuiteQLPagination,
 	extractReferencedTables,
 } from "../utils/suiteqlGuard.js";
 
@@ -122,14 +121,8 @@ export class NetSuiteMCPTools {
 			toolName === "ns_runCustomSuiteQL" ||
 			toolName === "netsuite_run_suiteql"
 		) {
-			let sqlQuery = String(parameters.sqlQuery || "");
+			const sqlQuery = String(parameters.sqlQuery || "");
 			assertValidSuiteQL(sqlQuery);
-			const rowLimit =
-				typeof parameters.limit === "number" && parameters.limit > 0
-					? parameters.limit
-					: 100;
-			sqlQuery = ensureSuiteQLPagination(sqlQuery, rowLimit);
-			parameters.sqlQuery = sqlQuery;
 		}
 
 		if (toolName === "ns_getRecord" || toolName === "ns_updateRecord") {
@@ -302,8 +295,8 @@ export class NetSuiteMCPTools {
 		try {
 			logger.info("Fetching custom record mappings from NetSuite...");
 			const rawResult = await this.executeTool("ns_runCustomSuiteQL", {
-				sqlQuery: "SELECT internalId, scriptId FROM customrecordtype",
-				limit: 1000,
+				sqlQuery:
+					"SELECT internalId, scriptId FROM customrecordtype FETCH FIRST 1000 ROWS ONLY",
 			});
 
 			const records = this.extractDataArray(rawResult);

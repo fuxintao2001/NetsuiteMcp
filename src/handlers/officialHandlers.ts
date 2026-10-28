@@ -58,8 +58,8 @@ const MUTATION_TOOLS = new Set(["ns_createrecord", "ns_updaterecord"]);
 export async function handleCallOfficial(
 	args: CallOfficialArgs,
 	mcpTools: NetSuiteMCPTools,
-	_accountId?: string | undefined,
-	isSandbox = true,
+	accountId?: string | undefined,
+	isSandbox = false,
 ): Promise<CallToolResult> {
 	const action = args.action || "call";
 	const toolName = args.toolName?.trim();
@@ -219,13 +219,18 @@ export async function handleCallOfficial(
 	}
 
 	// Dual-Gate Production Write Protection
-	const isMutation = MUTATION_TOOLS.has(toolName.toLowerCase());
+	const normalizedToolName = toolName.toLowerCase();
+	const isMutation =
+		MUTATION_TOOLS.has(normalizedToolName) ||
+		normalizedToolName.includes("createrecord") ||
+		normalizedToolName.includes("updaterecord") ||
+		normalizedToolName.includes("deleterecord");
 	if (isMutation && !isSandbox) {
 		logger.warn(
-			`[Production Safety Guard] Blocked call to official mutation tool '${toolName}' in Production`,
+			`[Production Safety Guard] Blocked call to official mutation tool '${toolName}' in Production (${accountId || "unknown"})`,
 		);
 		return textResult(
-			`❌ [Production Safety Violation] Executing official mutation tool '${toolName}' is strictly prohibited in Production environments. Write operations are restricted exclusively to Sandbox environments.`,
+			`❌ [Production Safety Violation] Executing official mutation tool '${toolName}' is strictly prohibited in Production environments (${accountId || "unknown"}). Write operations are restricted exclusively to Sandbox environments.`,
 			true,
 		);
 	}

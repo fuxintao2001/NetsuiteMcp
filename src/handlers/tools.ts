@@ -15,6 +15,10 @@ import {
 } from "../utils/errors.js";
 import { createLogger } from "../utils/logger.js";
 import {
+	formatProbeResults,
+	probeSuspiciousColumns,
+} from "../utils/suiteqlColumnProbe.js";
+import {
 	formatSuiteQLErrorResponse,
 	splitSuiteQLStatements,
 } from "../utils/suiteqlGuard.js";
@@ -191,7 +195,6 @@ const TOOL_DEFINITIONS: AnyToolDefinition[] = [
 				sqlQueries,
 				templateId,
 				templateParams,
-				limit,
 				customRecordMappings,
 			} = args;
 
@@ -229,8 +232,15 @@ const TOOL_DEFINITIONS: AnyToolDefinition[] = [
 			const queriesToRun = [...queriesFromSingle, ...queriesFromArray];
 
 			if (queriesToRun.length === 0) {
+				const receivedKeys = Object.keys(
+					args as Record<string, unknown>,
+				).filter((k) => (args as Record<string, unknown>)[k] !== undefined);
+				const keysInfo =
+					receivedKeys.length > 0
+						? ` (received parameter keys: [${receivedKeys.join(", ")}])`
+						: "";
 				return textResult(
-					"❌ 'sqlQuery', 'sqlQueries', or 'templateId' parameter is required and cannot be empty.",
+					`❌ 'sqlQuery', 'sqlQueries', or 'templateId' parameter is required and cannot be empty${keysInfo}.`,
 					true,
 				);
 			}
@@ -284,9 +294,6 @@ const TOOL_DEFINITIONS: AnyToolDefinition[] = [
 							const queryParams: Record<string, unknown> = {
 								sqlQuery: queryStr,
 							};
-							if (limit !== undefined) {
-								queryParams.limit = limit;
-							}
 							if (resolvedMappings) {
 								queryParams.customRecordMappings = resolvedMappings;
 							}
@@ -307,11 +314,29 @@ const TOOL_DEFINITIONS: AnyToolDefinition[] = [
 							if (isPermissionError(errorMsg)) {
 								throw err;
 							}
+							let errorOutput = formatSuiteQLErrorResponse(errorMsg, queryStr);
+							if (
+								errorMsg.includes("unexpected SuiteScript error") &&
+								ctx.accountId
+							) {
+								try {
+									const probedIssues = await probeSuspiciousColumns(
+										queryStr,
+										ctx.accountId,
+										ctx.deps.mcpTools,
+									);
+									if (probedIssues.length > 0) {
+										errorOutput += formatProbeResults(probedIssues);
+									}
+								} catch {
+									// Probe is non-fatal
+								}
+							}
 							return {
 								index: index + 1,
 								query: queryStr,
 								success: false,
-								error: formatSuiteQLErrorResponse(errorMsg, queryStr),
+								error: errorOutput,
 							};
 						}
 					}),
@@ -356,9 +381,6 @@ const TOOL_DEFINITIONS: AnyToolDefinition[] = [
 			const queryParams: Record<string, unknown> = {
 				sqlQuery: queriesToRun[0],
 			};
-			if (limit !== undefined) {
-				queryParams.limit = limit;
-			}
 			if (resolvedMappings) {
 				queryParams.customRecordMappings = resolvedMappings;
 			}
@@ -558,6 +580,8 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
 						)
 						.map((c) => c.text)
 						.join("\n") || "Unknown error";
+				const diagMatch = /🔍 \*\*Diagnostic:\*\* ([^\n]+)/.exec(errorText);
+				const diagnosis = diagMatch?.[1]?.trim();
 				const category = classifyError(name, errorText);
 				recordToolError({
 					tool: name,
@@ -566,6 +590,7 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
 					durationMs: Date.now() - callStartTime,
 					category,
 					errorMessage: errorText,
+					diagnosis,
 					errorStack,
 					parameters: safeArgs,
 				});
@@ -589,6 +614,8 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
 
 			return res;
 		};
+
+		let detectedId: string | undefined;
 
 		try {
 			const tool = TOOL_MAP.get(name);
@@ -614,11 +641,10 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
 				}
 			}
 
-			// Dual-gate production write protection for sandbox-only mutation tools
-			let detectedId: string | undefined;
+			// Detect NetSuite account ID and Sandbox environment for mutation guards
 			let isSandbox = false;
 
-			if (tool.sandboxOnly) {
+			if (tool.sandboxOnly || tool.name === "netsuite_call_official") {
 				try {
 					detectedId =
 						(await oauthManager.getAccountId()) ||
@@ -628,7 +654,8 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
 				}
 				isSandbox = detectedId ? isSandboxAccount(detectedId) : false;
 
-				if (!isSandbox) {
+				// Dual-gate production write protection for sandbox-only mutation tools
+				if (tool.sandboxOnly && !isSandbox) {
 					return await recordErrorIfPresent(
 						textResult(
 							`⛔ [Production Safety Violation] Tool '${name}' is restricted strictly to Sandbox environments. Writing to Production via MCP mutation tools is physically prohibited.`,
@@ -683,10 +710,29 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
 			if (name === "netsuite_run_suiteql") {
 				const sqlQuery =
 					typeof safeArgs.sqlQuery === "string" ? safeArgs.sqlQuery : "";
-				return await recordErrorIfPresent(
-					textResult(formatSuiteQLErrorResponse(message, sqlQuery), true),
-					stack,
-				);
+				let errOutput = formatSuiteQLErrorResponse(message, sqlQuery);
+				const accId =
+					detectedId ||
+					(await oauthManager.getAccountId().catch(() => undefined));
+				if (
+					message.includes("unexpected SuiteScript error") &&
+					accId &&
+					sqlQuery
+				) {
+					try {
+						const issues = await probeSuspiciousColumns(
+							sqlQuery,
+							accId,
+							deps.mcpTools,
+						);
+						if (issues.length > 0) {
+							errOutput += formatProbeResults(issues);
+						}
+					} catch {
+						// Non-fatal
+					}
+				}
+				return await recordErrorIfPresent(textResult(errOutput, true), stack);
 			}
 
 			return await recordErrorIfPresent(

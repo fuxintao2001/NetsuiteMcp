@@ -36,6 +36,8 @@
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json",
     "logs:summary": "node --import tsx scripts/summarize-errors.ts",
     "logs:daily": "node --import tsx scripts/summarize-errors.ts --daily",
+    "logs:clean": "node scripts/clean-error-logs.js",
+    "push": "git push && npm run logs:clean",
     "check:safe": "node scripts/suitescript-safe-check.js",
     "check:upload": "node scripts/pre-upload-check.js"
   },

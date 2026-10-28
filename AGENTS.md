@@ -176,7 +176,7 @@ All SuiteQL queries executed through this server undergo static AST and regex va
 1. **Zero Implicit Dialect Rewriting**: The server never silently rewrites non-standard SQL dialects. Queries using bare MySQL/Postgres `LIMIT` or bare `OFFSET` are strictly rejected at runtime with remediation guidance to enforce Oracle NetSuite standard syntax.
 2. **Wildcard Projection Block**: `SELECT *` and `SELECT alias.*` are strictly blocked to prevent wide-table token explosion.
 3. **Mandatory `mainline` Filter Check**: Queries referencing `transactionline` must include `tl.mainline = 'F'` or `'T'` to prevent duplicate row and amount inflation.
-4. **Automatic Safe Pagination Guard**: Unpaginated queries automatically receive a safe ceiling (`FETCH FIRST 100 ROWS ONLY`).
+4. **Zero Implicit Query Rewriting & Situational Pagination**: The server executes SuiteQL queries transparently without automatic SQL rewriting or silent pagination injection, ensuring the AI model has full awareness and determinism over executed SQL statements. Pagination is never mandatory; AI models dynamically judge whether to include Oracle-compliant pagination (`FETCH FIRST N ROWS ONLY` or `ROWNUM <= N`) based on data volume, query nature (e.g., exploratory sampling vs. unique entity lookup/aggregations), and response payload requirements.
 5. **Slow-Query Hard Block (SAFE Pitfall 11)**: Joining `systemnote` with transactional tables (`JOIN systemnote`) is strictly blocked to prevent 45s+ full-table scan timeouts; use standalone `systemnote` queries or `netsuite_get_system_notes`.
 6. **Core Schema Invariant Remediation**:
    - Rejects `item.recordtype` ➔ directs to `itemtype` and `subtype`.

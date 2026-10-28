@@ -263,5 +263,37 @@ describe("NetSuiteMCPTools", () => {
 			);
 			expect(result).toEqual({ id: "123", companyname: "Test Customer" });
 		});
+
+		it("should pass sqlQuery verbatim to JSON-RPC without automatic pagination injection or rewriting", async () => {
+			vi.spyOn(cacheService, "get").mockResolvedValue(null);
+			const mockResult = { data: [{ id: "100" }] };
+			httpPostSpy.mockResolvedValueOnce({
+				data: {
+					result: mockResult,
+				},
+			});
+
+			const rawSql =
+				"SELECT id, companyname FROM customer WHERE isinactive = 'F'";
+			const result = await client.executeTool("ns_runCustomSuiteQL", {
+				sqlQuery: rawSql,
+			});
+
+			expect(result).toEqual(mockResult);
+			expect(httpPostSpy).toHaveBeenCalledTimes(1);
+			const requestPayload = httpPostSpy.mock.calls[0]?.[1] as {
+				method: string;
+				params: {
+					name: string;
+					arguments: { sqlQuery: string };
+				};
+			};
+			expect(requestPayload.method).toBe("tools/call");
+			expect(requestPayload.params.name).toBe("ns_runCustomSuiteQL");
+			expect(requestPayload.params.arguments.sqlQuery).toBe(rawSql);
+			expect(requestPayload.params.arguments.sqlQuery).not.toContain(
+				"FETCH FIRST",
+			);
+		});
 	});
 });

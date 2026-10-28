@@ -763,7 +763,7 @@ export class SuiteCloudRunnerService {
 	 * Build complete environment with dynamic JAVA_HOME and standard CLI paths
 	 */
 	resolveEnvironment(): NodeJS.ProcessEnv {
-		const env = { ...process.env };
+		const env: NodeJS.ProcessEnv = { ...process.env, CI: "true" };
 		let resolvedJavaHome = "";
 
 		if (process.env.JAVA_HOME && fs.existsSync(process.env.JAVA_HOME)) {
@@ -835,6 +835,27 @@ export class SuiteCloudRunnerService {
 	): string[] {
 		const combined = `${stderr}\n${stdout}`.toLowerCase();
 		const tips: string[] = [];
+
+		if (
+			combined.includes("module is not defined in es module scope") ||
+			combined.includes("suitecloud.config.js") ||
+			(combined.includes('type": "module"') && combined.includes("commonjs"))
+		) {
+			tips.push(
+				'📦 **配置文件 ESM 模块冲突**: `suitecloud.config.js` 必须为 CommonJS 格式。因为父级/项目 `package.json` 声明了 `"type": "module"`，Node.js 默认将其视为 ES 模块而报错。请将项目根目录下的 `suitecloud.config.js` 重命名为 `suitecloud.config.cjs`。',
+			);
+		}
+
+		if (
+			combined.includes("timed out") ||
+			combined.includes("timeout of 120000ms exceeded") ||
+			combined.includes("killed") ||
+			combined.includes("sigterm")
+		) {
+			tips.push(
+				"⏱️ **SuiteCloud CLI 执行超时 (120s)**: CLI 进程运行超过 120 秒被终止。常见原因：CLI 在等待交互式终端输入确认、网络连接超时或 NetSuite 部署锁争用。请在独立终端直接运行 `npx suitecloud file:upload --paths ...` 查看是否有交互提示。",
+			);
+		}
 
 		if (
 			combined.includes("missing_default_auth_id") ||

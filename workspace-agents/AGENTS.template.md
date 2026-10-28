@@ -122,7 +122,7 @@ The server registers 7 official MCP resource URIs. Read these resources via MCP 
    - **Only Permitted Sequential Boundary**:
      - Split across turns ONLY when a downstream call's required parameter (e.g., an unknown internal ID or unverified custom column name) must be extracted from an upstream call's output.
 3. **SuiteQL Guardrails & Zero-Transpile Standard**:
-   - Ensure all queries conform strictly to [SuiteQL Guardrails](file://{{PROJECT_PATH}}/.agents/rules/suiteql-guardrails.md) (No `SELECT *`, explicit `mainline = 'F'`, pagination via `FETCH FIRST N ROWS ONLY`, `ROWNUM <= N`, or Oracle-standard `OFFSET M ROWS FETCH NEXT N ROWS ONLY`, index driving filter).
+   - Ensure all queries conform strictly to [SuiteQL Guardrails](file://{{PROJECT_PATH}}/.agents/rules/suiteql-guardrails.md) (No `SELECT *`, explicit `mainline = 'F'`, situational pagination via `FETCH FIRST N ROWS ONLY` or `ROWNUM <= N` when needed, index driving filter).
    - The server performs **zero implicit rewriting** of queries. Queries with non-standard syntax (e.g., bare `LIMIT`) are strictly rejected at runtime with actionable remediation guidance.
 4. **Primary Query Mechanism**:
    - SuiteQL (`netsuite_run_suiteql`) is the authoritative and primary query mechanism for all business data retrieval.
@@ -134,7 +134,7 @@ The server registers 7 official MCP resource URIs. Read these resources via MCP 
 The server exposes 8 authoritative core tools (plus 2 sandbox mutation tools and 1 official gateway) with strict orthogonal boundaries (zero bloat, zero deprecated aliases):
 
 1. **Tool Execution Hierarchy & Parameter Contracts**:
-   - **SuiteQL Queries**: `netsuite_run_suiteql` (Direct 1-turn execution; accepts `sqlQuery` with optional semicolon `;` separation, batch `sqlQueries: [...]` array up to 10 concurrent queries via the 5-thread worker pool, safe row `limit` [default 100], `templateId`, `templateParams`, and `customRecordMappings`).
+   - **SuiteQL Queries**: `netsuite_run_suiteql` (Direct 1-turn execution; accepts `sqlQuery` with optional semicolon `;` separation, batch `sqlQueries: [...]` array up to 10 concurrent queries via the 5-thread worker pool, `templateId`, `templateParams`, and `customRecordMappings`).
    - **Schema Reconnaissance**: `netsuite_get_metadata` (Inspect single `table`, batch `tables: [...]` up to 10 tables concurrently in 1 turn, filter via `keyword`, with `source: "auto" | "offline" | "remote"` and automatic offline standard 272 catalog fallback).
    - **Record Fetch & Inspection**: `netsuite_get_record` (Inspect single `id` or batch `ids: [...]` up to 10 internal IDs or document numbers `tranid` concurrently in 1 turn; supports `includeSublists` [default true], `linesMode: "all" | "summary"`, `maxLines`, `lineFields`, and `format: "markdown" | "compact_json"`, automatically resolving natural keys, pruning null noise, and generating active Web UI links).
    - **Script Execution Logs**: `netsuite_get_script_logs` (Retrieve real-time execution logs from `ScriptNote` for single `scriptId` or batch `scriptIds: [...]` up to 10 scripts concurrently in 1 turn; auto-resolves deployed scripts via `recordType`; filters by `type: "DEBUG" | "AUDIT" | "ERROR" | "EMERGENCY"`, `dateFrom`/`dateTo`, `deploymentId`, `title`, `detail`, `keyword`, `limit` [default 50, max 200], and `format`).

@@ -1,5 +1,10 @@
 import { LRUCache } from "lru-cache";
 import pkg from "node-sql-parser";
+import { recordsReferenceService } from "./recordsReference.js";
+import {
+	findColumnHint,
+	getPseudoTableRemediation,
+} from "./suiteqlColumnHints.js";
 
 const { Parser } = pkg;
 const sqlParser = new Parser();
@@ -381,68 +386,6 @@ export function hasPaginationClause(sqlQuery: string): boolean {
 }
 
 /**
- * Strips trailing comments (-- ... or /* ... * /) and whitespace/semicolons from the end of a SQL query.
- */
-export function stripTrailingCommentsAndWhitespace(sql: string): string {
-	let result = sql.trim().replace(/;+$/, "").trim();
-	while (true) {
-		// Strip trailing block comment /* ... */
-		const blockMatch = result.match(/\/\*[\s\S]*?\*\/$/);
-		if (blockMatch) {
-			result = result.slice(0, -blockMatch[0].length).trim();
-			continue;
-		}
-		// Strip trailing line comment -- ... or # ...
-		// Ensure we don't accidentally match inside string literal
-		const { maskedSql } = maskStringLiterals(result);
-		const lineMatch = maskedSql.match(/(?:--|#)[^\r\n]*$/);
-		if (lineMatch) {
-			result = result.slice(0, -lineMatch[0].length).trim();
-			continue;
-		}
-		break;
-	}
-	return result.replace(/;+$/, "").trim();
-}
-
-/**
- * Ensures a SuiteQL query has pagination.
- * If missing:
- * - For UNION / compound queries: wraps safely in outer query `SELECT * FROM (...) WHERE ROWNUM <= N`
- * - For standard SELECT queries: appends `FETCH FIRST N ROWS ONLY`
- */
-export function ensureSuiteQLPagination(
-	sqlQuery: string,
-	defaultLimit = 100,
-): string {
-	const trimmed = stripTrailingCommentsAndWhitespace(sqlQuery);
-	if (hasPaginationClause(trimmed)) {
-		return trimmed;
-	}
-
-	const { maskedSql } = maskStringLiterals(trimmed);
-
-	// Try parsing AST with node-sql-parser
-	try {
-		const ast = sqlParser.astify(trimmed);
-		if (ast && typeof ast === "object") {
-			const astObj = ast as unknown as Record<string, unknown>;
-			// Check if it is a compound query (UNION, UNION ALL, INTERSECT, etc.)
-			if (astObj.set_op || astObj._next) {
-				return `SELECT * FROM (${trimmed}) WHERE ROWNUM <= ${defaultLimit}`;
-			}
-		}
-	} catch {
-		// Fallback to masked regex analysis if AST parsing encounters dialect specifics (e.g. BUILTIN.DF)
-		if (/\bUNION\b/i.test(maskedSql)) {
-			return `SELECT * FROM (${trimmed}) WHERE ROWNUM <= ${defaultLimit}`;
-		}
-	}
-
-	return `${trimmed} FETCH FIRST ${defaultLimit} ROWS ONLY`;
-}
-
-/**
  * Extracts SELECT projection expressions, respecting nested parenthesis depth
  * so that FROM keywords inside functions (e.g. EXTRACT(YEAR FROM date)) or subqueries
  * do not prematurely terminate the projection clause.
@@ -678,7 +621,14 @@ export function hasMainlineFilter(
 		return false;
 	}
 
-	// 3. Match strict mainline predicate:
+	// 3. Match direct single-line key lookup (uniquekey is globally unique per line across tenant)
+	const lineKeyLookup =
+		/\b(?:[a-zA-Z0-9_]+\.)?(?:uniquekey|lineuniquekey)\s*(?:=|\bIN\b)\s*(\d+|\()/i;
+	if (lineKeyLookup.test(searchScope)) {
+		return true;
+	}
+
+	// 4. Match strict mainline predicate:
 	// Requires matching quotes: (['"])[TF]\1 followed by non-identifier boundary (?![a-zA-Z0-9_])
 	// Also supports Yoda syntax: 'T' = tl.mainline
 	const standardMainline =
@@ -687,6 +637,91 @@ export function hasMainlineFilter(
 		/(['"])[TF]\1\s*(?:=|IS)\s*(?:[a-zA-Z0-9_]+\.)?mainline\b/i;
 
 	return standardMainline.test(searchScope) || yodaMainline.test(searchScope);
+}
+
+/**
+ * Detects duplicate projected column names or aliases within a SELECT projection list.
+ * e.g. "SELECT t.id, tl.id FROM ..." -> both have effective name 'id' without unique AS aliases.
+ */
+export function findDuplicateProjectionAlias(projectionStr: string): {
+	duplicate: string;
+	firstExpr: string;
+	secondExpr: string;
+} | null {
+	// Split top-level commas (depth 0 parentheses)
+	const items: string[] = [];
+	let depth = 0;
+	let start = 0;
+	for (let i = 0; i < projectionStr.length; i++) {
+		const ch = projectionStr[i];
+		if (ch === "(") depth++;
+		else if (ch === ")") {
+			if (depth > 0) depth--;
+		} else if (ch === "," && depth === 0) {
+			items.push(projectionStr.slice(start, i).trim());
+			start = i + 1;
+		}
+	}
+	if (start < projectionStr.length) {
+		const last = projectionStr.slice(start).trim();
+		if (last.length > 0) items.push(last);
+	}
+
+	const seen = new Map<string, string>(); // alias.toLowerCase() -> rawExpr
+
+	for (const rawItem of items) {
+		const item = rawItem.trim();
+		if (!item || item === "*" || item.endsWith(".*")) continue;
+
+		// Check for explicit "AS alias"
+		const asMatch = /\bAS\s+([a-zA-Z0-9_]+)$/i.exec(item);
+		if (asMatch?.[1]) {
+			const alias = asMatch[1].toLowerCase();
+			const existing = seen.get(alias);
+			if (existing) {
+				return {
+					duplicate: alias,
+					firstExpr: existing,
+					secondExpr: item,
+				};
+			}
+			seen.set(alias, item);
+			continue;
+		}
+
+		// Check for implicit column name: e.g. "tl.id", "t.tranid"
+		const simpleIdentMatch = /^[a-zA-Z0-9_]+\.([a-zA-Z0-9_]+)$/i.exec(item);
+		if (simpleIdentMatch?.[1]) {
+			const colName = simpleIdentMatch[1].toLowerCase();
+			const existing = seen.get(colName);
+			if (existing) {
+				return {
+					duplicate: colName,
+					firstExpr: existing,
+					secondExpr: item,
+				};
+			}
+			seen.set(colName, item);
+			continue;
+		}
+
+		// Bare identifier: e.g. "id"
+		const bareIdentMatch = /^[a-zA-Z0-9_]+$/i.exec(item);
+		if (bareIdentMatch?.[0]) {
+			const colName = bareIdentMatch[0].toLowerCase();
+			const existing = seen.get(colName);
+			if (existing) {
+				return {
+					duplicate: colName,
+					firstExpr: existing,
+					secondExpr: item,
+				};
+			}
+			seen.set(colName, item);
+		}
+	}
+
+	return null;
 }
 
 function validateSuiteQLInternal(sqlQuery: string): SuiteQLValidationResult {
@@ -737,6 +772,18 @@ function validateSuiteQLInternal(sqlQuery: string): SuiteQLValidationResult {
 			reason:
 				"SuiteQL query contains 'SELECT *' or wildcard projection (e.g. 'table.*'). Explicitly specify each required column name to optimize performance, prevent governance timeouts, and avoid invalid field errors.",
 		};
+	}
+
+	// Check for duplicate column alias in SELECT projection
+	const projections = extractSelectProjections(cleanMaskedSql);
+	for (const proj of projections) {
+		const dup = findDuplicateProjectionAlias(proj);
+		if (dup) {
+			return {
+				valid: false,
+				reason: `Duplicate column alias '${dup.duplicate}' detected in SELECT projection ('${dup.firstExpr}', '${dup.secondExpr}'). NetSuite SuiteQL requires unique column aliases. Please assign explicit aliases using AS (e.g. '${dup.firstExpr} AS ${dup.duplicate}_1, ${dup.secondExpr} AS ${dup.duplicate}_2').`,
+			};
+		}
 	}
 
 	// Check for MySQL/Postgres-style LIMIT (bare, parenthesized, parameterized, named bind, user variable, or keyword)
@@ -791,15 +838,6 @@ function validateSuiteQLInternal(sqlQuery: string): SuiteQLValidationResult {
 			valid: false,
 			reason:
 				"Non-Oracle aggregation function detected ('GROUP_CONCAT()'). In Oracle NetSuite SuiteQL, use 'LISTAGG(column, \", \") WITHIN GROUP (ORDER BY ...)' instead.",
-		};
-	}
-
-	// Dialect Linter 4: Subquery in FROM or JOIN clause (Derived Tables / Inline Views)
-	if (/\b(?:FROM|JOIN)\s*\(\s*SELECT\b/i.test(withoutTrailingSemicolon)) {
-		return {
-			valid: false,
-			reason:
-				"Derived tables / subqueries in FROM or JOIN clauses ('FROM (SELECT ...)') are strictly unsupported by Oracle NetSuite SuiteQL. Please rewrite the query using a Common Table Expression (CTE: `WITH cte_name AS (SELECT ...) SELECT ... FROM cte_name`) or flatten into direct joins.",
 		};
 	}
 
@@ -1116,7 +1154,7 @@ export interface SuiteQLErrorDiagnosis {
 	summary: string;
 	rootCause: string;
 	officialGuidance: string;
-	suggestedFix?: string;
+	suggestedFix?: string | undefined;
 	selfHealingAction: string;
 }
 
@@ -1140,12 +1178,13 @@ export function diagnoseSuiteQLError(
 			isDiagnosed: true,
 			summary: "Preceding Syntax/Column Error (The False 'near: FETCH' Trap)",
 			rootCause:
-				"NetSuite SuiteQL fully supports 'FETCH FIRST N ROWS ONLY'. The parser encountered an invalid column name, missing comma, or unbalanced expression immediately before the FETCH clause and derailed onto the FETCH token.",
+				"NetSuite SuiteQL fully supports 'FETCH FIRST N ROWS ONLY', but masks column errors behind the FETCH token when an unknown column name, typo, or syntax error precedes it.",
 			officialGuidance:
-				"DO NOT remove 'FETCH FIRST' or convert it to MySQL 'LIMIT' (which is completely invalid in NetSuite). Inspect the column list or WHERE clause immediately before 'FETCH'. You can test individual columns or use 'WHERE ROWNUM <= N' to locate the offending column.",
-			suggestedFix: "SELECT id, tranid FROM transaction WHERE ROWNUM <= 10",
+				"DO NOT remove 'FETCH FIRST' or convert it to MySQL 'LIMIT' (which is completely invalid in NetSuite). The error is almost always caused by an invalid column name preceding FETCH. To reveal the exact column error, replace 'FETCH FIRST N ROWS ONLY' with a top-N subquery wrapper: 'SELECT * FROM (SELECT ...) WHERE ROWNUM <= N'.",
+			suggestedFix:
+				"SELECT * FROM (SELECT id, tranid FROM transaction) WHERE ROWNUM <= 10",
 			selfHealingAction:
-				"Keep Oracle-standard pagination. Check the column list and WHERE condition directly preceding the FETCH clause for typos or missing commas.",
+				"Keep Oracle-standard pagination. Check the column list and WHERE condition directly preceding the FETCH clause for typos or missing commas. Wrap query in 'SELECT * FROM (...) WHERE ROWNUM <= N' to obtain the exact invalid identifier from NetSuite.",
 		};
 	}
 
@@ -1223,7 +1262,7 @@ export function diagnoseSuiteQLError(
 				isDiagnosed: true,
 				summary: "Unsupported Subquery in FROM/JOIN Clause (Derived Table)",
 				rootCause:
-					"NetSuite SuiteQL does not support derived tables or inline subqueries in the FROM or JOIN clause (e.g. 'FROM (SELECT ...)').",
+					"NetSuite SuiteQL rejected the inline view or derived table subquery in the FROM or JOIN clause.",
 				officialGuidance:
 					"Rewrite using a Common Table Expression (CTE): `WITH cte_name AS (SELECT ...) SELECT ... FROM cte_name` or flatten the query into direct joins.",
 				suggestedFix:
@@ -1237,26 +1276,26 @@ export function diagnoseSuiteQLError(
 				isDiagnosed: true,
 				summary: "Unsupported 'BUILTIN.DF()' in Grouped Query",
 				rootCause:
-					"NetSuite SuiteQL does not support applying 'BUILTIN.DF()' directly on grouped expressions in aggregate queries.",
+					"NetSuite SuiteQL rejects 'BUILTIN.DF()' directly in GROUP BY expressions. Placing functions in GROUP BY triggers 'Invalid or unsupported search'.",
 				officialGuidance:
-					"Query the underlying numeric ID in the grouped query, or wrap with a CTE (`WITH data AS (SELECT col, COUNT(*) AS cnt FROM ... GROUP BY col) SELECT BUILTIN.DF(col), cnt FROM data`).",
+					"Group by the underlying raw numeric ID or field in a Common Table Expression (CTE), and project 'BUILTIN.DF()' in the outer SELECT query.",
 				suggestedFix:
-					"WITH grp AS (SELECT status, COUNT(*) AS cnt FROM customrecord_xxx GROUP BY status) SELECT BUILTIN.DF(status), cnt FROM grp",
+					"WITH grp AS (SELECT status, COUNT(*) AS cnt FROM customrecord_xxx GROUP BY status) SELECT status, BUILTIN.DF(status) AS lbl, cnt FROM grp",
 				selfHealingAction:
-					"Remove BUILTIN.DF from the GROUP BY query or wrap the aggregation in a CTE.",
+					"Wrap aggregation in a CTE: group by raw ID, then apply BUILTIN.DF() in the outer query.",
 			};
 		}
 		return {
 			isDiagnosed: true,
 			summary: "Invalid or Unsupported Search Specification",
 			rootCause:
-				"NetSuite SuiteQL rejected the query structure (typically caused by FROM subqueries, unsupported window functions, or unsupported functions in GROUP BY clauses).",
+				"NetSuite SuiteQL rejected the query structure (typically caused by unsupported window functions, unsupported subquery placements, or unsupported expressions in GROUP BY clauses).",
 			officialGuidance:
-				"Ensure queries follow Oracle NetSuite SuiteQL standards: avoid derived tables in FROM, avoid unsupported functions in GROUP BY, and verify valid column references via netsuite_get_metadata.",
+				"Ensure queries follow Oracle NetSuite SuiteQL standards: avoid inline JOIN subqueries, ensure functions in SELECT appear in GROUP BY, and verify valid column references via netsuite_get_metadata.",
 			suggestedFix:
-				"Inspect referenced tables using netsuite_get_metadata, eliminate nested FROM subqueries, and simplify GROUP BY expressions.",
+				"Inspect referenced tables using netsuite_get_metadata, simplify GROUP BY expressions, or wrap complex logic in CTEs (`WITH ...`).",
 			selfHealingAction:
-				"1. Flatten FROM subqueries into CTEs (`WITH ...`). 2. Verify column names with netsuite_get_metadata.",
+				"1. Flatten nested subqueries into CTEs (`WITH ...`). 2. Verify column names with netsuite_get_metadata.",
 		};
 	}
 
@@ -1327,14 +1366,66 @@ export function diagnoseSuiteQLError(
 		};
 	}
 
+	// 2a. Field NOT_EXPOSED to SuiteQL error
 	if (
-		/record ['"]?([a-zA-Z0-9_]+)['"]? was not found/i.test(err) ||
+		/Field\s+['"]?([a-zA-Z0-9_]+)['"]?\s+for\s+record\s+['"]?([a-zA-Z0-9_]+)['"]?\s+was\s+not\s+found/i.test(
+			err,
+		) &&
+		/NOT_EXPOSED/i.test(err)
+	) {
+		const match =
+			/Field\s+['"]?([a-zA-Z0-9_]+)['"]?\s+for\s+record\s+['"]?([a-zA-Z0-9_]+)['"]?\s+was\s+not\s+found/i.exec(
+				err,
+			);
+		const fieldName = match?.[1] || "unknown";
+		const recordName = match?.[2] || "unknown";
+		const hint = findColumnHint(recordName, fieldName);
+
+		return {
+			isDiagnosed: true,
+			summary: `Field Not Exposed to SuiteQL: '${recordName}.${fieldName}'`,
+			rootCause: `Field '${fieldName}' exists on record '${recordName}', but is NOT_EXPOSED to NetSuite's SuiteQL search channel.`,
+			officialGuidance: hint
+				? hint.description
+				: `Field '${fieldName}' cannot be queried directly via SuiteQL on record '${recordName}'. Use alternative exposed fields or inspect record with netsuite_get_record.`,
+			suggestedFix: hint?.fix || undefined,
+			selfHealingAction: hint
+				? `Replace '${fieldName}' with '${hint.fix}'.`
+				: `Remove '${fieldName}' from query projection or inspect available fields using netsuite_get_metadata.`,
+		};
+	}
+
+	if (
+		(!/Field\s+['"]?[a-zA-Z0-9_]+['"]?\s+for\s+record/i.test(err) &&
+			/record ['"]?([a-zA-Z0-9_]+)['"]? was not found/i.test(err)) ||
 		/invalid search type: ([a-zA-Z0-9_]+)/i.test(err)
 	) {
 		const match =
 			/record ['"]?([a-zA-Z0-9_]+)['"]? was not found/i.exec(err) ||
 			/invalid search type: ([a-zA-Z0-9_]+)/i.exec(err);
 		const tableName = match?.[1] || "unknown";
+
+		const pseudoAdvice = getPseudoTableRemediation(tableName);
+		if (pseudoAdvice) {
+			return {
+				isDiagnosed: true,
+				summary: `SuiteQL Does Not Support Metadata Table '${tableName}'`,
+				rootCause: `Table '${tableName}' does not exist as a SuiteQL queryable table. Schema and field metadata cannot be queried with SQL pseudo-catalog tables in NetSuite.`,
+				officialGuidance: pseudoAdvice,
+				selfHealingAction: `Call netsuite_get_metadata({ table: 'target_record', source: 'remote' }) instead of querying '${tableName}'.`,
+			};
+		}
+
+		const standardDef = recordsReferenceService.getRecordDefinition(tableName);
+		if (standardDef?.found) {
+			return {
+				isDiagnosed: true,
+				summary: `Permission Denied for Standard Table '${tableName}' (Reported as 'not found')`,
+				rootCause: `Table '${tableName}' is a standard NetSuite record type (${standardDef.totalFields} fields in catalog), but NetSuite returns 'Record was not found' when the active user/integration role lacks permission to access it.`,
+				officialGuidance: `Standard table '${tableName}' exists in NetSuite. Ask your NetSuite Administrator to grant permissions (e.g. LIST_${tableName.toUpperCase()} or ADMI_${tableName.toUpperCase()}) to the integration role. Do not attempt to query invalid table aliases.`,
+				selfHealingAction: `HALT: Role lacks permission to query standard table '${tableName}'. Request permission grant from NetSuite Administrator.`,
+			};
+		}
 
 		return {
 			isDiagnosed: true,
@@ -1354,12 +1445,23 @@ export function diagnoseSuiteQLError(
 		const tableContext =
 			tables.length > 0 ? ` on table(s): ${tables.join(", ")}` : "";
 
+		let hint: ReturnType<typeof findColumnHint>;
+		for (const table of tables) {
+			hint = findColumnHint(table, colName);
+			if (hint) break;
+		}
+
 		return {
 			isDiagnosed: true,
 			summary: `Unknown Field/Column: '${colName}'`,
 			rootCause: `Column '${colName}' was not recognized${tableContext}. Field names are case-sensitive and vary by custom fields (custbody_*, custrecord_*, custitem_*).`,
-			officialGuidance: `Inspect the exact column definitions for ${tables[0] || "the table"} using netsuite_get_metadata.`,
-			selfHealingAction: `Call netsuite_get_metadata({ table: '${tables[0] || "tableName"}' }) to verify valid column names.`,
+			officialGuidance: hint
+				? hint.description
+				: `Inspect the exact column definitions for ${tables[0] || "the table"} using netsuite_get_metadata.`,
+			suggestedFix: hint?.fix || undefined,
+			selfHealingAction: hint
+				? `Replace '${colName}' with '${hint.fix}'.`
+				: `Call netsuite_get_metadata({ table: '${tables[0] || "tableName"}' }) to verify valid column names.`,
 		};
 	}
 

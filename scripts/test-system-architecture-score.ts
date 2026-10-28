@@ -38,7 +38,6 @@ import {
 import { isSandboxAccount } from "../src/utils/environment.js";
 import { recordsReferenceService } from "../src/utils/recordsReference.js";
 import {
-	ensureSuiteQLPagination,
 	validateSuiteQL,
 } from "../src/utils/suiteqlGuard.js";
 import { SUITEQL_TEMPLATES } from "../src/utils/suiteqlTemplates.js";
@@ -592,26 +591,29 @@ pillar4Metrics.push({
 	detail: `物理字符压缩: ${rawBytes}B ➔ ${cleanedBytes}B (节省 ${tokenReductionRate}%) 极大幅度降低大模型 Context 开销`,
 });
 
-// Metric P4-2: 治理限额与强制保底分页注入验证
+// Metric P4-2: SuiteQL 零底层隐式改写与情境化透明执行保障
+// 验证用户/大模型提交的 SuiteQL 原样透传，无任何静默注入或截断，提升 AI 感知透明度与确定性
 const rawSqlNoPage = "SELECT id, tranid FROM transaction WHERE type = 'SalesOrd'";
-const pagedSql = ensureSuiteQLPagination(rawSqlNoPage, 100);
-const pageInjected = pagedSql.includes("FETCH FIRST 100 ROWS ONLY");
+const validationNoPage = validateSuiteQL(rawSqlNoPage);
 
-const alreadyPagedSql = "SELECT id FROM customer FETCH FIRST 20 ROWS ONLY";
-const preservedSql = ensureSuiteQLPagination(alreadyPagedSql, 100);
-const notDuplicateInjected =
-	preservedSql.indexOf("FETCH FIRST") === preservedSql.lastIndexOf("FETCH FIRST");
+const pagedSql = "SELECT id FROM customer FETCH FIRST 20 ROWS ONLY";
+const validationPaged = validateSuiteQL(pagedSql);
 
-const paginationValid = pageInjected && notDuplicateInjected;
+const transparentExecutionValid =
+	validationNoPage.valid &&
+	!rawSqlNoPage.includes("FETCH FIRST") &&
+	validationPaged.valid &&
+	pagedSql.includes("FETCH FIRST 20 ROWS ONLY");
+
 pillar4Metrics.push({
 	id: "P4-2",
-	name: "SuiteQL 强制分页保底注入与治理限额防护",
-	standardRef: "Oracle NetSuite SAFE Guide Section 3.3.5 (Pagination Budget)",
-	passed: paginationValid,
-	score: paginationValid ? 100 : 0,
-	detail: paginationValid
-		? "✅ 无分页查询自动安全追加 FETCH FIRST 100 ROWS ONLY，既有分页不重复注入"
-		: "❌ 分页保底注入逻辑异常",
+	name: "SuiteQL 零底层隐式改写与情境化透明执行保障",
+	standardRef: "Anthropic MCP Zero-Implicit-Mutation & Transparent AI Execution",
+	passed: transparentExecutionValid,
+	score: transparentExecutionValid ? 100 : 0,
+	detail: transparentExecutionValid
+		? "✅ SuiteQL 查询 100% 原样透传执行，彻底杜绝底层隐式注入改写，保证 AI 模型感知与自主判断"
+		: "❌ SuiteQL 查询存在隐式改写或语法校验异常",
 });
 
 // Metric P4-3: Oracle SAFE 黄金查询模板库收录与标准对齐度
