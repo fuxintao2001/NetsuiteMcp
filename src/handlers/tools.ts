@@ -19,6 +19,7 @@ import {
 	probeSuspiciousColumns,
 } from "../utils/suiteqlColumnProbe.js";
 import {
+	assertValidSuiteQL,
 	formatSuiteQLErrorResponse,
 	splitSuiteQLStatements,
 } from "../utils/suiteqlGuard.js";
@@ -278,6 +279,17 @@ const TOOL_DEFINITIONS: AnyToolDefinition[] = [
 						},
 					),
 				);
+			}
+
+			// Pre-flight static security & syntax validation (fail-fast in 0ms, zero network cost, zero implicit rewriting)
+			for (const queryStr of queriesToRun) {
+				try {
+					assertValidSuiteQL(queryStr);
+				} catch (valErr: unknown) {
+					const reason =
+						valErr instanceof Error ? valErr.message : String(valErr);
+					return textResult(reason, true);
+				}
 			}
 
 			// Parallel multi-query execution
@@ -709,7 +721,12 @@ export function registerToolHandlers(deps: ToolHandlerDeps): void {
 
 			if (name === "netsuite_run_suiteql") {
 				const sqlQuery =
-					typeof safeArgs.sqlQuery === "string" ? safeArgs.sqlQuery : "";
+					typeof safeArgs.sqlQuery === "string"
+						? safeArgs.sqlQuery
+						: Array.isArray(safeArgs.sqlQueries) &&
+								typeof safeArgs.sqlQueries[0] === "string"
+							? safeArgs.sqlQueries[0]
+							: "";
 				let errOutput = formatSuiteQLErrorResponse(message, sqlQuery);
 				const accId =
 					detectedId ||

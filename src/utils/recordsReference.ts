@@ -1693,13 +1693,23 @@ class RecordsReferenceService {
 				const lowerKey = key.toLowerCase();
 				if (this.recordsCache.has(lowerKey)) continue;
 
-				const fields: RecordFieldMeta[] = (val.fields || []).map((f) => ({
+				let fields: RecordFieldMeta[] = (val.fields || []).map((f) => ({
 					internalId: f.internalId,
 					label: f.label || f.internalId,
 					type: f.type || "string",
 					required: f.required === "true" || f.required === true,
 					help: f.help || "",
 				}));
+
+				if (fields.length === 0) {
+					if (TRANSACTION_TYPES_LIST.includes(lowerKey)) {
+						fields = COMMON_TRANSACTION_FIELDS;
+					} else if (lowerKey.includes("item") || lowerKey === "bom") {
+						fields = COMMON_ITEM_FIELDS;
+					} else {
+						fields = COMMON_ENTITY_FIELDS;
+					}
+				}
 
 				let sublists: RecordSublistMeta[] = (val.sublists || []).map(
 					(s: { name?: string; internalId?: string; label?: string }) => ({

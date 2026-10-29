@@ -1,6 +1,9 @@
 import { LRUCache } from "lru-cache";
 import pkg from "node-sql-parser";
-import { recordsReferenceService } from "./recordsReference.js";
+import {
+	type RecordFieldMeta,
+	recordsReferenceService,
+} from "./recordsReference.js";
 import {
 	findColumnHint,
 	getPseudoTableRemediation,
@@ -1155,6 +1158,21 @@ function validateSuiteQLInternal(sqlQuery: string): SuiteQLValidationResult {
 		};
 	}
 
+	// Anti-Pattern 10: BUILTIN.DF() in Grouped Query without CTE (Oracle NetSuite dialect syntax violation)
+	if (
+		/\bBUILTIN\.DF\s*\(/i.test(cleanMaskedSql) &&
+		/\bGROUP\s+BY\b/i.test(cleanMaskedSql)
+	) {
+		const hasWithClause = /^\s*WITH\b/i.test(cleanMaskedSql);
+		if (!hasWithClause) {
+			return {
+				valid: false,
+				reason:
+					"Unsupported 'BUILTIN.DF()' in Grouped Query: NetSuite Oracle SuiteQL rejects calling 'BUILTIN.DF()' directly inside queries containing a GROUP BY clause, triggering 'Search error occurred: Invalid or unsupported search'. Please rewrite your query using a Common Table Expression (CTE): perform aggregation and GROUP BY on raw IDs inside the CTE, and apply BUILTIN.DF() in the outer SELECT projection (e.g. `WITH grp AS (SELECT id, COUNT(*) FROM ... GROUP BY id) SELECT id, BUILTIN.DF(id) FROM grp`).",
+			};
+		}
+	}
+
 	return { valid: true, tables, hasPagination };
 }
 
@@ -1196,6 +1214,32 @@ export function assertValidSuiteQL(sqlQuery: string): void {
 			`❌ SuiteQL Security Guardrail Violation: ${result.reason}`,
 		);
 	}
+}
+
+/**
+ * Formats the full ground truth schema of a table into a clean Markdown table
+ * to inject into error diagnostics when an unknown column is referenced.
+ */
+export function formatTableSchemaContext(tableName: string): string {
+	const cleanTable = tableName.toLowerCase().trim();
+	const def = recordsReferenceService.getRecordDefinition(cleanTable);
+	if (!def?.found || def.fields.length === 0) {
+		return `\n\n💡 **Action**: Call \`netsuite_get_metadata({ table: '${tableName}' })\` to inspect available columns.`;
+	}
+
+	let out = `\n\n📋 **Complete Official Data Structure for table '${cleanTable}' (${def.fields.length} available fields):**\n\n`;
+	out += `| Column / Field ID | Type | Label | Required |\n|:---|:---|:---|:---|\n`;
+	for (const f of def.fields as RecordFieldMeta[]) {
+		out += `| \`${f.internalId}\` | ${f.type} | ${f.label} | ${f.required ? "Yes" : "No"} |\n`;
+	}
+	out += `\n💡 **NetSuite Custom Field Prefixes**: If your query targets a tenant custom field, ensure it begins with the correct prefix:\n`;
+	out += `- Transaction line: \`custcol_*\`\n`;
+	out += `- Transaction body: \`custbody_*\`\n`;
+	out += `- Item / Master: \`custitem_*\`\n`;
+	out += `- Custom record: \`custrecord_*\`\n`;
+	out += `\n🔄 **AI Action**: Review the complete schema above and rewrite your query explicitly using valid column names.\n`;
+
+	return out;
 }
 
 export interface SuiteQLErrorDiagnosis {
@@ -1512,13 +1556,19 @@ export function diagnoseSuiteQLError(
 			if (hint) break;
 		}
 
+		let officialGuidance = hint
+			? hint.description
+			: `Inspect the exact column definitions for ${tables[0] || "the table"} using netsuite_get_metadata.`;
+
+		if (tables[0]) {
+			officialGuidance += formatTableSchemaContext(tables[0]);
+		}
+
 		return {
 			isDiagnosed: true,
 			summary: `Unknown Field/Column: '${colName}'`,
 			rootCause: `Column '${colName}' was not recognized${tableContext}. Field names are case-sensitive and vary by custom fields (custbody_*, custrecord_*, custitem_*).`,
-			officialGuidance: hint
-				? hint.description
-				: `Inspect the exact column definitions for ${tables[0] || "the table"} using netsuite_get_metadata.`,
+			officialGuidance,
 			suggestedFix: hint?.fix || undefined,
 			selfHealingAction: hint
 				? `Replace '${colName}' with '${hint.fix}'.`

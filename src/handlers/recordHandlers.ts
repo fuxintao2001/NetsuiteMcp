@@ -1048,42 +1048,111 @@ function formatOfflineRecordMetadata(
 
 /**
  * Core helper to inspect metadata for a single NetSuite table or record type.
+ * Supports offline-first standard catalog, on-demand miss-driven remote refresh,
+ * and explicit refresh invalidation.
  */
 async function inspectSingleTableMetadata(
 	table: string,
 	keyword: string | undefined,
 	source: "auto" | "offline" | "remote",
 	mcpTools: NetSuiteMCPTools,
+	refresh = false,
 ): Promise<ToolResponse> {
 	const isCustom = table.toLowerCase().startsWith("customrecord");
 
-	// Case 2: Explicit offline source routing or auto standard reference check
-	if (source === "offline" || (source === "auto" && !isCustom)) {
+	// 1. Explicit offline routing
+	if (source === "offline") {
 		const def = recordsReferenceService.getRecordDefinition(table, keyword);
-		if (def?.found && def.fields.length > 0) {
-			return textResult(formatOfflineRecordMetadata(def, table));
+		if (def?.found) {
+			if (def.fields.length > 0) {
+				return textResult(formatOfflineRecordMetadata(def, table));
+			}
+			return textResult(
+				`## 📖 Official Records Definition: \`${table}\` (Offline Catalog)\n\n` +
+					`> ℹ️ **Notice**: Table \`${table}\` is a standard NetSuite table, but **no standard fields matched the keyword "${keyword}"**.\n\n` +
+					`> 📋 **Available Standard Fields (${def.totalFields})**: \`${def.fields
+						.map((f) => f.internalId)
+						.slice(0, 20)
+						.join("`, `")}\`...\n\n` +
+					`> 💡 **Tip**: If you are searching for tenant custom fields (\`custcol_*\`, \`custbody_*\`), query with \`source: 'remote'\` or omit source for miss-driven search.`,
+			);
 		}
 	}
 
-	// Case 3: Query remote SuiteQL / REST metadata
+	// 2. Auto mode (Offline-first, Miss-driven on demand)
+	if (source === "auto" && !isCustom && !refresh) {
+		const def = recordsReferenceService.getRecordDefinition(table, keyword);
+		if (def?.found) {
+			// If keyword is omitted, or keyword matched standard fields, return offline instantly (0ms)!
+			if (!keyword || def.fields.length > 0) {
+				return textResult(formatOfflineRecordMetadata(def, table));
+			}
+			// Keyword WAS provided, but def.fields.length === 0 (not found in standard fields!)
+			// This is the MISS TRIGGER: it may be a tenant custom field (custcol_*, custbody_*, etc.).
+			// We fall through to remote SuiteQL metadata below to query/refresh live tenant schema!
+		}
+	}
+
+	// 3. Query remote SuiteQL metadata (for custom records, explicit remote, refresh: true, or keyword miss trigger)
 	try {
+		if (refresh) {
+			await mcpTools.clearTableMetadataCache(table);
+		}
 		const sqlMeta = await mcpTools.executeTool("ns_getSuiteQLMetadata", {
 			recordType: table,
 		});
-		return textResult(formatMetadataToCompactMarkdown(sqlMeta, keyword));
+		const formatted = formatMetadataToCompactMarkdown(sqlMeta, keyword);
+
+		// If keyword was filtered and yielded no rows (only table header and divider returned):
+		const rows = formatted
+			.trim()
+			.split("\n")
+			.filter((line) => line.startsWith("|"));
+		if (keyword && rows.length <= 2) {
+			const fallbackDef = recordsReferenceService.getRecordDefinition(table);
+			let msg = `## 📖 Metadata Inspection: \`${table}\` (Real-Time Synchronized)\n\n`;
+			msg += `> ℹ️ **Notice**: Synchronized latest schema from NetSuite. **No standard or custom fields matched the keyword "${keyword}"** on table \`${table}\`.\n\n`;
+			if (fallbackDef?.found && fallbackDef.fields.length > 0) {
+				msg += `> 📋 **Available Standard Fields (${fallbackDef.totalFields})**: \`${fallbackDef.fields
+					.map((f) => f.internalId)
+					.slice(0, 20)
+					.join("`, `")}\`...\n\n`;
+			}
+			msg +=
+				`> 💡 **Tip**: NetSuite custom fields carry mandatory prefixes:\n` +
+				`- Transaction lines: \`custcol_*\`\n` +
+				`- Transaction body: \`custbody_*\`\n` +
+				`- Items / Master: \`custitem_*\`\n` +
+				`- Custom records: \`custrecord_*\``;
+			return textResult(msg);
+		}
+
+		return textResult(formatted);
 	} catch (err: unknown) {
 		const msg = err instanceof Error ? err.message : String(err);
 		if (isPermissionError(msg)) throw err;
 
-		// Fallback to offline catalog if remote fails (unless source is explicitly remote)
-		if (source !== "remote") {
-			const fallbackDef = recordsReferenceService.getRecordDefinition(
-				table,
-				keyword,
-			);
-			if (fallbackDef?.found && fallbackDef.fields.length > 0) {
-				return textResult(formatOfflineRecordMetadata(fallbackDef, table));
+		// Fallback to offline catalog if remote encounters an error
+		const fallbackDef = recordsReferenceService.getRecordDefinition(
+			table,
+			keyword,
+		);
+		if (fallbackDef?.found) {
+			if (fallbackDef.fields.length > 0) {
+				let out = `⚠️ Remote metadata sync encountered: ${msg}. Showing offline standard catalog:\n\n`;
+				out += formatOfflineRecordMetadata(fallbackDef, table);
+				return textResult(out);
 			}
+			return textResult(
+				`## 📖 Official Records Definition: \`${table}\` (Offline Catalog)\n\n` +
+					`> ⚠️ Remote metadata sync encountered: ${msg}\n` +
+					`> ℹ️ Table \`${table}\` is a standard NetSuite table, but **no standard fields matched the keyword "${keyword}"**.\n\n` +
+					`> 📋 **Available Standard Fields (${fallbackDef.totalFields})**: \`${fallbackDef.fields
+						.map((f) => f.internalId)
+						.slice(0, 20)
+						.join("`, `")}\`...`,
+				false,
+			);
 		}
 
 		return textResult(
@@ -1112,7 +1181,13 @@ export async function handleGetMetadata(
 		);
 	}
 
-	const { table, tables, keyword, source = "auto" } = parsed.data;
+	const {
+		table,
+		tables,
+		keyword,
+		source = "auto",
+		refresh = false,
+	} = parsed.data;
 
 	const targetTables: string[] = [];
 	if (Array.isArray(tables) && tables.length > 0) {
@@ -1138,6 +1213,7 @@ export async function handleGetMetadata(
 			keyword,
 			source,
 			mcpTools,
+			refresh,
 		);
 	}
 
@@ -1148,6 +1224,7 @@ export async function handleGetMetadata(
 				keyword,
 				source,
 				mcpTools,
+				refresh,
 			);
 			const firstContent = res.content?.[0];
 			const text =

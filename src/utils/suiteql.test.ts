@@ -20,6 +20,7 @@ import {
 	diagnoseSuiteQLError,
 	extractReferencedTables,
 	formatSuiteQLErrorResponse,
+	formatTableSchemaContext,
 	hasMainlineFilter,
 	hasPaginationClause,
 	maskStringLiterals,
@@ -889,6 +890,24 @@ describe("SuiteQL, Search & Query Utilities", () => {
 				);
 				expect(snRes.valid).toBe(false);
 				expect(snRes.reason).toContain("TO_CHAR(sn.date");
+
+				// Anti-Pattern 10: BUILTIN.DF in Grouped Query without CTE
+				const groupedBuiltinRes = validateSuiteQL(
+					"SELECT ir.id, BUILTIN.DF(ir.entity) as vendor, COUNT(ir.id) as cnt FROM transaction ir WHERE ir.id = 123 GROUP BY ir.id, ir.entity",
+				);
+				expect(groupedBuiltinRes.valid).toBe(false);
+				expect(groupedBuiltinRes.reason).toContain(
+					"Unsupported 'BUILTIN.DF()' in Grouped Query",
+				);
+				expect(groupedBuiltinRes.reason).toContain(
+					"Common Table Expression (CTE)",
+				);
+
+				// Valid CTE with BUILTIN.DF in outer projection
+				const cteBuiltinRes = validateSuiteQL(
+					"WITH grp AS (SELECT id, COUNT(*) as cnt FROM item GROUP BY id) SELECT id, BUILTIN.DF(id) as lbl FROM grp",
+				);
+				expect(cteBuiltinRes.valid).toBe(true);
 			});
 		});
 
@@ -947,6 +966,28 @@ describe("SuiteQL, Search & Query Utilities", () => {
 				expect(diag.selfHealingAction).toContain(
 					"Replace all occurrences of 'recordtype'",
 				);
+			});
+
+			it("should inject complete official table data structure on unknown column error", () => {
+				const diag = diagnoseSuiteQLError(
+					"Unknown identifier 'islotnumbered'",
+					"SELECT id, islotnumbered FROM item WHERE id = 100",
+				);
+				expect(diag.isDiagnosed).toBe(true);
+				expect(diag.summary).toContain("Unknown Field/Column: 'islotnumbered'");
+				expect(diag.officialGuidance).toContain(
+					"Complete Official Data Structure for table 'item'",
+				);
+				expect(diag.officialGuidance).toContain("itemtype");
+				expect(diag.officialGuidance).toContain("subtype");
+				expect(diag.officialGuidance).toContain("custitem_*");
+
+				// Direct formatTableSchemaContext test
+				const schemaContext = formatTableSchemaContext("item");
+				expect(schemaContext).toContain("| `id` |");
+				expect(schemaContext).toContain("| `itemid` |");
+				expect(schemaContext).toContain("| `itemtype` |");
+				expect(schemaContext).toContain("NetSuite Custom Field Prefixes");
 			});
 
 			it("should diagnose 'Record bin was not found' and guide to inventorybalance", () => {

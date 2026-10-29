@@ -971,6 +971,83 @@ describe("MCP Handler Wires", () => {
 				expect(res.content[0].text).toContain("customer");
 			});
 
+			it("should handle miss-driven metadata inspection for unknown keyword on standard table", async () => {
+				const callFn = registeredHandlers.get("tools/call");
+				mockMCPTools.executeTool.mockResolvedValueOnce({
+					metadata: {
+						type: "object",
+						properties: {
+							id: { type: "integer", title: "Internal ID" },
+							item: { type: "integer", title: "Item" },
+						},
+					},
+				});
+
+				const res = await callFn?.({
+					params: {
+						name: "netsuite_get_metadata",
+						arguments: { table: "transactionline", keyword: "accrual" },
+					},
+				});
+
+				expect(mockMCPTools.executeTool).toHaveBeenCalledWith(
+					"ns_getSuiteQLMetadata",
+					{
+						recordType: "transactionline",
+					},
+				);
+				expect(res.content[0].text).toContain("Real-Time Synchronized");
+				expect(res.content[0].text).toContain("accrual");
+			});
+
+			it("should reject grouped query with BUILTIN.DF via pre-flight AST validation without network call", async () => {
+				const callFn = registeredHandlers.get("tools/call");
+				mockMCPTools.executeTool.mockClear();
+
+				const res = await callFn?.({
+					params: {
+						name: "netsuite_run_suiteql",
+						arguments: {
+							sqlQuery:
+								"SELECT ir.id, BUILTIN.DF(ir.entity) as vendor, COUNT(ir.id) as cnt FROM transaction ir WHERE ir.id = 123 GROUP BY ir.id, ir.entity",
+						},
+					},
+				});
+
+				expect(mockMCPTools.executeTool).not.toHaveBeenCalled();
+				expect(res.isError).toBe(true);
+				expect(res.content[0].text).toContain(
+					"Unsupported 'BUILTIN.DF()' in Grouped Query",
+				);
+				expect(res.content[0].text).toContain("Common Table Expression (CTE)");
+			});
+
+			it("should diagnose error properly when sqlQueries array is used in netsuite_run_suiteql", async () => {
+				const callFn = registeredHandlers.get("tools/call");
+				mockMCPTools.executeTool.mockRejectedValueOnce(
+					new Error(
+						"Search error occurred: Unknown identifier 'islotnumbered'",
+					),
+				);
+
+				const res = await callFn?.({
+					params: {
+						name: "netsuite_run_suiteql",
+						arguments: {
+							sqlQueries: ["SELECT id, islotnumbered FROM item WHERE id = 100"],
+						},
+					},
+				});
+
+				expect(res.isError).toBe(true);
+				expect(res.content[0].text).toContain(
+					"Unknown Field/Column: 'islotnumbered'",
+				);
+				expect(res.content[0].text).toContain(
+					"Complete Official Data Structure for table 'item'",
+				);
+			});
+
 			it("should handle netsuite_get_record successfully with full line details by default", async () => {
 				const callFn = registeredHandlers.get("tools/call");
 				mockMCPTools.executeTool.mockResolvedValueOnce({

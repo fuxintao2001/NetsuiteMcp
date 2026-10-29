@@ -87,6 +87,13 @@ export const GetMetadataArgsSchema = z.object({
 		.describe(
 			"Metadata source: 'auto' (cached/remote), 'offline' (272 catalog), or 'remote' (live NetSuite API).",
 		),
+	refresh: z
+		.boolean()
+		.default(false)
+		.optional()
+		.describe(
+			"Optional flag to force-refresh cached tenant schema and custom fields directly from NetSuite.",
+		),
 });
 export type GetMetadataArgs = z.infer<typeof GetMetadataArgsSchema>;
 
@@ -501,7 +508,7 @@ export function createToolInputSchema<T extends z.ZodObject<z.ZodRawShape>>(
 export const RUN_SUITEQL_TOOL = {
 	name: "netsuite_run_suiteql",
 	description:
-		"Execute read-only Oracle NetSuite SuiteQL queries and return tabular results. Supports single-turn parallel batch execution via 'sqlQueries' array or ';' separated statements. Operates under transparent execution with zero implicit rewriting or stealth pagination injection. Enforces fail-fast static guardrails: explicit columns (no SELECT *), mandatory tl.mainline on transactionline, no cross-table JOIN systemnote, and Oracle dialect. If rejected, AI must explicitly rewrite the query. Refer to 'netsuite://guides/suiteql' and 'netsuite://queries/golden-templates' for official syntax and patterns.",
+		"Execute read-only Oracle NetSuite SuiteQL queries and return tabular results. Supports single-turn parallel batch execution via 'sqlQueries' array or ';' separated statements. Operates under transparent execution with zero implicit rewriting or stealth pagination injection. Enforces fail-fast static guardrails: explicit columns (no SELECT *), mandatory tl.mainline on transactionline, no cross-table JOIN systemnote, and Oracle dialect. CRITICAL CONSTRAINTS: 1) NEVER use BUILTIN.DF() directly in grouped queries alongside GROUP BY — use Common Table Expressions (WITH grp AS (SELECT ...) SELECT ..., BUILTIN.DF(...) FROM grp). 2) Inspect table schema via netsuite_get_metadata before querying unfamiliar tables. 3) Transaction lines require mainline = 'F' or 'T'. If rejected, AI must explicitly rewrite the query. Refer to 'netsuite://guides/suiteql' and 'netsuite://queries/golden-templates' for official syntax and patterns.",
 	inputSchema: createToolInputSchema(RunSuiteQLArgsSchema),
 };
 
