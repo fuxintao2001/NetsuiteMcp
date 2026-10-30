@@ -909,6 +909,28 @@ describe("SuiteQL, Search & Query Utilities", () => {
 				);
 				expect(cteBuiltinRes.valid).toBe(true);
 			});
+
+			it("should reject queries with undeclared table aliases and explain required JOIN", () => {
+				const res = validateSuiteQL(
+					"SELECT t.id, t.tranid FROM transaction t WHERE t.type = 'SalesOrd' AND tl_check.mainline = 'T'",
+				);
+				expect(res.valid).toBe(false);
+				expect(res.reason).toContain("Undeclared table alias 'tl_check'");
+				expect(res.reason).toContain("tl_check.mainline");
+				expect(res.reason).toContain("JOIN transactionline tl_check ON");
+			});
+
+			it("should permit queries with declared table aliases, CTEs, and system functions", () => {
+				const joinRes = validateSuiteQL(
+					"SELECT t.id, tl.item FROM transaction t JOIN transactionline tl ON t.id = tl.transaction WHERE t.type = 'SalesOrd' AND tl.mainline = 'T'",
+				);
+				expect(joinRes.valid).toBe(true);
+
+				const cteRes = validateSuiteQL(
+					"WITH summary AS (SELECT id, tranid FROM transaction WHERE type = 'SalesOrd') SELECT s.id, BUILTIN.DF(s.id) AS name FROM summary s",
+				);
+				expect(cteRes.valid).toBe(true);
+			});
 		});
 
 		describe("assertValidSuiteQL", () => {
@@ -1074,8 +1096,26 @@ describe("SuiteQL, Search & Query Utilities", () => {
 				expect(diag.isDiagnosed).toBe(true);
 				expect(diag.summary).toContain("False 'near: FETCH' Trap");
 				expect(diag.officialGuidance).toContain("DO NOT remove 'FETCH FIRST'");
+				expect(diag.officialGuidance).toContain("netsuite_get_metadata");
 				expect(diag.selfHealingAction).toContain(
 					"Keep Oracle-standard pagination",
+				);
+				expect(diag.selfHealingAction).toContain("netsuite_get_metadata");
+			});
+
+			it("should diagnose undeclared table alias errors reported by NetSuite and guide to join the table", () => {
+				const diag = diagnoseSuiteQLError(
+					"Search error occurred: Unknown identifier 'tl_check.mainline'. Available identifiers are: {t=transaction AS t}",
+					"SELECT t.id FROM transaction t WHERE tl_check.mainline = 'T'",
+				);
+				expect(diag.isDiagnosed).toBe(true);
+				expect(diag.summary).toContain("Undeclared Table Alias: 'tl_check'");
+				expect(diag.rootCause).toContain("tl_check.mainline");
+				expect(diag.rootCause).toContain(
+					"NetSuite only recognized: {t=transaction AS t}",
+				);
+				expect(diag.selfHealingAction).toContain(
+					"JOIN <table_name> tl_check ON",
 				);
 			});
 

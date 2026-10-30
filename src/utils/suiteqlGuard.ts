@@ -373,6 +373,123 @@ export function extractReferencedTables(
 }
 
 /**
+ * System and schema prefixes that are valid in qualified identifiers (e.g. BUILTIN.DF)
+ */
+export const SYSTEM_PREFIXES = new Set([
+	"builtin",
+	"standard",
+	"dbms_random",
+	"dbms_utility",
+	"sys",
+	"dual",
+	"netsuite",
+	"netsuite2",
+]);
+
+const RESERVED_ALIAS_WORDS = new Set([
+	"where",
+	"join",
+	"left",
+	"right",
+	"inner",
+	"outer",
+	"cross",
+	"natural",
+	"full",
+	"on",
+	"using",
+	"group",
+	"order",
+	"having",
+	"fetch",
+	"limit",
+	"offset",
+	"union",
+	"window",
+	"select",
+	"from",
+	"and",
+	"or",
+	"not",
+	"as",
+	"with",
+	"set",
+]);
+
+/**
+ * Extracts all declared table names, CTE names, and table aliases from a SuiteQL query.
+ */
+export function extractDeclaredAliases(
+	cleanMaskedSql: string,
+	literals?: string[],
+): Set<string> {
+	const declared = new Set<string>();
+
+	// 1. All physical tables and CTEs from extractReferencedTables are declared
+	const tables = extractReferencedTables(cleanMaskedSql, literals);
+	for (const t of tables) {
+		declared.add(t.toLowerCase());
+	}
+
+	// 2. CTE names: WITH cte AS (...), cte2 AS (...)
+	const withMatch = cleanMaskedSql.match(
+		/\bWITH\s+["']?([a-zA-Z0-9_]+)["']?\s+AS\s*\(/i,
+	);
+	if (withMatch?.[1]) {
+		declared.add(withMatch[1].toLowerCase());
+		const subsequentCteRegex = /,\s*["']?([a-zA-Z0-9_]+)["']?\s+AS\s*\(/gi;
+		let subMatch: RegExpExecArray | null;
+		while (true) {
+			subMatch = subsequentCteRegex.exec(cleanMaskedSql);
+			if (!subMatch) break;
+			if (subMatch[1]) declared.add(subMatch[1].toLowerCase());
+		}
+	}
+
+	// 3. FROM / JOIN aliases (including derived tables and subqueries)
+	// Matches:
+	//   FROM table alias
+	//   FROM table AS alias
+	//   JOIN table alias
+	//   JOIN table AS alias
+	//   ) alias
+	//   ) AS alias
+	const aliasPattern =
+		/(?:\b(?:FROM|JOIN)\s+(?:["']?[a-zA-Z0-9_]+["']?|\([^)]*\))\s+(?:AS\s+)?|\)\s+(?:AS\s+)?)(["']?[a-zA-Z0-9_]+["']?)/gi;
+	let match: RegExpExecArray | null;
+	while (true) {
+		match = aliasPattern.exec(cleanMaskedSql);
+		if (!match) break;
+		const rawAlias = match[1]?.replace(/^["']|["']$/g, "").toLowerCase();
+		if (
+			rawAlias &&
+			!RESERVED_ALIAS_WORDS.has(rawAlias) &&
+			!rawAlias.startsWith("__str_literal_")
+		) {
+			declared.add(rawAlias);
+		}
+	}
+
+	// 4. Comma-separated table aliases in FROM list: e.g. FROM table1 t1, table2 t2
+	const commaAliasPattern =
+		/,\s*(?:["']?[a-zA-Z0-9_]+["']?|\([^)]*\))\s+(?:AS\s+)?(["']?[a-zA-Z0-9_]+["']?)/gi;
+	while (true) {
+		match = commaAliasPattern.exec(cleanMaskedSql);
+		if (!match) break;
+		const rawAlias = match[1]?.replace(/^["']|["']$/g, "").toLowerCase();
+		if (
+			rawAlias &&
+			!RESERVED_ALIAS_WORDS.has(rawAlias) &&
+			!rawAlias.startsWith("__str_literal_")
+		) {
+			declared.add(rawAlias);
+		}
+	}
+
+	return declared;
+}
+
+/**
  * Checks if a SuiteQL query already has a pagination clause (ROWNUM or FETCH FIRST).
  */
 export function hasPaginationClause(sqlQuery: string): boolean {
@@ -934,6 +1051,34 @@ function validateSuiteQLInternal(sqlQuery: string): SuiteQLValidationResult {
 		}
 	}
 
+	// Anti-Pattern 2b: Undeclared Table Alias Guardrail
+	// Catches queries referencing aliases that were never declared in FROM/JOIN (e.g. tl_check.mainline when only 'FROM transaction t')
+	const declaredAliases = extractDeclaredAliases(cleanMaskedSql, literals);
+	if (declaredAliases.size > 0) {
+		const qualifiedRefRegex =
+			/\b([a-zA-Z_][a-zA-Z0-9_]*)\.([a-zA-Z_][a-zA-Z0-9_]*)\b/g;
+		let refMatch: RegExpExecArray | null;
+		while (true) {
+			refMatch = qualifiedRefRegex.exec(cleanMaskedSql);
+			if (!refMatch?.[1] || !refMatch[2]) break;
+			const alias = refMatch[1].toLowerCase();
+			const col = refMatch[2];
+
+			// Skip numeric prefixes, system prefixes (BUILTIN), or masked string literal tokens
+			if (SYSTEM_PREFIXES.has(alias) || alias.startsWith("__str_literal_")) {
+				continue;
+			}
+
+			if (!declaredAliases.has(alias)) {
+				const availableStr = Array.from(declaredAliases).join(", ");
+				return {
+					valid: false,
+					reason: `Undeclared table alias '${refMatch[1]}': Column '${refMatch[1]}.${col}' was referenced, but alias '${refMatch[1]}' is not defined in any FROM or JOIN clause. Available aliases in query: [${availableStr}]. NetSuite requires you to declare table aliases via JOIN (e.g. JOIN transactionline ${refMatch[1]} ON ...) before referencing them.`,
+				};
+			}
+		}
+	}
+
 	// Anti-Pattern 3: Suboptimal table 'inventoryitemlocations' for general inventory
 	if (
 		tables.includes("inventoryitemlocations") &&
@@ -1267,17 +1412,18 @@ export function diagnoseSuiteQLError(
 		/failed to parse sql[\s\S]*near:\s*FETCH/i.test(err) ||
 		/syntax error[\s\S]*near:\s*FETCH/i.test(err)
 	) {
+		const tables = sql ? extractReferencedTables(sql) : [];
+		const targetTable = tables[0] || "the queried table";
 		return {
 			isDiagnosed: true,
 			summary: "Preceding Syntax/Column Error (The False 'near: FETCH' Trap)",
 			rootCause:
 				"NetSuite SuiteQL fully supports 'FETCH FIRST N ROWS ONLY', but masks column errors behind the FETCH token when an unknown column name, typo, or syntax error precedes it.",
-			officialGuidance:
-				"DO NOT remove 'FETCH FIRST' or convert it to MySQL 'LIMIT' (which is completely invalid in NetSuite). The error is almost always caused by an invalid column name preceding FETCH. To reveal the exact column error, replace 'FETCH FIRST N ROWS ONLY' with a top-N subquery wrapper: 'SELECT * FROM (SELECT ...) WHERE ROWNUM <= N'.",
-			suggestedFix:
-				"SELECT * FROM (SELECT id, tranid FROM transaction) WHERE ROWNUM <= 10",
-			selfHealingAction:
-				"Keep Oracle-standard pagination. Check the column list and WHERE condition directly preceding the FETCH clause for typos or missing commas. Wrap query in 'SELECT * FROM (...) WHERE ROWNUM <= N' to obtain the exact invalid identifier from NetSuite.",
+			officialGuidance: `DO NOT remove 'FETCH FIRST' or convert it to MySQL 'LIMIT' (which is completely invalid in NetSuite). The error is almost always caused by an invalid or non-existent column preceding FETCH. Inspect valid column names using netsuite_get_metadata({ table: '${targetTable}' }).`,
+			suggestedFix: tables[0]
+				? `Call netsuite_get_metadata({ table: '${tables[0]}' }) to inspect authoritative fields, then verify the column projection.`
+				: "Check the column list and WHERE condition directly preceding the FETCH clause for typos or missing commas.",
+			selfHealingAction: `Keep Oracle-standard pagination. Call netsuite_get_metadata({ table: '${targetTable}' }) to verify column names and correct the invalid identifier directly preceding FETCH.`,
 		};
 	}
 
@@ -1539,6 +1685,33 @@ export function diagnoseSuiteQLError(
 			officialGuidance:
 				"Verify available tables by calling `netsuite_get_metadata({ keyword: '...' })` or check NetSuite Records Catalog.",
 			selfHealingAction: `Call netsuite_get_metadata({ keyword: '${tableName}' }) to discover the correct table name.`,
+		};
+	}
+
+	// 2c. Undeclared table alias: Unknown identifier 'alias.column'. Available identifiers are: {...}
+	if (
+		/Available identifiers are:\s*\{([^}]+)\}/i.test(err) ||
+		/unknown identifier ['"]?([a-zA-Z0-9_]+)\.([a-zA-Z0-9_]+)['"]?/i.test(err)
+	) {
+		const qualifiedMatch =
+			/unknown identifier ['"]?([a-zA-Z0-9_]+)\.([a-zA-Z0-9_]+)['"]?/i.exec(
+				err,
+			);
+		const availMatch = /Available identifiers are:\s*\{([^}]+)\}/i.exec(err);
+
+		const alias = qualifiedMatch?.[1] || "alias";
+		const column = qualifiedMatch?.[2] || "column";
+		const availableStr = availMatch?.[1]
+			? ` NetSuite only recognized: {${availMatch[1]}}`
+			: "";
+
+		return {
+			isDiagnosed: true,
+			summary: `Undeclared Table Alias: '${alias}'`,
+			rootCause: `Column '${alias}.${column}' was referenced, but table alias '${alias}' was not declared in any FROM or JOIN clause.${availableStr}`,
+			officialGuidance: `Every table alias must be explicitly declared in FROM or JOIN. If '${alias}' refers to a transaction line table (e.g. for mainline, item, quantity), add 'JOIN transactionline ${alias} ON ...' to your query, or remove the unjoined alias prefix.`,
+			suggestedFix: `JOIN transactionline ${alias} ON t.id = ${alias}.transaction`,
+			selfHealingAction: `Explicitly declare alias '${alias}' in a JOIN clause (e.g. JOIN <table_name> ${alias} ON ...) before referencing '${alias}.${column}'.`,
 		};
 	}
 
