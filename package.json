@@ -1,0 +1,80 @@
+{
+  "name": "@suiteinsider/netsuite-mcp",
+  "version": "1.0.0",
+  "description": "NetSuite MCP Antigravity Plugin with OAuth 2.0 PKCE authentication, SuiteQL AST guardrails, and bundled Oracle NetSuite skills.",
+  "type": "module",
+  "main": "dist/index.js",
+  "files": [
+    "dist",
+    "plugin.json",
+    "mcp_config.json",
+    "assets",
+    "rules",
+    "skills",
+    "README.md"
+  ],
+  "bin": {
+    "netsuite-mcp": "./dist/index.js"
+  },
+  "scripts": {
+    "start": "node dist/index.js",
+    "dev": "tsx src/index.ts",
+    "build": "rimraf dist && tsc",
+    "build:watch": "tsc -w --preserveWatchOutput",
+    "auth:all": "node --import tsx scripts/bulk-auth.ts",
+    "skills:check": "node scripts/check-skills-update.mjs",
+    "skills:update": "node scripts/check-skills-update.mjs --sync",
+    "lint": "biome check src",
+    "typecheck": "tsc --noEmit",
+    "cache:clean": "node scripts/clean-redis-cache.js"
+  },
+  "keywords": [
+    "netsuite",
+    "mcp",
+    "antigravity-plugin",
+    "model-context-protocol",
+    "oauth",
+    "pkce",
+    "netsuite-api",
+    "netsuite-integration",
+    "suiteql",
+    "erp-integration"
+  ],
+  "author": "SuiteInsider",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/dsvantien/netsuite-mcp-server.git"
+  },
+  "bugs": {
+    "url": "https://github.com/dsvantien/netsuite-mcp-server/issues"
+  },
+  "homepage": "https://github.com/dsvantien/netsuite-mcp-server#readme",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/server": "^2.0.0",
+    "acorn": "^8.19.0",
+    "axios": "^1.6.0",
+    "ioredis": "^5.11.1",
+    "lru-cache": "^11.5.3",
+    "node-sql-parser": "^5.4.0",
+    "open": "^11.0.4",
+    "p-limit": "^7.3.1",
+    "pino": "^10.3.1",
+    "proper-lockfile": "^4.1.2",
+    "redlock": "^5.0.0-beta.2",
+    "write-file-atomic": "^7.0.1",
+    "zod": "^4.4.3"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.5",
+    "@types/node": "^25.9.1",
+    "@types/proper-lockfile": "^4.1.4",
+    "@types/write-file-atomic": "^4.0.3",
+    "rimraf": "^6.1.3",
+    "tsx": "^4.22.4",
+    "typescript": "^6.0.3"
+  }
+}

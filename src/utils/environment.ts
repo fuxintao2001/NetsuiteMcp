@@ -1,0 +1,136 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const defaultProjectRoot = path.resolve(__dirname, "../../");
+
+// ---------------------------------------------------------------------------
+// Environment detection utilities
+// ---------------------------------------------------------------------------
+
+/**
+ * Determine whether a NetSuite account ID refers to a Sandbox / Test environment.
+ *
+ * Sandbox account IDs contain `_SB` or `-SB` (e.g. `5848789_SB1`, `9260916-sb1`).
+ * Test-drive accounts start with `TSTDRV`.
+ */
+export function isSandboxAccount(accountId: string): boolean {
+	const upper = accountId.toUpperCase();
+	return (
+		upper.includes("_SB") || upper.includes("-SB") || upper.startsWith("TSTDRV")
+	);
+}
+
+/**
+ * Format a NetSuite account ID for use as a DNS hostname segment.
+ *
+ * NetSuite account IDs are commonly written as `123456_SB1`, but hostnames
+ * require the sandbox separator as a hyphen and should be lowercase.
+ */
+export function formatNetSuiteAccountHost(accountId: string): string {
+	return accountId.trim().replace(/_/g, "-").toLowerCase();
+}
+
+/**
+ * Build the environment suffix that is appended to every tool description
+ * during tool discovery (`list_tools`).
+ *
+ * Example output: ` [Account: 5848789_SB1, Env: Sandbox]`
+ */
+export function buildEnvSuffix(accountId: string | null): string {
+	if (!accountId) return "";
+	const isSandbox = isSandboxAccount(accountId);
+	return ` [Account: ${accountId}, Env: ${isSandbox ? "Sandbox" : "Production"}]`;
+}
+
+/**
+ * Get the path to the NetSuite skills directory.
+ *
+ * Checks:
+ * 1. env.NETSUITE_SKILLS_PATH
+ * 2. If in a test environment, falls back to local `projectRoot/skills`.
+ * 3. The global config directory `~/.gemini/config/skills`
+ * 4. Fallback to local `projectRoot/skills`.
+ */
+export function getSkillsDir(projectRoot?: string): string {
+	if (process.env.NETSUITE_SKILLS_PATH) {
+		return process.env.NETSUITE_SKILLS_PATH;
+	}
+	if (process.env.NODE_ENV === "test" && projectRoot) {
+		return path.join(projectRoot, "skills");
+	}
+	const globalPath = path.join(os.homedir(), ".gemini", "config", "skills");
+	if (fs.existsSync(globalPath)) {
+		return globalPath;
+	}
+	const localRoot = projectRoot || defaultProjectRoot;
+	const localSkills = path.join(localRoot, "skills");
+	if (fs.existsSync(localSkills)) {
+		return localSkills;
+	}
+	if (projectRoot) {
+		return path.join(projectRoot, "skills");
+	}
+	return globalPath;
+}
+
+/**
+ * Get standard configuration directory for NetSuite MCP (~/.config/netsuite-mcp).
+ */
+export function getDefaultConfigDir(): string {
+	if (process.env.NETSUITE_CONFIG_DIR) {
+		return path.resolve(process.env.NETSUITE_CONFIG_DIR);
+	}
+	return path.join(os.homedir(), ".config", "netsuite-mcp");
+}
+
+/**
+ * Get standard sessions storage directory (~/.config/netsuite-mcp/sessions).
+ * Priority:
+ * 1. process.env.NETSUITE_SESSIONS_DIR
+ * 2. Standard config directory: ~/.config/netsuite-mcp/sessions (if exists)
+ * 3. Legacy Antigravity directory: ~/.gemini/antigravity/sessions (if exists)
+ * 4. Fallback: ~/.config/netsuite-mcp/sessions
+ */
+export function getDefaultSessionsDir(): string {
+	if (process.env.NETSUITE_SESSIONS_DIR) {
+		return path.resolve(process.env.NETSUITE_SESSIONS_DIR);
+	}
+	const standardConfigSessions = path.join(getDefaultConfigDir(), "sessions");
+	if (fs.existsSync(standardConfigSessions)) {
+		return standardConfigSessions;
+	}
+	const geminiSessions = path.join(
+		os.homedir(),
+		".gemini",
+		"antigravity",
+		"sessions",
+	);
+	if (fs.existsSync(geminiSessions)) {
+		return geminiSessions;
+	}
+	return standardConfigSessions;
+}
+
+/**
+ * Get standard logs directory for NetSuite MCP.
+ * Supports NETSUITE_LOG_DIR or NETSUITE_LOGS_DIR environment variable override,
+ * prioritizes local workspace project root `./logs` if present,
+ * and falls back to standard config directory (~/.config/netsuite-mcp/logs).
+ */
+export function getDefaultLogsDir(): string {
+	if (process.env.NETSUITE_LOG_DIR) {
+		return path.resolve(process.env.NETSUITE_LOG_DIR);
+	}
+	if (process.env.NETSUITE_LOGS_DIR) {
+		return path.resolve(process.env.NETSUITE_LOGS_DIR);
+	}
+	const localProjectLogs = path.join(defaultProjectRoot, "logs");
+	if (fs.existsSync(localProjectLogs)) {
+		return localProjectLogs;
+	}
+	return path.join(getDefaultConfigDir(), "logs");
+}

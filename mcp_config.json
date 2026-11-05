@@ -1,0 +1,68 @@
+{
+  "mcpServers": {
+    "netsuite_5848789": {
+      "command": "node",
+      "args": [
+        "/Users/fuxintao/WebstormProjects/NetsuiteMcp/dist/index.js"
+      ],
+      "env": {
+        "NETSUITE_ACCOUNT_ID": "5848789",
+        "NETSUITE_CLIENT_ID": "a1b2d7195f6788a9c751d8107c5b79d9c8f9ac07eccf3ad910b744002597001e",
+        "NETSUITE_SESSION_PATH": "/Users/fuxintao/.gemini/antigravity/sessions/5848789",
+        "OAUTH_CALLBACK_PORT": "8080",
+        "MCP_SESSION_SECRET": "63a5cbb54e1962c40b27e1f5fe0f7e517db2d3ef4da370c1f5ff1085568c32cb",
+        "NETSUITE_LOG_DIR": "/Users/fuxintao/WebstormProjects/NetsuiteMcp/logs"
+      },
+      "disabledTools": [
+        "ns_createRecord",
+        "ns_updateRecord"
+      ]
+    },
+    "netsuite_5848789_sb1": {
+      "command": "node",
+      "args": [
+        "/Users/fuxintao/WebstormProjects/NetsuiteMcp/dist/index.js"
+      ],
+      "env": {
+        "NETSUITE_ACCOUNT_ID": "5848789-sb1",
+        "NETSUITE_CLIENT_ID": "0236ead47a3111e43ef133494c12b55c7a83b4f0ad72cc7c2cb2787af636768a",
+        "NETSUITE_SESSION_PATH": "/Users/fuxintao/.gemini/antigravity/sessions/5848789_sb1",
+        "OAUTH_CALLBACK_PORT": "8081",
+        "MCP_SESSION_SECRET": "63a5cbb54e1962c40b27e1f5fe0f7e517db2d3ef4da370c1f5ff1085568c32cb",
+        "NETSUITE_LOG_DIR": "/Users/fuxintao/WebstormProjects/NetsuiteMcp/logs"
+      }
+    },
+    "netsuite_9260916": {
+      "command": "node",
+      "args": [
+        "/Users/fuxintao/WebstormProjects/NetsuiteMcp/dist/index.js"
+      ],
+      "env": {
+        "NETSUITE_ACCOUNT_ID": "9260916",
+        "NETSUITE_CLIENT_ID": "a464dbc30452bd27cde365f221ebe2b28e5fe2edb5d00880aef4f276dcbe6383",
+        "NETSUITE_SESSION_PATH": "/Users/fuxintao/.gemini/antigravity/sessions/9260916",
+        "OAUTH_CALLBACK_PORT": "8082",
+        "MCP_SESSION_SECRET": "63a5cbb54e1962c40b27e1f5fe0f7e517db2d3ef4da370c1f5ff1085568c32cb",
+        "NETSUITE_LOG_DIR": "/Users/fuxintao/WebstormProjects/NetsuiteMcp/logs"
+      },
+      "disabledTools": [
+        "ns_createRecord",
+        "ns_updateRecord"
+      ]
+    },
+    "netsuite_9260916_sb1": {
+      "command": "node",
+      "args": [
+        "/Users/fuxintao/WebstormProjects/NetsuiteMcp/dist/index.js"
+      ],
+      "env": {
+        "NETSUITE_ACCOUNT_ID": "9260916-sb1",
+        "NETSUITE_CLIENT_ID": "70eac686e969349ae3aa4f68de3495f7c091b3274dc9f13aa2fb2a5a4510e462",
+        "NETSUITE_SESSION_PATH": "/Users/fuxintao/.gemini/antigravity/sessions/9260916_sb1",
+        "OAUTH_CALLBACK_PORT": "8083",
+        "MCP_SESSION_SECRET": "63a5cbb54e1962c40b27e1f5fe0f7e517db2d3ef4da370c1f5ff1085568c32cb",
+        "NETSUITE_LOG_DIR": "/Users/fuxintao/WebstormProjects/NetsuiteMcp/logs"
+      }
+    }
+  }
+}

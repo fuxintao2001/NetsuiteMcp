@@ -1,0 +1,37 @@
+# Dependencies
+node_modules/
+
+# Antigravity project config (contains sensitive MCP credentials)
+.gemini/
+
+# Sessions (contains OAuth tokens)
+sessions/
+*.session.json
+
+# Environment variables
+.env
+.env.local
+
+# Logs
+logs/*.jsonl
+logs/*.log
+logs/reports/*.md
+*.log
+npm-debug.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Build outputs
+dist/
+
+# Scratch & artifacts
+scratch/
+artifact/

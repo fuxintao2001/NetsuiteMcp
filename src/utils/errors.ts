@@ -1,0 +1,394 @@
+/**
+ * NetSuite error response detail structure
+ */
+interface NetSuiteErrorDetail {
+	detail?: string;
+	message?: string;
+	"o:errorCode"?: string;
+	o_errorCode?: string;
+}
+
+/**
+ * Hard-stop instruction banner appended to permission error responses.
+ * Instructs the AI agent to stop all tasks immediately and avoid hallucinating data.
+ */
+export const PERMISSION_HARD_STOP_ADVICE = `
+🚫 ═══ PERMISSION DENIED — HARD STOP REQUIRED ═══
+🛑 CRITICAL AGENT INSTRUCTION (ZERO HALLUCINATION & IMMEDIATE HALT):
+  1. STOP ALL TASKS IMMEDIATELY: Do NOT retry, do NOT attempt self-healing loops, and do NOT test alternative queries. NetSuite permission restrictions cannot be bypassed or self-healed by rewriting queries.
+  2. STRICTLY ZERO HALLUCINATION: You MUST NOT guess, invent, simulate, or fabricate any record data, schema, or query results.
+  3. REPORT TO USER & WAIT: Clearly report the failed record type/table name and specify the required NetSuite permission configuration path (e.g., Setup > Users/Roles > Manage Roles > Permissions > Transactions/Lists/Setup with appropriate Access Level such as View/Full). Explicitly wait for the user to configure permissions before proceeding.
+📖 OFFICIAL PERMISSION MATRIX REFERENCE:
+  Consult the 'netsuite-sdf-roles-and-permissions' skill for authoritative permission IDs (ADMI_*, LIST_*, TRAN_*, REPO_*, REGT_*).`;
+
+/**
+ * Checks if an error code, message, or HTTP status indicates a NetSuite permission/authorization error.
+ */
+export function isPermissionError(
+	codeOrMessage?: string,
+	status?: number,
+): boolean {
+	if (status === 403) return true;
+	if (!codeOrMessage) return false;
+	const normalized = codeOrMessage.toLowerCase();
+	return (
+		normalized.includes("insufficient_permission") ||
+		normalized.includes("permission_violation") ||
+		normalized.includes("permission_denied") ||
+		normalized.includes("role_permission_error") ||
+		normalized.includes("permission") ||
+		normalized.includes("privilege") ||
+		normalized.includes("access denied") ||
+		normalized.includes("you do not have permission") ||
+		normalized.includes("you need the '") ||
+		normalized.includes("forbidden") ||
+		normalized.includes("unauthorized") ||
+		normalized.includes("does not have access") ||
+		normalized.includes("two-factor authentication") ||
+		normalized.includes("record 'scriptnote' was not found") ||
+		normalized.includes("record 'script' was not found")
+	);
+}
+
+/**
+ * Returns actionable advice for common NetSuite errors to assist the AI agent.
+ */
+function getActionableAdvice(code: string, message: string): string {
+	const normalizedCode = code.toUpperCase();
+	const normalizedMessage = message.toLowerCase();
+
+	// SuiteQL / SQL / Field name errors
+	if (
+		normalizedCode.includes("INVALID_SEARCH_SELECT_FIELD") ||
+		normalizedCode.includes("INVALID_SQL") ||
+		normalizedMessage.includes("sql") ||
+		normalizedMessage.includes("select") ||
+		normalizedMessage.includes("query") ||
+		normalizedMessage.includes("column")
+	) {
+		const fieldMatch =
+			/(?:field|column|identifier)\s*['"]?([a-zA-Z0-9_.]+)['"]?/i.exec(message);
+		const offendingField = fieldMatch?.[1] || null;
+
+		let advice = "\n💡 [Troubleshooting Advice - SuiteQL/SQL]:";
+		advice += "\n  👉 Code-level immediate self-healing steps:";
+		if (offendingField) {
+			advice += `\n  - Invalid Column '${offendingField}': Replace with standard NetSuite column (e.g. 'id' instead of 'internalid', 'tranid' instead of 'docnum').`;
+		} else {
+			advice +=
+				"\n  - Explicit Columns: Avoid \"SELECT *\". Specify explicit column names, e.g.:\n    SELECT id, tranid, trandate FROM transaction WHERE type = 'SalesOrd'";
+		}
+		advice += '\n  - Primary Key: Primary key is "id" (not "internalid").';
+		advice +=
+			"\n  - Dates: Format date parameters with TO_DATE('<value>', '<format>'), e.g. TO_DATE('2025-01-15', 'YYYY-MM-DD').";
+		advice +=
+			'\n  - Pagination: "LIMIT" is NOT supported. Use Oracle-standard "FETCH FIRST N ROWS ONLY", "WHERE ROWNUM <= N", or "OFFSET M ROWS FETCH NEXT N ROWS ONLY".';
+		advice +=
+			"\n  - Display Names: Use BUILTIN.DF(<field>) to extract foreign key text labels (e.g. BUILTIN.DF(entity), BUILTIN.DF(status)).";
+		advice +=
+			"\n  - Transaction Types: SalesOrd, CustInvc, PurchOrd, VendBill, Journal, CustCred, ItemRcpt, ItemShip, CashSale, CustPymt, VendPymt.";
+		advice +=
+			"\n  - Self-Healing Template: If table/column schema is uncertain, inspect live metadata directly:\n    netsuite_get_metadata({ table: '<target_table>' })";
+		return advice;
+	}
+
+	// Record Not Found / Invalid Record Type
+	if (
+		normalizedCode.includes("RECORD_NOT_FOUND") ||
+		normalizedCode.includes("INVALID_RECORD_TYPE") ||
+		normalizedMessage.includes("record type") ||
+		normalizedMessage.includes("does not exist")
+	) {
+		const recMatch = /(?:record\s*type|type)\s*['"]?([a-zA-Z0-9_]+)['"]?/i.exec(
+			message,
+		);
+		const recName = recMatch?.[1]?.toLowerCase() || "salesorder";
+
+		let advice = "\n💡 [Troubleshooting Advice - Record Type / ID]:";
+		advice += "\n  👉 Code-level immediate self-healing steps:";
+		advice += `\n  - Offline Standard Schema: Check standard field definitions and types:\n    netsuite_get_metadata({ table: '${recName}' })`;
+		advice += `\n  - Live Tenant Schema: For custom records or custom fields (custbody_*):\n    netsuite_get_metadata({ table: '${recName}' })`;
+		advice += `\n  - Verify record type is lowercase standard (e.g. 'salesorder', 'customer', 'item', 'invoice', 'customrecord_xxx').`;
+		return advice;
+	}
+
+	// Missing Required Argument
+	if (
+		normalizedCode.includes("SSS_MISSING_REQD_ARGUMENT") ||
+		normalizedCode.includes("MISSING_REQD_ARGUMENT") ||
+		normalizedMessage.includes("missing required")
+	) {
+		let advice = "\n💡 [Troubleshooting Advice - Missing Required Argument]:";
+		advice += "\n  👉 Code-level immediate self-healing steps:";
+		advice +=
+			"\n  - Offline Mandatory Check: Inspect mandatory/required fields for the record:\n    netsuite_get_metadata({ table: '<record_type>' })";
+		advice +=
+			"\n  - Ensure all non-nullable / mandatory fields (e.g. entity, subsidiary, trandate) are provided in the mutation payload.";
+		return advice;
+	}
+
+	// Invalid Field Value
+	if (
+		normalizedCode.includes("INVALID_FLD_VALUE") ||
+		normalizedMessage.includes("invalid field value")
+	) {
+		let advice = "\n💡 [Troubleshooting Advice - Invalid Field Value]:";
+		advice += "\n  👉 Code-level immediate self-healing steps:";
+		advice +=
+			"\n  - Select/List Fields: Pass internal numeric ID strings (e.g. { entity: '123' }) rather than display names (e.g. { entity: 'Acme Corp' }).";
+		advice +=
+			"\n  - Data Types: Check boolean/date/number formats against schema definitions using netsuite_get_metadata.";
+		return advice;
+	}
+
+	// Permissions / Access errors
+	if (isPermissionError(code, 0) || isPermissionError(message, 0)) {
+		let advice = PERMISSION_HARD_STOP_ADVICE;
+		const recMatch = /(?:record|type|table)\s*['"]?([a-zA-Z0-9_]+)['"]?/i.exec(
+			message,
+		);
+		if (recMatch?.[1]) {
+			advice += `\n\n🎯 Check required permissions for '${recMatch[1]}' in the 'netsuite-sdf-roles-and-permissions' skill.`;
+		}
+		return advice;
+	}
+
+	// Concurrency / Rate limit errors
+	if (
+		normalizedCode.includes("LIMIT_EXCEEDED") ||
+		normalizedCode.includes("CONCURRENT") ||
+		normalizedMessage.includes("concurrent") ||
+		normalizedMessage.includes("too many requests")
+	) {
+		let advice = "\n💡 [Troubleshooting Advice - Concurrency]:";
+		advice += "\n  - You have exceeded NetSuite's concurrent request limit.";
+		advice +=
+			"\n  👉 Code-level immediate self-healing steps:\n  - Recommended: Provide 'sqlQueries' array to netsuite_run_suiteql for concurrent execution.";
+		advice +=
+			"\n  - Otherwise, reduce request frequency or add exponential backoff.";
+		return advice;
+	}
+
+	return "";
+}
+
+/**
+ * Parses axios or generic error into a readable NetSuite-specific error message.
+ */
+export function parseNetSuiteError(error: unknown): Error {
+	if (!error) {
+		return new Error("Unknown error");
+	}
+
+	const err = error as {
+		message?: string;
+		response?: {
+			status?: number;
+			statusText?: string;
+			data?: unknown;
+		};
+	};
+
+	// Check if error has response data (AxiosError structure)
+	if (err.response?.data) {
+		const data = err.response.data;
+
+		// Detect HTML response and truncate to avoid raw HTML dump in context window
+		if (
+			typeof data === "string" &&
+			(data.includes("<!DOCTYPE html>") ||
+				data.includes("<html") ||
+				data.includes("<HTML"))
+		) {
+			const status = err.response.status || "Unknown";
+			const statusText = err.response.statusText || "";
+			const titleMatch = data.match(/<title>([\s\S]*?)<\/title>/i);
+			const title = titleMatch?.[1]?.trim() ?? "";
+			return new Error(
+				`HTTP ${status} (${statusText || "Error"}): Server returned HTML response instead of JSON. ${
+					title ? `Title: "${title}"` : ""
+				} (Truncated raw HTML)`,
+			);
+		}
+
+		// 1. Check for NetSuite o:errorDetails structure
+		if (data && typeof data === "object") {
+			const dataObj = data as Record<string, unknown>;
+			const errorDetails = dataObj["o:errorDetails"] || dataObj.o_errorDetails;
+			if (Array.isArray(errorDetails)) {
+				let advice = "";
+				const details = errorDetails
+					.map((d: NetSuiteErrorDetail) => {
+						const code = d["o:errorCode"] || d.o_errorCode || "ERROR";
+						const msg = d.detail || d.message || "";
+						const itemAdvice = getActionableAdvice(code, msg);
+						if (itemAdvice && !advice.includes(itemAdvice)) {
+							advice += itemAdvice;
+						}
+						return `[${code}] ${msg}`;
+					})
+					.filter(Boolean)
+					.join("; ");
+
+				if (details) {
+					return new Error(`NetSuite API Error: ${details}${advice}`);
+				}
+			}
+
+			// 2. Check for OAuth error structure (standard OAuth 2.0 error body)
+			if (dataObj.error) {
+				const errCode = String(dataObj.error);
+				const errDesc = String(
+					dataObj.error_description || dataObj.errorDescription || "",
+				);
+				let advice = getActionableAdvice(errCode, errDesc);
+				if (
+					errCode.toLowerCase().includes("invalid_grant") ||
+					errDesc.toLowerCase().includes("refresh token")
+				) {
+					advice +=
+						"\n💡 [Troubleshooting Advice - OAuth Session]:\n  👉 Immediate Action: Refresh token is invalid or expired. Call 'netsuite_auth' with { action: 'login' } to re-authenticate.";
+				}
+				return new Error(
+					`OAuth Error [${errCode}]: ${errDesc || "No details provided"}${advice}`,
+				);
+			}
+
+			// 3. Check if it's general JSON but doesn't match above, serialize it
+			try {
+				const advice = getActionableAdvice(
+					String(dataObj.code || ""),
+					String(dataObj.message || ""),
+				);
+				return new Error(
+					`NetSuite Error Response: ${JSON.stringify(data)}${advice}`,
+				);
+			} catch {
+				// Ignore serialization failure
+			}
+		}
+	}
+
+	// 4. Fallback if it is an Axios error with status but no response body details
+	if (err.response?.status) {
+		const status = err.response.status;
+		let advice = "";
+		if (status === 429) {
+			advice =
+				"\n💡 [Troubleshooting Advice - Concurrency]:\n  - You have exceeded NetSuite's concurrent request limit.\n  - Recommended: Provide `sqlQueries` array to `netsuite_run_suiteql` or reduce request frequency.";
+		} else if (status === 403) {
+			advice = PERMISSION_HARD_STOP_ADVICE;
+		}
+		return new Error(
+			`HTTP ${status}: ${err.message || "Request failed"}${advice}`,
+		);
+	}
+
+	// 5. Fallback to standard error or String representation
+	if (error instanceof Error) {
+		return error;
+	}
+
+	return new Error(String(error));
+}
+
+export function sanitizeMessage(message: string): string {
+	if (!message) return message;
+	let sanitized = message;
+
+	// Filter various credential patterns
+	sanitized = sanitized.replace(
+		/Bearer\s+[a-zA-Z0-9_\-.]+/gi,
+		"Bearer [REDACTED]",
+	);
+	sanitized = sanitized.replace(
+		/refresh_token=[a-zA-Z0-9_\-.]+/gi,
+		"refresh_token=[REDACTED]",
+	);
+	sanitized = sanitized.replace(
+		/client_id=[a-zA-Z0-9_\-.]+/gi,
+		"client_id=[REDACTED]",
+	);
+	sanitized = sanitized.replace(
+		/code_verifier=[a-zA-Z0-9_\-.]+/gi,
+		"code_verifier=[REDACTED]",
+	);
+	sanitized = sanitized.replace(
+		/"access_token"\s*:\s*"[^"]+"/gi,
+		'"access_token":"[REDACTED]"',
+	);
+	sanitized = sanitized.replace(
+		/"refresh_token"\s*:\s*"[^"]+"/gi,
+		'"refresh_token":"[REDACTED]"',
+	);
+
+	// Filter absolute working directory and user home paths
+	const cwd = process.cwd();
+	if (cwd) {
+		const registrySafe = cwd.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+		sanitized = sanitized.replace(
+			new RegExp(registrySafe, "gi"),
+			"<PROJECT_ROOT>",
+		);
+	}
+	sanitized = sanitized.replace(/\/Users\/[a-zA-Z0-9_\-.]+/gi, "/Users/<USER>");
+	sanitized = sanitized.replace(/\/home\/[a-zA-Z0-9_\-.]+/gi, "/home/<USER>");
+	sanitized = sanitized.replace(
+		/[a-zA-Z]:[/\\](?:Users|Documents and Settings)[/\\][^\s/\\]+/gi,
+		"<USER_HOME>",
+	);
+
+	return sanitized;
+}
+
+/**
+ * Sanitize error object: prioritize extracting detailed NetSuite API responses (e.g. INVALID_SQL details),
+ * then mask sensitive information, avoiding leaking sensitive Axios config credentials.
+ */
+export function sanitizeError(error: unknown): Error {
+	if (!error) return new Error("Unknown error");
+
+	// 1. Extract precise NetSuite internal error details to prevent losing details like INVALID_SQL
+	const parsedError = parseNetSuiteError(error);
+
+	// 2. Sanitize sensitive paths and credentials in error message
+	const cleanMsg = sanitizeMessage(parsedError.message);
+	const cleanErr = new Error(cleanMsg);
+
+	if (parsedError.stack) {
+		cleanErr.stack = sanitizeMessage(parsedError.stack);
+	}
+
+	return cleanErr;
+}
+
+/**
+ * Inspects any NetSuite tool response (raw object, MCP content wrapper, or JSON string)
+ * for embedded error fields. Throws an Error if an error is detected.
+ * If the error is a permission error, ensures it throws so the permission hard stop is triggered.
+ */
+export function assertNoMcpError(result: unknown): void {
+	if (!result || typeof result !== "object") return;
+
+	let payload: unknown = result;
+	const resObj = result as Record<string, unknown>;
+
+	if (Array.isArray(resObj.content)) {
+		const first = (resObj.content as Array<{ text?: string }>)[0];
+		if (first?.text && typeof first.text === "string") {
+			try {
+				payload = JSON.parse(first.text);
+			} catch {
+				// not JSON text
+			}
+		}
+	}
+
+	if (payload && typeof payload === "object") {
+		const pObj = payload as Record<string, unknown>;
+		if (pObj.isError === true || pObj.error || pObj.success === false) {
+			const errMsg = String(pObj.error || pObj.message || JSON.stringify(pObj));
+			throw new Error(errMsg);
+		}
+	}
+}

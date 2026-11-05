@@ -1,0 +1,354 @@
+/**
+ * Connection Resilience Utilities
+ * Provides proactive token refresh scheduling to maintain session validity.
+ */
+
+import { execFile } from "node:child_process";
+import { lookup } from "node:dns/promises";
+import https from "node:https";
+import { promisify } from "node:util";
+import pLimit, { type LimitFunction } from "p-limit";
+
+const execFileAsync = promisify(execFile);
+
+/**
+ * Parses pmset assertion output to verify if the user is actively using the system.
+ * Returns true if UserIsActive is 1 or more, false if 0, and true if indeterminate.
+ */
+export function parseUserActiveAssertion(output: string): boolean {
+	const match = output.match(/^\s*UserIsActive\s+(\d+)/m);
+	if (match?.[1]) {
+		return parseInt(match[1], 10) > 0;
+	}
+	return true;
+}
+
+/**
+ * Checks if the macOS user is currently active (display awake, lid open, not in DarkWake / sleep).
+ *
+ * Background:
+ * On macOS, when the lid is closed or the display sleeps, pmset assertions shows `UserIsActive 0`.
+ * macOS periodically enters "DarkWake" (Power Nap / maintenance wake for ~45 seconds).
+ * Trying to refresh NetSuite OAuth tokens during DarkWake or while sleep is imminent risks
+ * severed TLS sockets, which permanently burns the single-use refresh token.
+ *
+ * By skipping proactive token rotation when `isUserActiveOnMacOS() === false`, we protect
+ * the 7~30 day refresh token on disk. Token refresh will instead occur safely once the
+ * user wakes the Mac and actively issues requests.
+ *
+ * Returns `true` if not macOS, if in test mode, if UserIsActive >= 1, or if check fails.
+ */
+export async function isUserActiveOnMacOS(): Promise<boolean> {
+	if (process.platform !== "darwin") {
+		return true;
+	}
+	if (
+		process.env.NODE_ENV === "test" ||
+		process.env.VITEST ||
+		process.env.JEST_WORKER_ID
+	) {
+		return true;
+	}
+	try {
+		const { stdout } = await execFileAsync(
+			"/usr/bin/pmset",
+			["-g", "assertions"],
+			{
+				encoding: "utf-8",
+				timeout: 1500,
+				maxBuffer: 1024 * 64,
+			},
+		);
+		return parseUserActiveAssertion(stdout);
+	} catch {
+		return true;
+	}
+}
+
+import { createLogger } from "./logger.js";
+
+const logger = createLogger("resilience");
+
+/**
+ * Checks if basic network connectivity is up by resolving a well-known NetSuite API hostname.
+ * Prevents firing token requests right as macOS wakes up from sleep when Wi-Fi/TLS socket is not yet ready.
+ */
+export async function checkNetworkReadiness(
+	timeoutMs = 5000,
+): Promise<boolean> {
+	if (
+		process.env.NODE_ENV === "test" ||
+		process.env.VITEST ||
+		process.env.JEST_WORKER_ID
+	) {
+		return true;
+	}
+	try {
+		await lookup("system.netsuite.com");
+		return await new Promise<boolean>((resolve) => {
+			const req = https.request(
+				{
+					hostname: "system.netsuite.com",
+					port: 443,
+					method: "HEAD",
+					timeout: timeoutMs,
+				},
+				(res) => {
+					res.resume();
+					resolve(true);
+				},
+			);
+			req.on("error", () => resolve(false));
+			req.on("timeout", () => {
+				req.destroy();
+				resolve(false);
+			});
+			req.end();
+		});
+	} catch {
+		return false;
+	}
+}
+
+/** Minimal interface for the OAuthManager used by the scheduler */
+interface TokenRefreshTarget {
+	hasValidSession(): Promise<boolean>;
+	ensureValidToken(options?: { allowInteractive?: boolean }): Promise<string>;
+	forceRefreshToken(failedToken?: string): Promise<string>;
+	tryAutoRecover(maxRetries?: number): Promise<void>;
+	touchHeartbeat?(): Promise<void>;
+}
+
+/**
+ * Proactive Token Refresh Scheduler
+ *
+ * Periodically checks if the OAuth token is expiring soon and refreshes it
+ * proactively, preventing silent token expiration during idle periods.
+ *
+ * Design contract:
+ * - All exceptions are caught internally — nothing escapes to global scope.
+ * - The interval timer is unref'd so it never prevents process exit.
+ * - Calling start() multiple times is safe (idempotent).
+ * - When no valid session is found, attempts auto-recovery via refresh token.
+ */
+export class TokenRefreshScheduler {
+	private intervalId: ReturnType<typeof setInterval> | null = null;
+	private readonly target: TokenRefreshTarget;
+	private readonly intervalMs: number;
+	private readonly isUserActiveFn: () => Promise<boolean>;
+	private lastTickTime: number = Date.now();
+	private isTickRunning = false;
+
+	constructor(
+		target: TokenRefreshTarget,
+		intervalMs: number = parseInt(
+			process.env.MCP_TOKEN_CHECK_INTERVAL_MS || "60000",
+			10,
+		),
+		isUserActiveFn: () => Promise<boolean> = isUserActiveOnMacOS,
+	) {
+		this.target = target;
+		this.intervalMs = intervalMs;
+		this.isUserActiveFn = isUserActiveFn;
+	}
+
+	/** Start the periodic refresh check. Idempotent. */
+	start(): void {
+		if (this.intervalId) return;
+
+		this.lastTickTime = Date.now();
+		logger.info(
+			`[TokenRefreshScheduler] Started — checking every ${this.intervalMs / 1000}s`,
+		);
+
+		// Run first tick immediately to handle startup/wake state
+		void this.tick();
+
+		this.intervalId = setInterval(() => {
+			void this.tick();
+		}, this.intervalMs);
+
+		// Ensure the timer never prevents Node.js from exiting
+		if (
+			this.intervalId &&
+			typeof this.intervalId === "object" &&
+			"unref" in this.intervalId
+		) {
+			this.intervalId.unref();
+		}
+	}
+
+	/** Stop the periodic refresh check. */
+	stop(): void {
+		if (this.intervalId) {
+			clearInterval(this.intervalId);
+			this.intervalId = null;
+			logger.info("[TokenRefreshScheduler] Stopped");
+		}
+	}
+
+	/** Check if the scheduler is currently running. */
+	isRunning(): boolean {
+		return this.intervalId !== null;
+	}
+
+	/**
+	 * Single tick: check session validity and refresh token if needed.
+	 * If no valid session exists, attempts auto-recovery via refresh token.
+	 * ALL exceptions are caught here — nothing escapes to global scope.
+	 */
+	private async tick(): Promise<void> {
+		if (this.isTickRunning) return;
+		this.isTickRunning = true;
+
+		try {
+			// macOS Sleep / DarkWake guard:
+			// If macOS display is off / lid is closed / system in DarkWake, do not proactively rotate tokens.
+			// The refresh token has a 7~30 day lifetime; rotate on-demand when user wakes up and makes requests.
+			if (!(await this.isUserActiveFn())) {
+				return;
+			}
+
+			// Detect sleep/wake: if elapsed time >> intervalMs, system likely just woke up
+			const now = Date.now();
+			const elapsed = now - this.lastTickTime;
+			const wasSleeping = elapsed > this.intervalMs * 3;
+			this.lastTickTime = now;
+
+			if (wasSleeping) {
+				logger.info(
+					`[TokenRefreshScheduler] System woke from sleep (elapsed ${Math.round(elapsed / 1000)}s). Checking network readiness...`,
+				);
+
+				const isReady = await checkNetworkReadiness();
+				if (!isReady) {
+					logger.warn(
+						"[TokenRefreshScheduler] Network not ready after wake. Waiting 10s for Wi-Fi/TLS stabilization...",
+					);
+					await new Promise((resolve) => setTimeout(resolve, 10000));
+					if (!(await checkNetworkReadiness())) {
+						logger.warn(
+							"[TokenRefreshScheduler] Network still unreachable. Skipping this tick to protect refresh token.",
+						);
+						return;
+					}
+					logger.info("[TokenRefreshScheduler] Network stabilized!");
+				}
+
+				// Stagger multiple accounts waking up simultaneously with small random jitter (0-3s)
+				if (
+					process.env.NODE_ENV !== "test" &&
+					!process.env.VITEST &&
+					!process.env.JEST_WORKER_ID
+				) {
+					const jitterMs = Math.floor(Math.random() * 3000);
+					await new Promise((resolve) => setTimeout(resolve, jitterMs));
+				}
+			}
+
+			const hasSession = await this.target.hasValidSession();
+			if (!hasSession) {
+				logger.info(
+					"[TokenRefreshScheduler] No valid session. Attempting auto-recovery...",
+				);
+				await this.target.tryAutoRecover(1);
+				return;
+			}
+
+			// Normal path: ensureValidToken({ allowInteractive: false }) auto-refreshes if within window
+			await this.target.ensureValidToken({ allowInteractive: false });
+			await this.target.touchHeartbeat?.().catch(() => {});
+		} catch (error: unknown) {
+			// Intentionally swallowed. This is a background maintenance task.
+			// Logging is the only action — we never rethrow from a setInterval callback.
+			const message = error instanceof Error ? error.message : String(error);
+			logger.warn(
+				`[TokenRefreshScheduler] Proactive refresh failed: ${message}`,
+			);
+		} finally {
+			this.isTickRunning = false;
+		}
+	}
+}
+
+export interface RetryOptions {
+	retries?: number;
+	minTimeoutMs?: number;
+	maxTimeoutMs?: number;
+	factor?: number;
+	jitter?: boolean;
+}
+
+export async function retryWithBackoff<T>(
+	fn: () => Promise<T>,
+	isRetryable: (error: unknown) => boolean,
+	options: RetryOptions = {},
+	onRetry?: (error: unknown, attempt: number, delayMs: number) => void,
+): Promise<T> {
+	const retries = options.retries ?? 3;
+	const minTimeout = options.minTimeoutMs ?? 1000;
+	const maxTimeout = options.maxTimeoutMs ?? 15000;
+	const factor = options.factor ?? 2;
+	const jitter = options.jitter ?? true;
+
+	let attempt = 0;
+	while (true) {
+		try {
+			return await fn();
+		} catch (error) {
+			attempt++;
+			if (attempt > retries || !isRetryable(error)) {
+				throw error;
+			}
+
+			// Prioritize parsing and respecting NetSuite Retry-After header delay
+			let delay =
+				getRetryAfterMs(error) ?? minTimeout * factor ** (attempt - 1);
+			delay = Math.min(delay, maxTimeout);
+
+			if (jitter && !getRetryAfterMs(error)) {
+				// Apply random jitter to prevent synchronized retry storms (thundering herd)
+				delay = (Math.random() * 0.5 + 0.5) * delay;
+			}
+
+			if (onRetry) {
+				onRetry(error, attempt, delay);
+			}
+
+			await new Promise((resolve) => setTimeout(resolve, delay));
+		}
+	}
+}
+
+export function getRetryAfterMs(error: unknown): number | null {
+	const err = error as {
+		response?: { headers?: Record<string, string | undefined> };
+	};
+	const headers = err.response?.headers;
+	if (!headers) return null;
+	const retryAfter = headers["retry-after"] || headers["Retry-After"];
+	if (!retryAfter) return null;
+
+	const seconds = parseInt(retryAfter, 10);
+	if (!Number.isNaN(seconds)) return seconds * 1000;
+
+	const dateMs = Date.parse(retryAfter);
+	if (!Number.isNaN(dateMs)) return Math.max(0, dateMs - Date.now());
+
+	return null;
+}
+
+/**
+ * Global concurrency limiter using p-limit to restrict parallel requests below account ceilings.
+ */
+export class ConcurrencyLimiter {
+	private readonly limiter: LimitFunction;
+
+	constructor(maxConcurrency: number) {
+		this.limiter = pLimit(maxConcurrency);
+	}
+
+	async run<T>(fn: () => Promise<T>): Promise<T> {
+		return this.limiter(fn);
+	}
+}
