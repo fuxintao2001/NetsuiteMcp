@@ -2,7 +2,7 @@ import { execFile, execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { promisify } from "node:util";
+import { promisify, stripVTControlCharacters } from "node:util";
 import * as acorn from "acorn";
 import { isSandboxAccount } from "./environment.js";
 import { createLogger } from "./logger.js";
@@ -401,19 +401,18 @@ export class SuiteCloudRunnerService {
 	 */
 	private findFileRecursively(dir: string, targetName: string): string | null {
 		try {
-			const entries = fs.readdirSync(dir, { withFileTypes: true });
+			const entries = fs.readdirSync(dir, {
+				recursive: true,
+				withFileTypes: true,
+			});
 			for (const entry of entries) {
-				const full = path.join(dir, entry.name);
-				if (entry.isFile() && entry.name === targetName) {
-					return full;
-				}
 				if (
-					entry.isDirectory() &&
-					entry.name !== ".git" &&
-					entry.name !== "node_modules"
+					entry.isFile() &&
+					entry.name === targetName &&
+					!entry.parentPath.includes("node_modules") &&
+					!entry.parentPath.includes(".git")
 				) {
-					const res = this.findFileRecursively(full, targetName);
-					if (res) return res;
+					return path.join(entry.parentPath, entry.name);
 				}
 			}
 		} catch {}
@@ -424,26 +423,20 @@ export class SuiteCloudRunnerService {
 	 * Collect all files in a directory recursively
 	 */
 	collectFilesInDirectory(dir: string): string[] {
-		const results: string[] = [];
 		try {
-			const entries = fs.readdirSync(dir, { withFileTypes: true });
-			for (const entry of entries) {
-				const full = path.join(dir, entry.name);
-				if (
-					entry.name === ".DS_Store" ||
-					entry.name === ".git" ||
-					entry.name === "node_modules"
-				) {
-					continue;
-				}
-				if (entry.isFile()) {
-					results.push(full);
-				} else if (entry.isDirectory()) {
-					results.push(...this.collectFilesInDirectory(full));
-				}
-			}
-		} catch {}
-		return results;
+			return fs
+				.readdirSync(dir, { recursive: true, withFileTypes: true })
+				.filter(
+					(entry) =>
+						entry.isFile() &&
+						entry.name !== ".DS_Store" &&
+						!entry.parentPath.includes("node_modules") &&
+						!entry.parentPath.includes(".git"),
+				)
+				.map((entry) => path.join(entry.parentPath, entry.name));
+		} catch {
+			return [];
+		}
 	}
 
 	/**
@@ -589,8 +582,7 @@ export class SuiteCloudRunnerService {
 			);
 
 			const results: AuthInfo[] = [];
-			// biome-ignore lint/suspicious/noControlCharactersInRegex: Strip ANSI escape sequences from CLI output
-			const cleanStdout = (stdout || "").replace(/\x1B\[[0-9;]*[a-zA-Z]/g, "");
+			const cleanStdout = stripVTControlCharacters(stdout || "");
 			const lines = cleanStdout.split("\n");
 			for (const line of lines) {
 				const trimmed = line.trim();

@@ -14,12 +14,12 @@ import {
 	unwrapMcpContent,
 } from "../utils/metadata.js";
 import { generateNetSuiteUrl } from "../utils/netsuiteUrls.js";
-import {
-	CreateRecordArgsSchema,
-	GetMetadataArgsSchema,
-	GetRecordArgsSchema,
-	GetSystemNotesArgsSchema,
-	UpdateRecordArgsSchema,
+import type {
+	CreateRecordArgs,
+	GetMetadataArgs,
+	GetRecordArgs,
+	GetSystemNotesArgs,
+	UpdateRecordArgs,
 } from "./toolSchemas.js";
 import { textResult } from "./types.js";
 
@@ -67,222 +67,14 @@ export async function resolveNaturalKeyToInternalId(
 	naturalKey: string,
 	mcpTools: NetSuiteMCPTools,
 ): Promise<{ id: string; recordType?: string | undefined } | null> {
-	const safeKey = naturalKey.replace(/'/g, "''").trim();
-	if (!safeKey || !recordType) return null;
-
-	const recType = recordType.toLowerCase().trim();
-
-	// 1. Transaction types: search transaction by tranid
-	const isTransaction = [
-		"salesorder",
-		"invoice",
-		"purchaseorder",
-		"estimate",
-		"opportunity",
-		"customerpayment",
-		"vendorbill",
-		"vendorpayment",
-		"creditmemo",
-		"itemfulfillment",
-		"itemreceipt",
-		"returnauthorization",
-		"journalentry",
-		"transferorder",
-		"transaction",
-	].includes(recType);
-
-	if (isTransaction) {
-		try {
-			const typeFilter = getTransactionTypeFilter(recType);
-			const upperKey = safeKey.toUpperCase();
-			const sql = `SELECT id, type, tranid FROM transaction WHERE UPPER(tranid) = '${upperKey}' ${typeFilter} ORDER BY id DESC FETCH FIRST 2 ROWS ONLY`;
-			const res = await mcpTools.executeTool("ns_runCustomSuiteQL", {
-				sqlQuery: sql,
-			});
-			assertNoMcpError(res);
-			const rows = mcpTools.extractDataArray(res);
-			if (rows.length > 0 && rows[0]?.id) {
-				return {
-					id: String(rows[0].id),
-					recordType: (rows[0].type as string)?.toLowerCase() || recordType,
-				};
-			}
-		} catch (err: unknown) {
-			const msg = err instanceof Error ? err.message : String(err);
-			if (isPermissionError(msg)) throw err;
-			/* Lookup failed */
-		}
-		return null;
-	}
-
-	// 2. Custom record lookup by canonical name
-	if (recType.startsWith("customrecord")) {
-		if (!/^customrecord_[a-z0-9_]+$/i.test(recType)) {
-			return null;
-		}
-		try {
-			const upperKey = safeKey.toUpperCase();
-			const sql = `SELECT id, name FROM ${recType} WHERE UPPER(name) = '${upperKey}' ORDER BY id DESC FETCH FIRST 2 ROWS ONLY`;
-			const res = await mcpTools.executeTool("ns_runCustomSuiteQL", {
-				sqlQuery: sql,
-			});
-			assertNoMcpError(res);
-			const rows = mcpTools.extractDataArray(res);
-			if (rows.length > 0 && rows[0]?.id) {
-				return { id: String(rows[0].id), recordType: recType };
-			}
-		} catch (err: unknown) {
-			const msg = err instanceof Error ? err.message : String(err);
-			if (isPermissionError(msg)) throw err;
-			/* Lookup failed */
-		}
-		return null;
-	}
-
-	// 3. Customer / Vendor / Employee / Partner / Contact / Job / Entity
-	const specificEntityTables = new Set([
-		"customer",
-		"vendor",
-		"employee",
-		"partner",
-		"contact",
-		"job",
-	]);
-	if (
-		specificEntityTables.has(recType) ||
-		recType === "lead" ||
-		recType === "prospect" ||
-		recType === "entity"
-	) {
-		try {
-			const upperKey = safeKey.toUpperCase();
-			const targetTable = specificEntityTables.has(recType)
-				? recType
-				: recType === "lead" || recType === "prospect"
-					? "customer"
-					: "entity";
-			const sql = `SELECT id FROM ${targetTable} WHERE UPPER(entityid) = '${upperKey}' FETCH FIRST 2 ROWS ONLY`;
-			const res = await mcpTools.executeTool("ns_runCustomSuiteQL", {
-				sqlQuery: sql,
-			});
-			assertNoMcpError(res);
-			const rows = mcpTools.extractDataArray(res);
-			if (rows.length > 0 && rows[0]?.id) {
-				return { id: String(rows[0].id), recordType: recType };
-			}
-		} catch (err: unknown) {
-			const msg = err instanceof Error ? err.message : String(err);
-			if (isPermissionError(msg)) throw err;
-			/* Lookup failed */
-		}
-		return null;
-	}
-
-	// 4. Item
-	if (ITEM_RECORD_TYPES.has(recType)) {
-		try {
-			const upperKey = safeKey.toUpperCase();
-			const sql = `SELECT id FROM item WHERE UPPER(itemid) = '${upperKey}' FETCH FIRST 2 ROWS ONLY`;
-			const res = await mcpTools.executeTool("ns_runCustomSuiteQL", {
-				sqlQuery: sql,
-			});
-			assertNoMcpError(res);
-			const rows = mcpTools.extractDataArray(res);
-			if (rows.length > 0 && rows[0]?.id) {
-				return { id: String(rows[0].id), recordType: "item" };
-			}
-		} catch (err: unknown) {
-			const msg = err instanceof Error ? err.message : String(err);
-			if (isPermissionError(msg)) throw err;
-			/* Lookup failed */
-		}
-		return null;
-	}
-
-	// 5. Script Deployment (matches ScriptDeployment.scriptid e.g. customdeploy_xxx or title)
-	const isDeployment = [
-		"scriptdeployment",
-		"deployment",
-		"scriptdeploy",
-	].includes(recType);
-	if (isDeployment) {
-		try {
-			const upperKey = safeKey.toUpperCase();
-			const sql = `SELECT primarykey AS id, scriptid, title FROM ScriptDeployment WHERE UPPER(scriptid) = '${upperKey}' OR UPPER(title) = '${upperKey}' FETCH FIRST 2 ROWS ONLY`;
-			const res = await mcpTools.executeTool("ns_runCustomSuiteQL", {
-				sqlQuery: sql,
-			});
-			assertNoMcpError(res);
-			const rows = mcpTools.extractDataArray(res);
-			if (rows.length > 0 && rows[0]?.id) {
-				return { id: String(rows[0].id), recordType: "scriptdeployment" };
-			}
-		} catch (err: unknown) {
-			const msg = err instanceof Error ? err.message : String(err);
-			if (isPermissionError(msg)) throw err;
-			/* Lookup failed */
-		}
-		return null;
-	}
-
-	// 6. Script Record (matches Script.scriptid e.g. customscript_xxx or name)
-	const isScript = [
-		"script",
-		"scriptrecord",
-		"clientscript",
-		"usereventscript",
-		"suitelet",
-		"restlet",
-		"scheduledscript",
-		"mapreducescript",
-		"portlet",
-		"massupdatescript",
-		"workflowactionscript",
-		"bundleinstallationscript",
-		"sdfinstallationscript",
-	].includes(recType);
-	if (isScript) {
-		try {
-			const upperKey = safeKey.toUpperCase();
-			const sql = `SELECT id, scriptid, name FROM Script WHERE UPPER(scriptid) = '${upperKey}' OR UPPER(name) = '${upperKey}' FETCH FIRST 2 ROWS ONLY`;
-			const res = await mcpTools.executeTool("ns_runCustomSuiteQL", {
-				sqlQuery: sql,
-			});
-			assertNoMcpError(res);
-			const rows = mcpTools.extractDataArray(res);
-			if (rows.length > 0 && rows[0]?.id) {
-				return { id: String(rows[0].id), recordType: "script" };
-			}
-		} catch (err: unknown) {
-			const msg = err instanceof Error ? err.message : String(err);
-			if (isPermissionError(msg)) throw err;
-			/* Lookup failed */
-		}
-		return null;
-	}
-
-	// 7. File Cabinet File (matches file.name e.g. script_file.js)
-	if (recType === "file") {
-		try {
-			const upperKey = safeKey.toUpperCase();
-			const sql = `SELECT id, name FROM file WHERE UPPER(name) = '${upperKey}' FETCH FIRST 2 ROWS ONLY`;
-			const res = await mcpTools.executeTool("ns_runCustomSuiteQL", {
-				sqlQuery: sql,
-			});
-			assertNoMcpError(res);
-			const rows = mcpTools.extractDataArray(res);
-			if (rows.length > 0 && rows[0]?.id) {
-				return { id: String(rows[0].id), recordType: "file" };
-			}
-		} catch (err: unknown) {
-			const msg = err instanceof Error ? err.message : String(err);
-			if (isPermissionError(msg)) throw err;
-			/* Lookup failed */
-		}
-		return null;
-	}
-
-	return null;
+	const trimmed = naturalKey.trim();
+	if (!trimmed || !recordType) return null;
+	const batchMap = await resolveNaturalKeysBatch(
+		recordType,
+		[trimmed],
+		mcpTools,
+	);
+	return batchMap.get(trimmed.toUpperCase()) ?? null;
 }
 
 /**
@@ -876,19 +668,11 @@ async function inspectSingleRecord(
  * Integrates natural key resolution, structured field grouping, empty pruning, and active UI links.
  */
 export async function handleGetRecord(
-	args: Record<string, unknown>,
+	args: GetRecordArgs,
 	mcpTools: NetSuiteMCPTools,
 	oauthManager: OAuthManager,
 	resolveRectype: (type: string) => number | null | Promise<number | null>,
 ): Promise<ToolResponse> {
-	const parsed = GetRecordArgsSchema.safeParse(args);
-	if (!parsed.success) {
-		return textResult(
-			`❌ Invalid arguments: ${parsed.error.issues[0]?.message}`,
-			true,
-		);
-	}
-
 	const {
 		recordType,
 		id: rawId,
@@ -898,7 +682,7 @@ export async function handleGetRecord(
 		maxLines,
 		lineFields,
 		format,
-	} = parsed.data;
+	} = args;
 
 	const targetIds: string[] = [];
 	if (Array.isArray(rawIds) && rawIds.length > 0) {
@@ -1061,24 +845,10 @@ async function inspectSingleTableMetadata(
  * Powered by Redis cache and authoritative 272 records catalog.
  */
 export async function handleGetMetadata(
-	args: Record<string, unknown>,
+	args: GetMetadataArgs,
 	mcpTools: NetSuiteMCPTools,
 ): Promise<ToolResponse> {
-	const parsed = GetMetadataArgsSchema.safeParse(args);
-	if (!parsed.success) {
-		return textResult(
-			`❌ Invalid arguments: ${parsed.error.issues[0]?.message}`,
-			true,
-		);
-	}
-
-	const {
-		table,
-		tables,
-		keyword,
-		source = "auto",
-		refresh = false,
-	} = parsed.data;
+	const { table, tables, keyword, source = "auto", refresh = false } = args;
 
 	const targetTables: string[] = [];
 	if (Array.isArray(tables) && tables.length > 0) {
@@ -1284,23 +1054,15 @@ async function inspectSingleRecordSystemNotes(
  * Dedicated audit log query complying strictly with Oracle SAFE Guide Pitfall 11.
  */
 export async function handleGetSystemNotes(
-	args: Record<string, unknown>,
+	args: GetSystemNotesArgs,
 	mcpTools: NetSuiteMCPTools,
 	resolveRectype?: (type: string) => number | null | Promise<number | null>,
 ): Promise<ToolResponse> {
-	const parsed = GetSystemNotesArgsSchema.safeParse(args);
-	if (!parsed.success) {
-		return textResult(
-			`❌ Invalid arguments: ${parsed.error.issues[0]?.message}`,
-			true,
-		);
-	}
-
-	const { recordType } = parsed.data;
-	const limit = Math.min(Math.max(parsed.data.limit ?? 50, 1), 100);
+	const { recordType } = args;
+	const limit = Math.min(Math.max(args.limit ?? 50, 1), 100);
 	const targetIds = [
-		...(parsed.data.recordId ? [parsed.data.recordId.trim()] : []),
-		...(parsed.data.recordIds || []).map((id) => id.trim()),
+		...(args.recordId ? [args.recordId.trim()] : []),
+		...(args.recordIds || []).map((id) => id.trim()),
 	];
 
 	if (targetIds.length === 0) {
@@ -1367,22 +1129,11 @@ export async function handleGetSystemNotes(
  * Dual-Gate Defense: Strictly blocked in Production accounts.
  */
 export async function handleCreateRecord(
-	args: Record<string, unknown>,
+	args: CreateRecordArgs,
 	mcpTools: NetSuiteMCPTools,
 	oauthManager: OAuthManager,
 	resolveRectype: (type: string) => number | null | Promise<number | null>,
 ): Promise<ToolResponse> {
-	const parsed = CreateRecordArgsSchema.safeParse(args);
-	if (!parsed.success) {
-		const issues = parsed.error.issues
-			.map((i) => `${i.path.join(".")}: ${i.message}`)
-			.join(", ");
-		return textResult(
-			`❌ Invalid arguments for 'netsuite_create_record': ${issues}`,
-			true,
-		);
-	}
-
 	const accountId =
 		(await oauthManager.getAccountId()) || process.env.NETSUITE_ACCOUNT_ID;
 	if (!accountId || !isSandboxAccount(accountId)) {
@@ -1393,7 +1144,7 @@ export async function handleCreateRecord(
 		);
 	}
 
-	const { recordType, record, ...rest } = parsed.data;
+	const { recordType, record, ...rest } = args;
 	const recordPayload =
 		record && typeof record === "object" && Object.keys(record).length > 0
 			? record
@@ -1453,22 +1204,11 @@ export async function handleCreateRecord(
  * Dual-Gate Defense: Strictly blocked in Production accounts.
  */
 export async function handleUpdateRecord(
-	args: Record<string, unknown>,
+	args: UpdateRecordArgs,
 	mcpTools: NetSuiteMCPTools,
 	oauthManager: OAuthManager,
 	resolveRectype: (type: string) => number | null | Promise<number | null>,
 ): Promise<ToolResponse> {
-	const parsed = UpdateRecordArgsSchema.safeParse(args);
-	if (!parsed.success) {
-		const issues = parsed.error.issues
-			.map((i) => `${i.path.join(".")}: ${i.message}`)
-			.join(", ");
-		return textResult(
-			`❌ Invalid arguments for 'netsuite_update_record': ${issues}`,
-			true,
-		);
-	}
-
 	const accountId =
 		(await oauthManager.getAccountId()) || process.env.NETSUITE_ACCOUNT_ID;
 	if (!accountId || !isSandboxAccount(accountId)) {
@@ -1479,7 +1219,7 @@ export async function handleUpdateRecord(
 		);
 	}
 
-	const { recordType, id: rawId, record, ...rest } = parsed.data;
+	const { recordType, id: rawId, record, ...rest } = args;
 	let targetId = rawId;
 
 	// Resolve natural key (e.g. SO10023) if not pure numeric

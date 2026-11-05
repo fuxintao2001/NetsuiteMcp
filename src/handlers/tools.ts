@@ -27,7 +27,6 @@ import {
 } from "./recordHandlers.js";
 import {
 	AuthArgsSchema,
-	type CallOfficialArgs,
 	CallOfficialArgsSchema,
 	CreateRecordArgsSchema,
 	GetMetadataArgsSchema,
@@ -161,7 +160,7 @@ const TOOL_DEFINITIONS: AnyToolDefinition[] = [
 		requiresAuth: false,
 		execute: async (args, ctx) =>
 			handleAuth(
-				args as unknown as Record<string, unknown>,
+				args,
 				ctx.deps.handleAuthentication,
 				ctx.deps.handleLogout,
 				ctx.deps.handleCacheRefresh,
@@ -171,11 +170,7 @@ const TOOL_DEFINITIONS: AnyToolDefinition[] = [
 		name: "netsuite_status",
 		schema: StatusArgsSchema,
 		requiresAuth: false,
-		execute: async (args, ctx) =>
-			handleStatus(
-				ctx.deps.oauthManager,
-				args as unknown as Record<string, unknown>,
-			),
+		execute: async (args, ctx) => handleStatus(ctx.deps.oauthManager, args),
 	}),
 	defineTool({
 		name: "netsuite_run_suiteql",
@@ -351,11 +346,7 @@ const TOOL_DEFINITIONS: AnyToolDefinition[] = [
 		name: "netsuite_get_metadata",
 		schema: GetMetadataArgsSchema,
 		requiresAuth: true,
-		execute: async (args, ctx) =>
-			handleGetMetadata(
-				args as unknown as Record<string, unknown>,
-				ctx.deps.mcpTools,
-			),
+		execute: async (args, ctx) => handleGetMetadata(args, ctx.deps.mcpTools),
 	}),
 	defineTool({
 		name: "netsuite_get_record",
@@ -363,7 +354,7 @@ const TOOL_DEFINITIONS: AnyToolDefinition[] = [
 		requiresAuth: true,
 		execute: async (args, ctx) =>
 			handleGetRecord(
-				args as unknown as Record<string, unknown>,
+				args,
 				ctx.deps.mcpTools,
 				ctx.deps.oauthManager,
 				ctx.deps.resolveCustomRecordRectype,
@@ -373,11 +364,7 @@ const TOOL_DEFINITIONS: AnyToolDefinition[] = [
 		name: "netsuite_get_script_logs",
 		schema: GetScriptLogsArgsSchema,
 		requiresAuth: true,
-		execute: async (args, ctx) =>
-			handleGetScriptLogs(
-				args as unknown as Record<string, unknown>,
-				ctx.deps.mcpTools,
-			),
+		execute: async (args, ctx) => handleGetScriptLogs(args, ctx.deps.mcpTools),
 	}),
 	defineTool({
 		name: "netsuite_get_system_notes",
@@ -385,7 +372,7 @@ const TOOL_DEFINITIONS: AnyToolDefinition[] = [
 		requiresAuth: true,
 		execute: async (args, ctx) =>
 			handleGetSystemNotes(
-				args as unknown as Record<string, unknown>,
+				args,
 				ctx.deps.mcpTools,
 				ctx.deps.resolveCustomRecordRectype,
 			),
@@ -396,7 +383,7 @@ const TOOL_DEFINITIONS: AnyToolDefinition[] = [
 		requiresAuth: true,
 		execute: async (args, ctx) =>
 			handleUploadFile(
-				args as unknown as Record<string, unknown>,
+				args,
 				ctx.deps.oauthManager,
 				ctx.deps.projectRoot,
 				ctx.deps.mcpTools,
@@ -409,7 +396,7 @@ const TOOL_DEFINITIONS: AnyToolDefinition[] = [
 		sandboxOnly: true,
 		execute: async (args, ctx) =>
 			handleCreateRecord(
-				args as unknown as Record<string, unknown>,
+				args,
 				ctx.deps.mcpTools,
 				ctx.deps.oauthManager,
 				ctx.deps.resolveCustomRecordRectype,
@@ -422,7 +409,7 @@ const TOOL_DEFINITIONS: AnyToolDefinition[] = [
 		sandboxOnly: true,
 		execute: async (args, ctx) =>
 			handleUpdateRecord(
-				args as unknown as Record<string, unknown>,
+				args,
 				ctx.deps.mcpTools,
 				ctx.deps.oauthManager,
 				ctx.deps.resolveCustomRecordRectype,
@@ -433,12 +420,7 @@ const TOOL_DEFINITIONS: AnyToolDefinition[] = [
 		schema: CallOfficialArgsSchema,
 		requiresAuth: true,
 		execute: async (args, ctx) =>
-			handleCallOfficial(
-				args as unknown as CallOfficialArgs,
-				ctx.deps.mcpTools,
-				ctx.accountId,
-				ctx.isSandbox,
-			),
+			handleCallOfficial(args, ctx.deps.mcpTools, ctx.accountId, ctx.isSandbox),
 	}),
 ];
 

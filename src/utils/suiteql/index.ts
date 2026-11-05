@@ -1,12 +1,11 @@
 /**
- * SuiteQL AST & Safety Guard Engine (Modernized Declarative Architecture).
+ * SuiteQL AST & Safety Guard Engine (Powered by sqlingo/oracle).
  */
 
 import { extractTablesAndAliases } from "./context.js";
 
 export * from "./context.js";
 export * from "./diagnostics.js";
-export * from "./normalizer.js";
 export * from "./rules/index.js";
 export * from "./types.js";
 

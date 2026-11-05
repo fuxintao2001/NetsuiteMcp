@@ -1,162 +1,252 @@
 /**
- * Query Context Extractor.
- * Parses raw SQL into a structured QueryContext for evaluation by the rule engine.
+ * Query Context Builder & AST Extractor.
+ * Uses sqlingo (sqlingo/oracle) to tokenize and parse SuiteQL into strongly-typed ASTs.
  */
 
-import { maskStringLiterals, stripSqlComments } from "./normalizer.js";
+import {
+	ColumnExpr,
+	CteExpr,
+	type Expression,
+	FetchExpr,
+	OffsetExpr,
+	parse,
+	TableExpr,
+	type Token,
+} from "sqlingo";
+import { Oracle } from "sqlingo/oracle";
 import type { QueryContext } from "./types.js";
 
-const SQL_KEYWORDS = new Set([
-	"on",
-	"where",
-	"left",
-	"right",
-	"inner",
-	"outer",
-	"join",
-	"cross",
-	"group",
-	"order",
-	"fetch",
-	"union",
-	"limit",
-	"offset",
-	"having",
-	"as",
-	"using",
-	"by",
-	"select",
-	"with",
-	"from",
-	"set",
-	"and",
-	"or",
-]);
+const oracleTokenizer = new Oracle.Tokenizer();
 
 /**
- * Extracts table names and table aliases from masked SQL string.
+ * Tokenizes a raw SQL string using the Oracle SQL lexer.
+ * Automatically strips single-line (--), multi-line (/* * /), and quoted string literals.
  */
-export function extractTablesAndAliases(maskedSql: string): {
+export function tokenizeSuiteQL(rawSql: string): Token[] {
+	if (!rawSql || typeof rawSql !== "string") return [];
+	try {
+		return oracleTokenizer.tokenize(rawSql);
+	} catch {
+		return [];
+	}
+}
+
+/**
+ * Splits a potentially multi-statement SQL string into individual SQL statements
+ * using the Oracle lexer's top-level semicolon token positions.
+ * Semicolons inside string literals or comments are never split.
+ */
+export function splitSuiteQLStatements(rawSql: string): string[] {
+	const trimmed = (rawSql || "").trim();
+	if (!trimmed) return [];
+
+	const tokens = tokenizeSuiteQL(trimmed);
+	if (tokens.length === 0) return [trimmed];
+
+	const statements: string[] = [];
+	let startIdx = 0;
+
+	for (const token of tokens) {
+		if (token.tokenType === "semicolon") {
+			const segment = trimmed.slice(startIdx, token.start).trim();
+			if (segment.length > 0) {
+				statements.push(segment);
+			}
+			startIdx = token.end + 1;
+		}
+	}
+
+	const tail = trimmed.slice(startIdx).trim();
+	if (tail.length > 0) {
+		statements.push(tail);
+	}
+
+	return statements;
+}
+
+/**
+ * Extracts referenced physical tables, table aliases, and CTE names from parsed ASTs.
+ */
+export function extractTablesAndAliasesFromAsts(asts: Expression[]): {
 	tables: string[];
 	tableAliases: Map<string, string>;
+	cteNames: Set<string>;
 } {
+	const cteNames = new Set<string>();
 	const tableSet = new Set<string>();
-	const aliases = new Map<string, string>();
+	const tableAliases = new Map<string, string>();
 
-	// FROM / JOIN regex
-	const fromJoinRegex =
-		/\b(?:FROM|JOIN)\s+([a-zA-Z0-9_]+)(?:\s+(?:AS\s+)?([a-zA-Z0-9_]+))?\b/gi;
-
-	let match: RegExpExecArray | null;
-	while (true) {
-		match = fromJoinRegex.exec(maskedSql);
-		if (!match) break;
-
-		const table = match[1]?.toLowerCase();
-		if (!table || SQL_KEYWORDS.has(table)) continue;
-
-		tableSet.add(table);
-
-		let alias = match[2]?.toLowerCase();
-		if (!alias || SQL_KEYWORDS.has(alias)) {
-			alias = table;
+	for (const ast of asts) {
+		for (const cte of ast.findAll(CteExpr)) {
+			const alias = cte.alias?.toLowerCase();
+			if (alias) {
+				cteNames.add(alias);
+			}
 		}
+	}
 
-		aliases.set(alias, table);
-		aliases.set(table, table);
+	for (const ast of asts) {
+		for (const tbl of ast.findAll(TableExpr)) {
+			const name = tbl.name?.toLowerCase();
+			if (!name || cteNames.has(name)) continue;
+
+			tableSet.add(name);
+			tableAliases.set(name, name);
+
+			const alias = tbl.alias?.toLowerCase();
+			if (alias) {
+				tableAliases.set(alias, name);
+			}
+		}
 	}
 
 	return {
 		tables: Array.from(tableSet),
-		tableAliases: aliases,
+		tableAliases,
+		cteNames,
 	};
 }
 
 /**
- * Extracts projection items from SELECT statements in masked SQL.
+ * Extracts table names and aliases from a raw SQL string.
+ * Falls back to token-level FROM/JOIN inspection if the SQL has a syntax error preventing full AST parsing.
  */
-export function extractProjections(maskedSql: string): string[] {
-	const projections: string[] = [];
-	const selectRegex = /\bSELECT\s+([\s\S]*?)\s+\bFROM\b/gi;
+export function extractTablesAndAliases(rawSql: string): {
+	tables: string[];
+	tableAliases: Map<string, string>;
+	cteNames: Set<string>;
+} {
+	const trimmed = (rawSql || "").trim();
+	if (!trimmed) {
+		return {
+			tables: [],
+			tableAliases: new Map(),
+			cteNames: new Set(),
+		};
+	}
 
-	let match: RegExpExecArray | null;
-	while (true) {
-		match = selectRegex.exec(maskedSql);
-		if (!match) break;
-
-		const projBlock = match[1]?.trim();
-		if (!projBlock) continue;
-
-		// Split by top-level commas outside parentheses
-		let depth = 0;
-		let current = "";
-		for (let i = 0; i < projBlock.length; i++) {
-			const char = projBlock[i];
-			if (char === "(") depth++;
-			else if (char === ")") depth = Math.max(0, depth - 1);
-
-			if (char === "," && depth === 0) {
-				const trimmed = current.trim();
-				if (trimmed.length > 0) projections.push(trimmed);
-				current = "";
-			} else {
-				current += char;
-			}
+	try {
+		const asts = parse(trimmed, { read: Oracle }).filter(
+			(stmt): stmt is Expression => stmt !== null,
+		);
+		if (asts.length > 0) {
+			return extractTablesAndAliasesFromAsts(asts);
 		}
+	} catch {
+		// Fallback to token-level scan below when SQL contains syntax errors
+	}
 
-		const lastTrimmed = current.trim();
-		if (lastTrimmed.length > 0) {
-			projections.push(lastTrimmed);
+	const tokens = tokenizeSuiteQL(trimmed);
+	const tableSet = new Set<string>();
+	const tableAliases = new Map<string, string>();
+	const cteNames = new Set<string>();
+
+	for (let i = 0; i < tokens.length; i++) {
+		const tok = tokens[i];
+		if (!tok) continue;
+		const type = String(tok.tokenType).toLowerCase();
+		if (type === "from" || type === "join") {
+			const nextTok = tokens[i + 1];
+			if (nextTok && String(nextTok.tokenType).toLowerCase() === "var") {
+				const tableName = nextTok.text.toLowerCase();
+				tableSet.add(tableName);
+				tableAliases.set(tableName, tableName);
+
+				const maybeAs = tokens[i + 2];
+				if (maybeAs) {
+					const maybeAsType = String(maybeAs.tokenType).toLowerCase();
+					if (maybeAsType === "alias" || maybeAsType === "as") {
+						const aliasTok = tokens[i + 3];
+						if (
+							aliasTok &&
+							String(aliasTok.tokenType).toLowerCase() === "var"
+						) {
+							tableAliases.set(aliasTok.text.toLowerCase(), tableName);
+						}
+					} else if (maybeAsType === "var") {
+						tableAliases.set(maybeAs.text.toLowerCase(), tableName);
+					}
+				}
+			}
 		}
 	}
 
-	return projections;
+	return {
+		tables: Array.from(tableSet),
+		tableAliases,
+		cteNames,
+	};
 }
 
 /**
- * Checks if the query has Oracle pagination syntax.
+ * Checks whether parsed ASTs (or tokens) contain Oracle pagination syntax:
+ * - FETCH FIRST / NEXT N ROWS ONLY (FetchExpr)
+ * - OFFSET M ROWS FETCH NEXT N ROWS ONLY (OffsetExpr + FetchExpr)
+ * - WHERE ROWNUM <= N (ColumnExpr with name 'rownum')
  */
-export function checkHasPagination(maskedSql: string): boolean {
-	return (
-		/\bFETCH\s+(?:FIRST|NEXT)\s+\d+\s+ROWS?\s+ONLY\b/i.test(maskedSql) ||
-		/\bROWNUM\s*(?:<=|<|=)\s*\d+\b/i.test(maskedSql) ||
-		/\bOFFSET\s+\d+\s+ROWS?\s+FETCH\s+(?:FIRST|NEXT)\s+\d+\s+ROWS?\s+ONLY\b/i.test(
-			maskedSql,
-		)
+export function checkHasPagination(
+	asts: Expression[],
+	tokens: Token[],
+): boolean {
+	for (const ast of asts) {
+		if (ast.find(FetchExpr) || ast.find(OffsetExpr)) {
+			return true;
+		}
+		for (const col of ast.findAll(ColumnExpr)) {
+			if (col.name.toLowerCase() === "rownum") {
+				return true;
+			}
+		}
+	}
+
+	return tokens.some(
+		(t) =>
+			t.text.toLowerCase() === "fetch" || t.text.toLowerCase() === "rownum",
 	);
 }
 
 /**
- * Builds a QueryContext instance from a raw SQL string.
+ * Builds a structured QueryContext from a raw SuiteQL string using sqlingo/oracle.
  */
 export function buildQueryContext(rawSql: string): QueryContext {
 	const trimmed = (rawSql || "").trim();
-	const { maskedSql, literals } = maskStringLiterals(trimmed);
-	const cleanMaskedSql = stripSqlComments(maskedSql).trim();
+	const tokens = tokenizeSuiteQL(trimmed);
+	const statements = splitSuiteQLStatements(trimmed);
+	const hasMultipleStatements = statements.length > 1;
 
-	const withoutTrailingSemicolon = cleanMaskedSql.endsWith(";")
-		? cleanMaskedSql.slice(0, -1).trim()
-		: cleanMaskedSql;
+	const firstToken = tokens[0];
+	const firstTokenText = firstToken?.text.toLowerCase() ?? "";
+	const isSelectOrWith =
+		firstTokenText === "select" || firstTokenText === "with";
 
-	const hasMultipleStatements = withoutTrailingSemicolon.includes(";");
-	const isSelectOrWith = /^(?:SELECT|WITH)\b/i.test(withoutTrailingSemicolon);
+	let asts: Expression[] = [];
+	let parseError: string | undefined;
 
-	const { tables, tableAliases } = extractTablesAndAliases(
-		withoutTrailingSemicolon,
-	);
-	const projections = extractProjections(withoutTrailingSemicolon);
-	const hasPagination = checkHasPagination(withoutTrailingSemicolon);
+	try {
+		asts = parse(trimmed, { read: Oracle }).filter(
+			(stmt): stmt is Expression => stmt !== null,
+		);
+	} catch (err) {
+		parseError = err instanceof Error ? err.message : String(err);
+	}
+
+	const { tables, tableAliases, cteNames } =
+		asts.length > 0
+			? extractTablesAndAliasesFromAsts(asts)
+			: extractTablesAndAliases(trimmed);
+
+	const hasPagination = checkHasPagination(asts, tokens);
 
 	return {
 		rawSql: trimmed,
-		cleanSql: withoutTrailingSemicolon,
-		maskedSql: withoutTrailingSemicolon,
-		literals,
+		tokens,
+		asts,
 		tables,
 		tableAliases,
-		projections,
+		cteNames,
 		hasPagination,
 		hasMultipleStatements,
 		isSelectOrWith,
+		parseError,
 	};
 }

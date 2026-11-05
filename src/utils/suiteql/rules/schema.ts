@@ -1,48 +1,38 @@
 /**
  * NetSuite ERP Schema Invariants Rules.
- * Catches high-frequency schema hallucinations before execution.
+ * Catches high-frequency schema hallucinations before execution using sqlingo AST nodes.
  */
 
-import type { SuiteQLRule } from "../types.js";
+import { ColumnExpr, SelectExpr } from "sqlingo";
+import { Oracle } from "sqlingo/oracle";
+import type { QueryContext, SuiteQLRule } from "../types.js";
 
-function findDuplicateProjectionAlias(projections: string[]): {
+function findDuplicateProjectionAlias(ctx: QueryContext): {
 	duplicate: string;
 	firstExpr: string;
 	secondExpr: string;
 } | null {
-	const seen = new Map<string, string>();
+	for (const ast of ctx.asts) {
+		if (!(ast instanceof SelectExpr)) continue;
 
-	for (const proj of projections) {
-		const asMatch = /\s+AS\s+([a-zA-Z0-9_]+)$/i.exec(proj);
-		if (asMatch?.[1]) {
-			const alias = asMatch[1].toLowerCase();
-			const existing = seen.get(alias);
+		const seen = new Map<string, string>();
+		for (const proj of ast.selects) {
+			const effectiveName = (
+				proj.alias || (proj instanceof ColumnExpr ? proj.name : "")
+			).toLowerCase();
+
+			if (!effectiveName || effectiveName === "*") continue;
+
+			const exprSql = proj.sql({ dialect: Oracle });
+			const existing = seen.get(effectiveName);
 			if (existing) {
 				return {
-					duplicate: alias,
+					duplicate: effectiveName,
 					firstExpr: existing,
-					secondExpr: proj,
+					secondExpr: exprSql,
 				};
 			}
-			seen.set(alias, proj);
-			continue;
-		}
-
-		// Implicit column name from identifier: e.g. "t.id" -> "id"
-		const identMatch = /^(?:[a-zA-Z0-9_]+\.)?([a-zA-Z0-9_]+)$/i.exec(
-			proj.trim(),
-		);
-		if (identMatch?.[1]) {
-			const colName = identMatch[1].toLowerCase();
-			const existing = seen.get(colName);
-			if (existing) {
-				return {
-					duplicate: colName,
-					firstExpr: existing,
-					secondExpr: proj,
-				};
-			}
-			seen.set(colName, proj);
+			seen.set(effectiveName, exprSql);
 		}
 	}
 
@@ -54,20 +44,52 @@ export const schemaRules: SuiteQLRule[] = [
 		id: "schema-item-no-recordtype",
 		name: "Enforce item.itemtype Over recordtype",
 		category: "schema",
+		severity: "error",
 		validate(ctx) {
+			if (!ctx.tables.includes("item")) return null;
+
 			const itemAliases = new Set<string>();
 			for (const [alias, table] of ctx.tableAliases.entries()) {
 				if (table === "item") itemAliases.add(alias);
 			}
 
-			if (itemAliases.size > 0) {
-				for (const alias of itemAliases) {
-					const pattern = new RegExp(`\\b${alias}\\.recordtype\\b`, "i");
-					if (pattern.test(ctx.maskedSql)) {
-						return "Invalid Column on 'item' Table: The 'item' table in NetSuite does NOT have a 'recordtype' column. Use 'itemtype' ('Assembly', 'InvtPart', 'NonInvtPart', 'Service', etc.) and 'subtype' ('Sale', 'Purchase', 'Resale') instead.";
+			const hasEntityOrTran = ctx.tables.some((t) =>
+				["entity", "customer", "vendor", "employee", "transaction"].includes(t),
+			);
+
+			for (const ast of ctx.asts) {
+				for (const col of ast.findAll(ColumnExpr)) {
+					if (col.name.toLowerCase() !== "recordtype") continue;
+
+					const tableQualifier = col.table.toLowerCase();
+					if (tableQualifier && itemAliases.has(tableQualifier)) {
+						return {
+							ruleId: "schema-item-no-recordtype",
+							ruleName: "Enforce item.itemtype Over recordtype",
+							category: "schema",
+							severity: "error",
+							message:
+								"Invalid Column on 'item' Table: The 'item' table in NetSuite does NOT have a 'recordtype' column. Use 'itemtype' ('Assembly', 'InvtPart', 'NonInvtPart', 'Service', etc.) and 'subtype' ('Sale', 'Purchase', 'Resale') instead.",
+							suggestedFix:
+								"Replace `item.recordtype` with `item.itemtype` or `item.subtype`.",
+						};
+					}
+
+					if (!tableQualifier && !hasEntityOrTran) {
+						return {
+							ruleId: "schema-item-no-recordtype",
+							ruleName: "Enforce item.itemtype Over recordtype",
+							category: "schema",
+							severity: "error",
+							message:
+								"Invalid Column on 'item' Table: The 'item' table in NetSuite does NOT have a 'recordtype' column. Use 'itemtype' ('Assembly', 'InvtPart', 'NonInvtPart', 'Service', etc.) and 'subtype' ('Sale', 'Purchase', 'Resale') instead.",
+							suggestedFix:
+								"Replace `recordtype` with `itemtype` or `subtype`.",
+						};
 					}
 				}
 			}
+
 			return null;
 		},
 	},
@@ -75,20 +97,40 @@ export const schemaRules: SuiteQLRule[] = [
 		id: "schema-transaction-no-createdfrom",
 		name: "Enforce createdfrom on transactionline",
 		category: "schema",
+		severity: "error",
 		validate(ctx) {
+			if (!ctx.tables.includes("transaction")) return null;
+
 			const tranAliases = new Set<string>();
 			for (const [alias, table] of ctx.tableAliases.entries()) {
 				if (table === "transaction") tranAliases.add(alias);
 			}
 
-			if (tranAliases.size > 0) {
-				for (const alias of tranAliases) {
-					const pattern = new RegExp(`\\b${alias}\\.createdfrom\\b`, "i");
-					if (pattern.test(ctx.maskedSql)) {
-						return "Invalid Field Location: 'createdfrom' exists exclusively on the 'transactionline' table (line items), NEVER on the 'transaction' header. To track upstream documents, JOIN transactionline tl ON tl.transaction = t.id and filter tl.createdfrom.";
+			const hasTranLine = ctx.tables.includes("transactionline");
+
+			for (const ast of ctx.asts) {
+				for (const col of ast.findAll(ColumnExpr)) {
+					if (col.name.toLowerCase() !== "createdfrom") continue;
+
+					const tableQualifier = col.table.toLowerCase();
+					if (
+						(tableQualifier && tranAliases.has(tableQualifier)) ||
+						(!tableQualifier && !hasTranLine)
+					) {
+						return {
+							ruleId: "schema-transaction-no-createdfrom",
+							ruleName: "Enforce createdfrom on transactionline",
+							category: "schema",
+							severity: "error",
+							message:
+								"Invalid Field Location: 'createdfrom' exists exclusively on the 'transactionline' table (line items), NEVER on the 'transaction' header. To track upstream documents, JOIN transactionline tl ON tl.transaction = t.id and filter tl.createdfrom.",
+							suggestedFix:
+								"JOIN transactionline tl ON t.id = tl.transaction and query `tl.createdfrom` with `tl.mainline = 'T'`.",
+						};
 					}
 				}
 			}
+
 			return null;
 		},
 	},
@@ -96,24 +138,18 @@ export const schemaRules: SuiteQLRule[] = [
 		id: "schema-unique-projection-aliases",
 		name: "Require Unique Column Aliases in SELECT",
 		category: "schema",
+		severity: "error",
 		validate(ctx) {
-			const dup = findDuplicateProjectionAlias(ctx.projections);
+			const dup = findDuplicateProjectionAlias(ctx);
 			if (dup) {
-				return `Duplicate column alias '${dup.duplicate}' detected in SELECT projection ('${dup.firstExpr}', '${dup.secondExpr}'). NetSuite SuiteQL requires unique column aliases. Please assign explicit aliases using AS (e.g. '${dup.firstExpr} AS ${dup.duplicate}_1, ${dup.secondExpr} AS ${dup.duplicate}_2').`;
-			}
-			return null;
-		},
-	},
-	{
-		id: "schema-pseudo-tables",
-		name: "Replace Non-Existent Pseudo-Tables",
-		category: "schema",
-		validate(ctx) {
-			if (
-				ctx.tables.includes("inventoryitemlocations") ||
-				ctx.tables.includes("lotnumberedassemblyitemlocations")
-			) {
-				return "Suboptimal table detected: 'inventoryitemlocations' only contains standard inventory items and omits Assembly, Lot, and Serialized items. Replace with 'aggregateitemlocation' which covers all item types.";
+				return {
+					ruleId: "schema-unique-projection-aliases",
+					ruleName: "Require Unique Column Aliases in SELECT",
+					category: "schema",
+					severity: "error",
+					message: `Duplicate Column Alias detected in SELECT: '${dup.duplicate}'. In NetSuite SuiteQL, each projected column must have a unique alias. Found duplicate across '${dup.firstExpr}' and '${dup.secondExpr}'.`,
+					suggestedFix: `Rename one of the conflicting columns (e.g. 'AS ${dup.duplicate}_1', 'AS ${dup.duplicate}_2').`,
+				};
 			}
 			return null;
 		},

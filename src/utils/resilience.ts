@@ -7,7 +7,6 @@ import { execFile } from "node:child_process";
 import { lookup } from "node:dns/promises";
 import https from "node:https";
 import { promisify } from "node:util";
-import pLimit, { type LimitFunction } from "p-limit";
 
 const execFileAsync = promisify(execFile);
 
@@ -336,19 +335,4 @@ export function getRetryAfterMs(error: unknown): number | null {
 	if (!Number.isNaN(dateMs)) return Math.max(0, dateMs - Date.now());
 
 	return null;
-}
-
-/**
- * Global concurrency limiter using p-limit to restrict parallel requests below account ceilings.
- */
-export class ConcurrencyLimiter {
-	private readonly limiter: LimitFunction;
-
-	constructor(maxConcurrency: number) {
-		this.limiter = pLimit(maxConcurrency);
-	}
-
-	async run<T>(fn: () => Promise<T>): Promise<T> {
-		return this.limiter(fn);
-	}
 }

@@ -26,6 +26,7 @@
     "skills:update": "node scripts/check-skills-update.mjs --sync",
     "lint": "biome check src",
     "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test 'test/**/*.test.ts'",
     "cache:clean": "node scripts/clean-redis-cache.js"
   },
   "keywords": [
@@ -56,12 +57,12 @@
     "axios": "^1.6.0",
     "ioredis": "^5.11.1",
     "lru-cache": "^11.5.3",
-    "node-sql-parser": "^5.4.0",
     "open": "^11.0.4",
     "p-limit": "^7.3.1",
     "pino": "^10.3.1",
     "proper-lockfile": "^4.1.2",
     "redlock": "^5.0.0-beta.2",
+    "sqlingo": "^0.12.4",
     "write-file-atomic": "^7.0.1",
     "zod": "^4.4.3"
   },

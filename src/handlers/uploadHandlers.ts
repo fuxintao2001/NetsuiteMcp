@@ -10,7 +10,7 @@ import {
 	generateNetSuiteUrl,
 } from "../utils/netsuiteUrls.js";
 import { suitecloudRunnerService } from "../utils/suitecloudRunner.js";
-import { UploadFileArgsSchema } from "./toolSchemas.js";
+import type { UploadFileArgs } from "./toolSchemas.js";
 import { textResult } from "./types.js";
 
 type ToolResponse = CallToolResult;
@@ -62,18 +62,11 @@ export function formatTargetFileDisplay(
 }
 
 export async function handleUploadFile(
-	args: Record<string, unknown>,
+	args: UploadFileArgs,
 	oauthManager: OAuthManager,
 	defaultProjectRoot: string,
 	mcpTools?: NetSuiteMCPTools,
 ): Promise<ToolResponse> {
-	const parsed = UploadFileArgsSchema.safeParse(args);
-	if (!parsed.success) {
-		return textResult(
-			`❌ Invalid arguments: ${parsed.error.issues[0]?.message}`,
-			true,
-		);
-	}
 	const {
 		paths,
 		projectPath: customProjectPath,
@@ -81,7 +74,7 @@ export async function handleUploadFile(
 		dryRun,
 		skipValidation,
 		allowProduction,
-	} = parsed.data;
+	} = args;
 
 	const currentAccountId = (await oauthManager.getAccountId()) || "UNKNOWN";
 	const isProd = !isSandboxAccount(currentAccountId);

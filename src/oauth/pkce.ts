@@ -9,11 +9,7 @@ import crypto from "node:crypto";
  * Base64URL encoding (no padding)
  */
 export function base64URLEncode(buffer: Buffer): string {
-	return buffer
-		.toString("base64")
-		.replace(/\+/g, "-")
-		.replace(/\//g, "_")
-		.replace(/=/g, "");
+	return buffer.toString("base64url");
 }
 
 export interface PKCEChallenge {

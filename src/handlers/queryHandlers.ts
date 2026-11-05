@@ -2,7 +2,7 @@ import type { CallToolResult } from "@modelcontextprotocol/server";
 import type { NetSuiteMCPTools } from "../mcp/tools.js";
 import { isPermissionError } from "../utils/errors.js";
 import { unwrapMcpContent } from "../utils/metadata.js";
-import { GetScriptLogsArgsSchema } from "./toolSchemas.js";
+import type { GetScriptLogsArgs } from "./toolSchemas.js";
 import { textResult } from "./types.js";
 
 type ToolResponse = CallToolResult;
@@ -12,13 +12,9 @@ type ToolResponse = CallToolResult;
  * Query NetSuite SuiteScript execution logs (ScriptNote) with index optimization.
  */
 export async function handleGetScriptLogs(
-	args: Record<string, unknown>,
+	args: GetScriptLogsArgs,
 	mcpTools: NetSuiteMCPTools,
 ): Promise<ToolResponse> {
-	const parsed = GetScriptLogsArgsSchema.safeParse(args);
-	if (!parsed.success) {
-		return textResult(`❌ ${parsed.error.issues[0]?.message}`, true);
-	}
 	const {
 		recordType,
 		scriptId,
@@ -32,7 +28,7 @@ export async function handleGetScriptLogs(
 		deploymentId,
 		limit: rawLimit,
 		format,
-	} = parsed.data;
+	} = args;
 
 	const limit = Math.min(Math.max(rawLimit ?? 50, 1), 200);
 

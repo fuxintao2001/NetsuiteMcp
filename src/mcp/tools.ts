@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import pLimit from "p-limit";
 import { cacheService } from "../cache/cache.js";
 import type { OAuthManager } from "../oauth/manager.js";
 import {
@@ -12,7 +13,7 @@ import { parseNetSuiteError } from "../utils/errors.js";
 import { httpClient } from "../utils/httpClient.js";
 import { createLogger } from "../utils/logger.js";
 import { type JsonSchemaProperty, mapFieldType } from "../utils/metadata.js";
-import { ConcurrencyLimiter, retryWithBackoff } from "../utils/resilience.js";
+import { retryWithBackoff } from "../utils/resilience.js";
 import {
 	assertValidSuiteQL,
 	extractReferencedTables,
@@ -49,7 +50,7 @@ export class NetSuiteMCPTools {
 	hasFetchedMappings = false;
 	private hasSeededFromDisk = false;
 
-	private netsuiteLimiter = new ConcurrencyLimiter(5);
+	private netsuiteLimiter = pLimit(5);
 
 	constructor(oauthManager: OAuthManager) {
 		this.oauthManager = oauthManager;
@@ -521,7 +522,7 @@ export class NetSuiteMCPTools {
 	}
 
 	async callNetSuiteApi<T>(requestFn: () => Promise<T>): Promise<T> {
-		return this.netsuiteLimiter.run(async () => {
+		return this.netsuiteLimiter(async () => {
 			return retryWithBackoff(
 				requestFn,
 				this.isRetryableError.bind(this),

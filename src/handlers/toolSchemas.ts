@@ -454,30 +454,15 @@ export function createToolInputSchema<T extends z.ZodObject<z.ZodRawShape>>(
 	properties: Record<string, unknown>;
 	required?: string[];
 } {
-	const jsonSchema = z.toJSONSchema(schema) as {
+	const { properties = {}, required } = z.toJSONSchema(schema) as {
 		properties?: Record<string, unknown>;
-	};
-	const required: string[] = [];
-	for (const [key, field] of Object.entries(schema.shape)) {
-		const candidate = field as unknown as { isOptional?: () => boolean };
-		if (typeof candidate.isOptional === "function") {
-			if (!candidate.isOptional()) {
-				required.push(key);
-			}
-		}
-	}
-	const result: {
-		type: "object";
-		properties: Record<string, unknown>;
 		required?: string[];
-	} = {
-		type: "object",
-		properties: jsonSchema.properties || {},
 	};
-	if (required.length > 0) {
-		result.required = required;
-	}
-	return result;
+	return {
+		type: "object",
+		properties,
+		...(required && required.length > 0 ? { required } : {}),
+	};
 }
 
 // ---------------------------------------------------------------------------
