@@ -2,7 +2,7 @@
   "name": "netsuite-mcp",
   "displayName": "NetSuite MCP",
   "version": "1.0.0",
-  "description": "Enterprise NetSuite MCP server, SuiteQL AST guardrails, Oracle SAFE 2.1 engineering rules, and 10 specialized NetSuite skills with OAuth 2.0 PKCE.",
+  "description": "Enterprise NetSuite MCP server, SuiteQL AST guardrails, Oracle SAFE 2.1 engineering rules, and 12 specialized NetSuite & engineering skills with OAuth 2.0 PKCE.",
   "logo": "assets/logo.svg",
   "suggestedPrompts": [
     "Check NetSuite account status and active OAuth session health",

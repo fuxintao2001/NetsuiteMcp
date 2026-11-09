@@ -66,6 +66,8 @@ Deep domain knowledge is loaded on demand. Proactively read the corresponding sk
 | **SDF Roles & Permissions Config** | `~/.gemini/config/plugins/netsuite-mcp/skills/netsuite-sdf-roles-and-permissions/SKILL.md` | Role permission XML (`customrole*`, `permkey`, `permlevel`), least-privilege role design, and 403 permission self-healing. |
 | **SDF Project Documentation** | `~/.gemini/config/plugins/netsuite-mcp/skills/netsuite-sdf-project-documentation/SKILL.md` | SDF architecture diagrams, manifest analysis, object dependency graphing, and deployment troubleshooting. |
 | **UIF SPA Component Development** | `~/.gemini/config/plugins/netsuite-mcp/skills/netsuite-uif-spa-reference/SKILL.md` | Modern NetSuite UIF SPA development, `@uif-js/core` and `@uif-js/component` APIs and hooks. |
+| **NetSuite Systematic Debugging** | `~/.gemini/config/plugins/netsuite-mcp/skills/netsuite-systematic-debugging/SKILL.md` | Enforce 4-phase root cause investigation (`NO FIXES WITHOUT ROOT CAUSE INVESTIGATION FIRST`). Fan-out `netsuite_get_script_logs`, `netsuite_get_system_notes`, and `netsuite_get_metadata` before patching SuiteScript, SuiteQL, or MCP code. |
+| **NetSuite Test-Driven Development** | `~/.gemini/config/plugins/netsuite-mcp/skills/netsuite-tdd/SKILL.md` | Enforce strict Red-Green-Refactor (`NO PRODUCTION CODE WITHOUT A FAILING TEST FIRST`) using `node:test` for MCP/`suiteqlGuard` rules and pure-core decoupling + verified Schema fixtures for SuiteScript 2.1. |
 
 ---
 

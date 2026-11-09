@@ -28,7 +28,7 @@
 │   └── logo.svg               # Plugin icon
 ├── rules/
 │   └── AGENTS.md              # Consolidated NetSuite engineering rules loaded when plugin is active
-├── skills/                    # 10 bundled Oracle NetSuite domain skills (SKILL.md)
+├── skills/                    # 12 bundled skills (10 Oracle NetSuite domain skills + 2 NetSuite engineering discipline skills)
 ├── src/
 │   ├── index.ts               # Server entrypoint: CLI argument parsing, Stdio transport initialization
 │   ├── mcp/                   # NetSuite low-level communication layer (SuiteQL, REST, ConcurrencyLimiter(5))
